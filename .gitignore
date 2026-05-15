@@ -1,0 +1,13 @@
+# Godot
+.godot/
+*.translation
+*.import
+export_presets.cfg
+
+# C# / .NET
+.vs/
+obj/
+bin/
+.mono/
+*.user
+*.suo
