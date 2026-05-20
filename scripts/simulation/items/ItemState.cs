@@ -1,4 +1,4 @@
-namespace SmurfulationC.Simulation.Items
+namespace Sporeholm.Simulation.Items
 {
     // v0.3.46 (Phase 4 core) — runtime state of an item, separate from
     // quality. Quality is *what was made*; State is *how it's holding up*.

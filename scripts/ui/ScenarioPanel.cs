@@ -2,9 +2,9 @@ using Godot;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using SmurfulationC;
-using SmurfulationC.Simulation;
-using SmurfulationC.Simulation.Items;
+using Sporeholm;
+using Sporeholm.Simulation;
+using Sporeholm.Simulation.Items;
 
 // Scenario configuration screen — RimWorld master/detail layout with a
 // Dwarf-Fortress-"Prepare Carefully"-style colony-wide starting inventory.
@@ -29,7 +29,7 @@ public partial class ScenarioPanel : Control
     private static readonly Color RowBorder    = new(0.45f, 0.32f, 0.10f, 0.5f);
 
     private static readonly string[] Roles =
-        { "Forager", "Crafter", "Guardian", "Caretaker", "Scholar", "Mage", "Elder", "Unassigned" };
+        { "Forager", "Crafter", "Guardian", "Caretaker", "Scholar", "Sage", "Elder", "Unassigned" };
 
     private readonly ScenarioConfig _config        = new();
     private readonly Random         _rng           = new();
@@ -43,7 +43,7 @@ public partial class ScenarioPanel : Control
     private VBoxContainer _detailContainer = null!;
     private Label        _inventorySummary = null!;
 
-    private const int DefaultSmurfCount = 7;
+    private const int DefaultShroompCount = 7;
     private const int MaxPersonalitySelections = 5;
 
     public override void _Ready()
@@ -61,11 +61,16 @@ public partial class ScenarioPanel : Control
         // footer when content height exceeded the inner VBox min size.
         var outer = new VBoxContainer();
         outer.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        outer.OffsetLeft   = 40;
-        outer.OffsetTop    = 32;
-        outer.OffsetRight  = -40;
-        outer.OffsetBottom = -32;
-        outer.AddThemeConstantOverride("separation", 12);
+        // v0.5.27 — tighter margins (32→16 vertical, 40→24 horizontal) so
+        // the footer Begin Colony button stays inside the 1280×720 canvas
+        // viewport. Header / footer would otherwise clip at the bottom on
+        // canvas_items stretch when the 3-col detail card stacks below the
+        // backstory section.
+        outer.OffsetLeft   = 24;
+        outer.OffsetTop    = 16;
+        outer.OffsetRight  = -24;
+        outer.OffsetBottom = -16;
+        outer.AddThemeConstantOverride("separation", 8);
         AddChild(outer);
 
         BuildHeader(outer);
@@ -85,8 +90,8 @@ public partial class ScenarioPanel : Control
         _config.StartingInventory = DefaultStartingInventory();
         _colonyNameEdit.Text      = _config.ColonyName;
         _storytellerDrop.Selected = 0;
-        _countSpin.Value          = DefaultSmurfCount;
-        RebuildSmurfTemplates(DefaultSmurfCount);
+        _countSpin.Value          = DefaultShroompCount;
+        RebuildShroompTemplates(DefaultShroompCount);
         _selectedIndex = 0;
         RebuildList();
         RebuildDetail();
@@ -106,7 +111,7 @@ public partial class ScenarioPanel : Control
             HorizontalAlignment = HorizontalAlignment.Center,
         };
         title.AddThemeColorOverride("font_color", Gold);
-        title.AddThemeFontSizeOverride("font_size", 36);
+        title.AddThemeFontSizeOverride("font_size", 26);
         parent.AddChild(title);
 
         var sub = new Label
@@ -133,37 +138,51 @@ public partial class ScenarioPanel : Control
         _colonyNameEdit = new LineEdit
         {
             PlaceholderText   = "Colony Name",
-            CustomMinimumSize = new Vector2(260, 0),
+            CustomMinimumSize = new Vector2(200, 0),
         };
         _colonyNameEdit.TextChanged += t => _config.ColonyName = t.Trim();
         row.AddChild(_colonyNameEdit);
 
         row.AddChild(MakeLabel("Storyteller"));
-        _storytellerDrop = new OptionButton { CustomMinimumSize = new Vector2(240, 0) };
-        _storytellerDrop.AddItem("Balanced — steady pacing");
-        _storytellerDrop.AddItem("Patient — slow build-up (coming soon)");
-        _storytellerDrop.AddItem("Random — unpredictable (coming soon)");
-        _storytellerDrop.AddItem("Cataclysmic — rare big spikes (coming soon)");
+        // v0.5.28 — dropdown labels shortened so the OptionButton's auto-
+        // sized width (driven by longest item) doesn't push the top
+        // settings row past viewport width. Original "Cataclysmic — rare
+        // big spikes (Phase 7)" was ~38 chars and ~380 logical px wide,
+        // overflowing the centered row at the 1280-logical viewport.
+        _storytellerDrop = new OptionButton { CustomMinimumSize = new Vector2(200, 0) };
+        _storytellerDrop.AddItem("Balanced");
+        _storytellerDrop.AddItem("Patient (Phase 7)");
+        _storytellerDrop.AddItem("Random (Phase 7)");
+        _storytellerDrop.AddItem("Cataclysmic (Phase 7)");
+        // v0.5.26 — labels were "(coming soon)"; replaced with explicit
+        // "(Phase 7)" so players see the storyteller variants exist as
+        // a planned feature, not a permanent stub. Disabled until the
+        // Storyteller event injector lands per rimport.md N10.
         _storytellerDrop.SetItemDisabled(1, true);
         _storytellerDrop.SetItemDisabled(2, true);
         _storytellerDrop.SetItemDisabled(3, true);
+        _storytellerDrop.TooltipText =
+            "Balanced — steady event pacing\n" +
+            "Patient — slow build-up (Phase 7)\n" +
+            "Random — unpredictable (Phase 7)\n" +
+            "Cataclysmic — rare big spikes (Phase 7)";
         _storytellerDrop.ItemSelected += idx => _config.Storyteller = (StorytellerType)idx;
         row.AddChild(_storytellerDrop);
 
-        row.AddChild(MakeLabel("Smurf Count"));
+        row.AddChild(MakeLabel("Shroomp Count"));
         _countSpin = new SpinBox
         {
-            MinValue          = ScenarioConfig.MinSmurfs,
-            MaxValue          = ScenarioConfig.MaxSmurfs,
+            MinValue          = ScenarioConfig.MinShroomps,
+            MaxValue          = ScenarioConfig.MaxShroomps,
             Step              = 1,
-            Value             = DefaultSmurfCount,
+            Value             = DefaultShroompCount,
             CustomMinimumSize = new Vector2(90, 0),
         };
         _countSpin.ValueChanged += v =>
         {
-            RebuildSmurfTemplates((int)v);
-            if (_selectedIndex >= _config.Smurfs.Count)
-                _selectedIndex = _config.Smurfs.Count - 1;
+            RebuildShroompTemplates((int)v);
+            if (_selectedIndex >= _config.Shroomps.Count)
+                _selectedIndex = _config.Shroomps.Count - 1;
             RebuildList();
             RebuildDetail();
         };
@@ -182,16 +201,19 @@ public partial class ScenarioPanel : Control
         split.AddThemeConstantOverride("separation", 16);
         parent.AddChild(split);
 
-        // ── Left column: list of smurfs ────────────────────────────────────
+        // ── Left column: list of shroomps ────────────────────────────────────
+        // v0.5.28 — narrowed from 320 to 260 logical px so the right detail
+        // card gets more horizontal room for its 3-col Personality/Skills/
+        // Items layout. Shroomp list rows still fit name + sex + role.
         var leftCol = new VBoxContainer
         {
-            CustomMinimumSize  = new Vector2(320, 0),
+            CustomMinimumSize  = new Vector2(260, 0),
             SizeFlagsVertical  = SizeFlags.ExpandFill,
         };
         leftCol.AddThemeConstantOverride("separation", 6);
         split.AddChild(leftCol);
 
-        var listHeader = new Label { Text = "Founding Smurfs" };
+        var listHeader = new Label { Text = "Founding Shroomps" };
         listHeader.AddThemeColorOverride("font_color", Parchment);
         listHeader.AddThemeFontSizeOverride("font_size", 18);
         leftCol.AddChild(listHeader);
@@ -208,7 +230,7 @@ public partial class ScenarioPanel : Control
         _listVBox.AddThemeConstantOverride("separation", 4);
         scroll.AddChild(_listVBox);
 
-        // ── Right column: detail card for selected smurf ───────────────────
+        // ── Right column: detail card for selected shroomp ───────────────────
         var rightCol = new PanelContainer
         {
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
@@ -289,11 +311,11 @@ public partial class ScenarioPanel : Control
         };
         randomAll.Pressed += () =>
         {
-            foreach (var t in _config.Smurfs) RandomizeOne(t);
+            foreach (var t in _config.Shroomps) RandomizeOne(t);
             // Randomize All is an automatic-generation path, so the female
-            // floor applies (per-smurf 🎲 dice don't enforce — those are
-            // explicit single-smurf rolls the player asked for).
-            EnsureAtLeastOneFemaleAmongIndices(0, _config.Smurfs.Count);
+            // floor applies (per-shroomp 🎲 dice don't enforce — those are
+            // explicit single-shroomp rolls the player asked for).
+            EnsureAtLeastOneFemaleAmongIndices(0, _config.Shroomps.Count);
             RebuildList();
             RebuildDetail();
         };
@@ -305,23 +327,23 @@ public partial class ScenarioPanel : Control
         var begin = new AnimatedButton
         {
             Text              = "✦ Begin Colony",
-            CustomMinimumSize = new Vector2(260, 52),
+            CustomMinimumSize = new Vector2(240, 44),
             TooltipText       = "Load into the level and start the game with the chosen settings",
         };
         begin.Pressed += OnBeginPressed;
         row.AddChild(begin);
     }
 
-    // ── Smurf list (left column) ───────────────────────────────────────────
+    // ── Shroomp list (left column) ───────────────────────────────────────────
 
     private void RebuildList()
     {
         foreach (Node child in _listVBox.GetChildren()) child.QueueFree();
 
-        for (int i = 0; i < _config.Smurfs.Count; i++)
+        for (int i = 0; i < _config.Shroomps.Count; i++)
         {
             int idx = i;
-            var t   = _config.Smurfs[i];
+            var t   = _config.Shroomps[i];
             bool selected = i == _selectedIndex;
 
             var panel = new PanelContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
@@ -391,11 +413,11 @@ public partial class ScenarioPanel : Control
     {
         foreach (Node child in _detailContainer.GetChildren()) child.QueueFree();
 
-        if (_selectedIndex < 0 || _selectedIndex >= _config.Smurfs.Count) return;
+        if (_selectedIndex < 0 || _selectedIndex >= _config.Shroomps.Count) return;
         int idx = _selectedIndex;
-        var t   = _config.Smurfs[idx];
+        var t   = _config.Shroomps[idx];
 
-        // Top row: large name field + per-smurf randomize.
+        // Top row: large name field + per-shroomp randomize.
         var topRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         topRow.AddThemeConstantOverride("separation", 12);
         _detailContainer.AddChild(topRow);
@@ -408,14 +430,14 @@ public partial class ScenarioPanel : Control
         var nameEdit = new LineEdit
         {
             Text                = t.Name,
-            PlaceholderText     = "Smurf Name",
+            PlaceholderText     = "Shroomp Name",
             CustomMinimumSize   = new Vector2(0, 44),
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
         };
         nameEdit.AddThemeFontSizeOverride("font_size", 22);
         nameEdit.TextChanged += s =>
         {
-            _config.Smurfs[idx].Name = s.Trim();
+            _config.Shroomps[idx].Name = s.Trim();
             UpdateListRowName(idx);
         };
         topRow.AddChild(nameEdit);
@@ -425,11 +447,11 @@ public partial class ScenarioPanel : Control
             Text              = "🎲",
             Compact           = true,
             CustomMinimumSize = new Vector2(56, 44),
-            TooltipText       = "Randomize this smurf",
+            TooltipText       = "Randomize this shroomp",
         };
         rand.Pressed += () =>
         {
-            RandomizeOne(_config.Smurfs[idx]);
+            RandomizeOne(_config.Shroomps[idx]);
             RebuildList();
             RebuildDetail();
         };
@@ -450,10 +472,10 @@ public partial class ScenarioPanel : Control
             t.Sex == Sex.Female ? new Color(0.95f, 0.55f, 0.78f) : new Color(0.50f, 0.78f, 1.0f));
         sexBtn.Pressed += () =>
         {
-            var s = _config.Smurfs[idx];
+            var s = _config.Shroomps[idx];
             s.Sex = s.Sex == Sex.Male ? Sex.Female : Sex.Male;
-            var used = _config.Smurfs.Where(x => x != s).Select(x => x.Name);
-            s.Name = SmurfNameGenerator.Generate(used, _rng, s.Sex);
+            var used = _config.Shroomps.Where(x => x != s).Select(x => x.Name);
+            s.Name = ShroompNameGenerator.Generate(used, _rng, s.Sex);
             RebuildList();
             RebuildDetail();
         };
@@ -468,7 +490,7 @@ public partial class ScenarioPanel : Control
         }
         roleDrop.ItemSelected += sel =>
         {
-            _config.Smurfs[idx].Role = Roles[(int)sel];
+            _config.Shroomps[idx].Role = Roles[(int)sel];
             UpdateListRowRole(idx);
         };
         propsRow.AddChild(roleDrop);
@@ -483,8 +505,15 @@ public partial class ScenarioPanel : Control
             CustomMinimumSize = new Vector2(100, 32),
             TooltipText       = "Age in years (18..540)",
         };
-        ageSpin.ValueChanged += v => _config.Smurfs[idx].Age = (int)v;
+        ageSpin.ValueChanged += v => _config.Shroomps[idx].Age = (int)v;
         propsRow.AddChild(ageSpin);
+
+        // v0.5.16 — Backstory section (RimWorld-style character screen).
+        // Shows the rolled Childhood + (if Juvenile+) Adulthood with their
+        // headline + skill-bump summary so the player sees who their
+        // shroomp actually is. PreviewChildhood / PreviewAdulthood populated
+        // by RandomizeOne via a temp Shroomp put through BackstoryRegistry.
+        BuildBackstorySection(t);
 
         // v0.4.9 — Personality + Starting items laid out side-by-side
         // inside the detail card. Previously stacked vertically, which
@@ -492,6 +521,7 @@ public partial class ScenarioPanel : Control
         // smaller screens and left the right half of the detail card
         // empty. Two-column HBox keeps both panes visible without
         // scrolling.
+        // v0.5.16 — three-col layout: Personality + Skills + Starting items.
         var twoCol = new HBoxContainer();
         twoCol.AddThemeConstantOverride("separation", 16);
         twoCol.SizeFlagsHorizontal = SizeFlags.ExpandFill;
@@ -507,6 +537,17 @@ public partial class ScenarioPanel : Control
         leftCol.AddThemeConstantOverride("separation", 4);
         twoCol.AddChild(leftCol);
 
+        // v0.5.16 — middle Skills column added between Personality (left)
+        // and Starting Items (right) for RimWorld-parity character screen.
+        var midCol = new VBoxContainer
+        {
+            SizeFlagsHorizontal   = SizeFlags.ExpandFill,
+            SizeFlagsVertical     = SizeFlags.ExpandFill,
+            SizeFlagsStretchRatio = 1f,
+        };
+        midCol.AddThemeConstantOverride("separation", 4);
+        twoCol.AddChild(midCol);
+
         var rightCol = new VBoxContainer
         {
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
@@ -515,6 +556,9 @@ public partial class ScenarioPanel : Control
         };
         rightCol.AddThemeConstantOverride("separation", 4);
         twoCol.AddChild(rightCol);
+
+        // v0.5.16 — Skills section in the middle column.
+        BuildSkillsSection(t, midCol);
 
         // ── Left column: personality picker ──────────────────────────────
         var pHeader = new Label { Text = $"Personality (pick up to {MaxPersonalitySelections})" };
@@ -552,10 +596,16 @@ public partial class ScenarioPanel : Control
             string traitName = def.Name;
             var chk = new CheckBox
             {
-                Text          = $"{traitName}  ({(def.MoodModifier >= 0 ? "+" : "")}{def.MoodModifier:0})",
+                Text          = $"{traitName} ({(def.MoodModifier >= 0 ? "+" : "")}{def.MoodModifier:0})",
                 ButtonPressed = current.Contains(traitName),
                 TooltipText   = PersonalityRegistry.BuildGameplayTooltip(def),   // v0.5.1
+                // v0.5.28 — ClipText prevents long trait names (e.g.
+                // "Accident-Prone (-6)") from forcing the personality
+                // column past its 1/3 stretch share. Tooltip preserves
+                // the full name + gameplay description.
+                ClipText      = true,
             };
+            chk.SizeFlagsHorizontal = SizeFlags.ExpandFill;
             chk.AddThemeColorOverride(
                 "font_color",
                 def.MoodModifier > 0 ? new Color(0.65f, 0.95f, 0.50f)
@@ -563,20 +613,20 @@ public partial class ScenarioPanel : Control
               :                        Parchment);
             chk.Toggled += pressed =>
             {
-                var smurf = _config.Smurfs[idx];
+                var shroomp = _config.Shroomps[idx];
                 if (pressed)
                 {
-                    if (smurf.Personality.Count >= MaxPersonalitySelections)
+                    if (shroomp.Personality.Count >= MaxPersonalitySelections)
                     {
                         chk.SetPressedNoSignal(false);
                         return;
                     }
-                    if (!smurf.Personality.Contains(traitName))
-                        smurf.Personality.Add(traitName);
+                    if (!shroomp.Personality.Contains(traitName))
+                        shroomp.Personality.Add(traitName);
                 }
                 else
                 {
-                    smurf.Personality.Remove(traitName);
+                    shroomp.Personality.Remove(traitName);
                 }
             };
             pGrid.AddChild(chk);
@@ -591,8 +641,8 @@ public partial class ScenarioPanel : Control
         var row = panel.GetChild(0);
         if (row.GetChildCount() < 3) return;
         if (row.GetChild(2) is Label nameLbl)
-            nameLbl.Text = string.IsNullOrEmpty(_config.Smurfs[idx].Name)
-                ? "(unnamed)" : _config.Smurfs[idx].Name;
+            nameLbl.Text = string.IsNullOrEmpty(_config.Shroomps[idx].Name)
+                ? "(unnamed)" : _config.Shroomps[idx].Name;
     }
 
     private void UpdateListRowRole(int idx)
@@ -603,7 +653,7 @@ public partial class ScenarioPanel : Control
         var row = panel.GetChild(0);
         if (row.GetChildCount() < 4) return;
         if (row.GetChild(3) is Label roleLbl)
-            roleLbl.Text = _config.Smurfs[idx].Role;
+            roleLbl.Text = _config.Shroomps[idx].Role;
     }
 
     // ── Colony inventory modal — DF Prepare-Carefully style ───────────────
@@ -641,7 +691,7 @@ public partial class ScenarioPanel : Control
         var notice = new Label
         {
             Text = "Allocate the supplies your colony brings on the expedition. Quantities are colony-wide " +
-                   "and distributed across smurfs by role / need at game start — same model as Dwarf " +
+                   "and distributed across shroomps by role / need at game start — same model as Dwarf " +
                    "Fortress's Prepare Carefully screen. Phase 4 will resolve each token into a real Item " +
                    "with material / quality / decay properties.",
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
@@ -796,7 +846,7 @@ public partial class ScenarioPanel : Control
 
     // ── Default inventory — colony-appropriate starter pack ────────────────
     // Mirrors a sensible Prepare-Carefully default: a week of rations per
-    // smurf, basic role tools, a small bit of weather protection.
+    // shroomp, basic role tools, a small bit of weather protection.
     private static List<InventoryEntry> DefaultStartingInventory() => new()
     {
         new() { Token = "food.rations.7d",     Quantity = 7  },
@@ -862,26 +912,26 @@ public partial class ScenarioPanel : Control
 
     private static string DefaultColonyName() => $"Colony {DateTime.Now:MM-dd-yy}";
 
-    private void RebuildSmurfTemplates(int count)
+    private void RebuildShroompTemplates(int count)
     {
-        while (_config.Smurfs.Count > count)
-            _config.Smurfs.RemoveAt(_config.Smurfs.Count - 1);
-        int growStart = _config.Smurfs.Count;
-        while (_config.Smurfs.Count < count)
-            _config.Smurfs.Add(MakeRandomTemplate());
+        while (_config.Shroomps.Count > count)
+            _config.Shroomps.RemoveAt(_config.Shroomps.Count - 1);
+        int growStart = _config.Shroomps.Count;
+        while (_config.Shroomps.Count < count)
+            _config.Shroomps.Add(MakeRandomTemplate());
         // If the count grew and the roster contains zero females, force one of
         // the NEWLY-ADDED templates to female (not an existing slot — the
         // player may have already explicitly set those to male). Shrinks
         // don't enforce because the player picked the smaller count.
-        if (_config.Smurfs.Count > growStart)
-            EnsureAtLeastOneFemaleAmongIndices(growStart, _config.Smurfs.Count);
+        if (_config.Shroomps.Count > growStart)
+            EnsureAtLeastOneFemaleAmongIndices(growStart, _config.Shroomps.Count);
     }
 
     // Every colony should start with at least one female unless the player
-    // has explicitly removed them (via the per-smurf sex toggle or per-smurf
+    // has explicitly removed them (via the per-shroomp sex toggle or per-shroomp
     // randomize). This helper enforces that floor on automatic-generation
     // paths only: initial Open(), Randomize All, and the count-grow branch
-    // of RebuildSmurfTemplates. Per-smurf actions intentionally don't call
+    // of RebuildShroompTemplates. Per-shroomp actions intentionally don't call
     // it — those are explicit player edits.
     //
     // `startIdx`..`endIdx` defines the range of indices eligible to be
@@ -892,21 +942,21 @@ public partial class ScenarioPanel : Control
     {
         if (startIdx >= endIdx) return;
         // Already a female anywhere in the roster? Roster meets the floor.
-        if (_config.Smurfs.Any(t => t.Sex == Sex.Female)) return;
+        if (_config.Shroomps.Any(t => t.Sex == Sex.Female)) return;
         // Pick a random template in the eligible range and force female.
         // Random pick (rather than always #0) avoids the founding female
         // always landing on Papa-equivalent.
         int pick = startIdx + _rng.Next(endIdx - startIdx);
-        var t    = _config.Smurfs[pick];
+        var t    = _config.Shroomps[pick];
         t.Sex    = Sex.Female;
-        var used = _config.Smurfs.Where(x => x != t).Select(x => x.Name);
-        t.Name   = SmurfNameGenerator.Generate(used, _rng, Sex.Female);
+        var used = _config.Shroomps.Where(x => x != t).Select(x => x.Name);
+        t.Name   = ShroompNameGenerator.Generate(used, _rng, Sex.Female);
     }
 
-    // Canonical Smurf gender ratio: 1 female per 49 males (~2 %). Matches the
-    // Smurfs Fandom-canon population structure used by `BirthSystem.TryBirth`.
-    // A 7-smurf scenario will roll a female only ~13 % of the time at random;
-    // most playthroughs start male-only and rely on Smurfette-style imports or
+    // Canonical Shroomp gender ratio: 1 female per 49 males (~2 %). Matches the
+    // Shroomps Fandom-canon population structure used by `BirthSystem.TryBirth`.
+    // A 7-shroomp scenario will roll a female only ~13 % of the time at random;
+    // most playthroughs start male-only and rely on SporeMother-style imports or
     // the Phase 4 wandering-in event to introduce their first mother.
     private const double FemaleSpawnChance = 1.0 / 49.0;
 
@@ -917,7 +967,144 @@ public partial class ScenarioPanel : Control
     // BuildDetail can drop the section into the right-hand column.
     // Defaults to `_detailContainer` for any caller that hasn't been
     // updated.
-    private void AddStartingItemsSection(int idx, SmurfTemplate t, Container? parent = null)
+    // v0.5.16 — RimWorld-style Backstory section in the detail card.
+    // Appears between the Properties row (Sex/Role/Age) and the three-
+    // column layout (Personality/Skills/Items). Each backstory entry
+    // shows: title, headline description, and the skill bumps it
+    // contributes. Sprouts (age < 20) only have a Childhood; Adulthood
+    // is empty until they reach Juvenile+ in-game.
+    //
+    // Sam: "RimWorld-style character screen at shroomp customization
+    // screen so we can see new backstories, traits, items, etc., all
+    // in one screen."
+    private void BuildBackstorySection(ShroompTemplate t)
+    {
+        if (string.IsNullOrEmpty(t.PreviewChildhood)
+            && string.IsNullOrEmpty(t.PreviewAdulthood)) return;   // not rolled yet
+
+        var header = new Label { Text = "Backstory" };
+        header.AddThemeColorOverride("font_color", Parchment);
+        header.AddThemeFontSizeOverride("font_size", 16);
+        _detailContainer.AddChild(header);
+
+        var box = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        box.AddThemeConstantOverride("separation", 6);
+        _detailContainer.AddChild(box);
+
+        if (!string.IsNullOrEmpty(t.PreviewChildhood))
+            box.AddChild(MakeBackstoryEntry("Childhood", t.PreviewChildhood));
+        if (!string.IsNullOrEmpty(t.PreviewAdulthood))
+            box.AddChild(MakeBackstoryEntry("Adulthood", t.PreviewAdulthood));
+    }
+
+    private Control MakeBackstoryEntry(string label, string key)
+    {
+        var def = BackstoryRegistry.Get(key);
+        var row = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        row.AddThemeConstantOverride("separation", 1);
+
+        // "Childhood: Wandering Berry-Picker" — label + Backstory.Label
+        var title = new Label { Text = $"{label}: {(def?.Label ?? key)}" };
+        title.AddThemeColorOverride("font_color", new Color(0.85f, 0.78f, 0.55f));
+        title.AddThemeFontSizeOverride("font_size", 13);
+        row.AddChild(title);
+
+        // Description (one-sentence summary)
+        if (def != null && !string.IsNullOrEmpty(def.Description))
+        {
+            var desc = new Label
+            {
+                Text = "  " + def.Description,
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                CustomMinimumSize = new Vector2(0, 0),
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            };
+            desc.AddThemeColorOverride("font_color", Muted);
+            desc.AddThemeFontSizeOverride("font_size", 11);
+            row.AddChild(desc);
+        }
+
+        // Skill bumps: "  +2 Construction · +1 Mining"
+        if (def != null && def.SkillBumps != null && def.SkillBumps.Count > 0)
+        {
+            var bumps = string.Join(" · ", def.SkillBumps
+                .OrderByDescending(kv => kv.Value)
+                .Select(kv => (kv.Value >= 0 ? "+" : "") + kv.Value + " " + kv.Key));
+            var bumpsLbl = new Label { Text = "  " + bumps };
+            bumpsLbl.AddThemeColorOverride("font_color", new Color(0.65f, 0.95f, 0.50f));
+            bumpsLbl.AddThemeFontSizeOverride("font_size", 11);
+            row.AddChild(bumpsLbl);
+        }
+        return row;
+    }
+
+    // v0.5.16 — RimWorld-style Skills column. Lists every skill in
+    // SkillRegistry with the shroomp's pre-rolled level. Future Phase 6
+    // polish: passion icons (RimWorld's flame indicator) once a
+    // PassionLevel field exists on Shroomp. For v0.5.16 the numeric
+    // level + bar visualisation is enough to communicate proficiency
+    // — the rolled values reflect Distribute() + Backstory bumps.
+    private void BuildSkillsSection(ShroompTemplate t, Container parent)
+    {
+        var header = new Label { Text = "Skills" };
+        header.AddThemeColorOverride("font_color", Parchment);
+        header.AddThemeFontSizeOverride("font_size", 16);
+        parent.AddChild(header);
+
+        if (t.PreviewSkills == null || t.PreviewSkills.Count == 0)
+        {
+            var hint = new Label { Text = "  (rerolling…)" };
+            hint.AddThemeColorOverride("font_color", Muted);
+            hint.AddThemeFontSizeOverride("font_size", 11);
+            parent.AddChild(hint);
+            return;
+        }
+
+        var scroll = new ScrollContainer
+        {
+            SizeFlagsHorizontal  = SizeFlags.ExpandFill,
+            SizeFlagsVertical    = SizeFlags.ExpandFill,
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+        };
+        parent.AddChild(scroll);
+
+        var grid = new GridContainer { Columns = 2, SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        grid.AddThemeConstantOverride("h_separation", 6);
+        grid.AddThemeConstantOverride("v_separation", 2);
+        scroll.AddChild(grid);
+
+        // Sort by level descending so high-skill stand out at the top.
+        foreach (var (skill, level) in t.PreviewSkills.OrderByDescending(kv => kv.Value))
+        {
+            // v0.5.28 — ClipText on both labels prevents long skill names
+            // (e.g., "Construction") and the bar visualisation from forcing
+            // the Skills column past its 1/3 stretch share. Same overflow
+            // pattern that v0.5.27 fixed for Starting Items.
+            var name = new Label { Text = skill, ClipText = true };
+            name.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            name.AddThemeColorOverride("font_color", level >= 8 ? new Color(0.65f, 0.95f, 0.50f)
+                                                  : level >= 5 ? Parchment
+                                                  : level >= 2 ? Muted
+                                                  :              new Color(0.55f, 0.40f, 0.30f));
+            name.AddThemeFontSizeOverride("font_size", 12);
+            grid.AddChild(name);
+
+            // v0.5.28 — bar shortened from 10 cells to 6 cells so the
+            // level+bar fits comfortably in the ~140-logical-px column
+            // share. Player still sees proportional fill (0-6 cells)
+            // mapped from clamped 0-10 level.
+            int filled6 = (System.Math.Clamp(level, 0, 10) * 6 + 5) / 10;   // round
+            string bar = new string('▰', filled6) + new string('▱', 6 - filled6);
+            var lvl = new Label { Text = $"{level,2} {bar}", ClipText = true };
+            lvl.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            lvl.TooltipText = $"{skill}: {level}";
+            lvl.AddThemeColorOverride("font_color", level >= 5 ? new Color(0.85f, 0.78f, 0.55f) : Muted);
+            lvl.AddThemeFontSizeOverride("font_size", 11);
+            grid.AddChild(lvl);
+        }
+    }
+
+    private void AddStartingItemsSection(int idx, ShroompTemplate t, Container? parent = null)
     {
         var host = parent ?? (Container)_detailContainer;
         var section = new VBoxContainer
@@ -946,7 +1133,7 @@ public partial class ScenarioPanel : Control
             Text              = "🎲 Reroll",
             Compact           = true,
             CustomMinimumSize = new Vector2(108, 30),
-            TooltipText       = "Re-roll this smurf's starting item kit",
+            TooltipText       = "Re-roll this shroomp's starting item kit",
         };
         headerRow.AddChild(reroll);
 
@@ -970,7 +1157,18 @@ public partial class ScenarioPanel : Control
                 string mat     = matDef?.DisplayName ?? it.Material.SubType;
                 string qty     = it.Quantity > 1 ? $" ×{it.Quantity}" : "";
                 string line    = $"  {ItemKindMeta.Icon(it.Kind)}  {it.Quality} {mat} {display}{qty}";
-                itemsBox.AddChild(MakeMutedLabel(line));
+                var lbl = MakeMutedLabel(line);
+                // Autowrap + clip prevents long item names (e.g. "Normal
+                // Cuttings Capberry ×3") from forcing the column past
+                // its 1/3 stretch share and pushing the whole detail
+                // card off the right edge of the viewport. Full text
+                // surfaced via tooltip for accessibility.
+                lbl.AutowrapMode         = TextServer.AutowrapMode.WordSmart;
+                lbl.ClipText             = true;
+                lbl.CustomMinimumSize    = new Vector2(0, 0);
+                lbl.SizeFlagsHorizontal  = SizeFlags.ExpandFill;
+                lbl.TooltipText          = line.TrimStart();
+                itemsBox.AddChild(lbl);
             }
         }
         Refresh();
@@ -990,32 +1188,37 @@ public partial class ScenarioPanel : Control
         return l;
     }
 
-    private SmurfTemplate MakeRandomTemplate()
+    private ShroompTemplate MakeRandomTemplate()
     {
-        var used = _config.Smurfs.Select(t => t.Name);
+        var used = _config.Shroomps.Select(t => t.Name);
         var sex  = _rng.NextDouble() < FemaleSpawnChance ? Sex.Female : Sex.Male;
-        var t = new SmurfTemplate
+        var t = new ShroompTemplate
         {
-            Name        = SmurfNameGenerator.Generate(used, _rng, sex),
+            Name        = ShroompNameGenerator.Generate(used, _rng, sex),
             Sex         = sex,
             Role        = Roles[_rng.Next(Roles.Length - 1)],
             Age         = 20 + _rng.Next(380),
             Personality = PersonalityRegistry.Assign(_rng, 20 + _rng.Next(380)),
         };
         // v0.3.43 — roll DF-style preferences alongside personality so the
-        // scenario UI can surface "Loves Smurfberries" etc. before begin.
+        // scenario UI can surface "Loves Capberries" etc. before begin.
         t.Preferences = PreferenceRegistry.Assign(_rng, t.Personality);
         // v0.3.47 (Phase 4 sub-B) — pre-roll starting items so the player
         // sees them on the detail card before clicking Begin.
         t.StartingItems = ItemFactory.RollStartingKit(t.Role, _rng, 0);
+        // v0.5.16/.17 fix — pre-roll backstory + skills via the shared
+        // helper so the character-screen Backstory + Skills sections
+        // populate from the very first render. Without this only newly-
+        // re-rolled shroomps (via the 🎲 button) showed those sections.
+        RollBackstoryAndSkills(t);
         return t;
     }
 
-    private void RandomizeOne(SmurfTemplate t)
+    private void RandomizeOne(ShroompTemplate t)
     {
-        var used = _config.Smurfs.Where(x => x != t).Select(x => x.Name);
+        var used = _config.Shroomps.Where(x => x != t).Select(x => x.Name);
         t.Sex         = _rng.NextDouble() < FemaleSpawnChance ? Sex.Female : Sex.Male;
-        t.Name        = SmurfNameGenerator.Generate(used, _rng, t.Sex);
+        t.Name        = ShroompNameGenerator.Generate(used, _rng, t.Sex);
         t.Role        = Roles[_rng.Next(Roles.Length - 1)];
         t.Age         = 20 + _rng.Next(380);
         t.Personality = PersonalityRegistry.Assign(_rng, t.Age);
@@ -1023,15 +1226,41 @@ public partial class ScenarioPanel : Control
         t.Preferences = PreferenceRegistry.Assign(_rng, t.Personality);
         // v0.3.47 — starting items re-roll alongside role.
         t.StartingItems = ItemFactory.RollStartingKit(t.Role, _rng, 0);
+
+        RollBackstoryAndSkills(t);
+    }
+
+    // v0.5.16 (refactored v0.5.17) — pre-roll backstory + skills via a
+    // throwaway Shroomp so the character screen can display them. Shared by
+    // both MakeRandomTemplate (initial creation) and RandomizeOne (per-
+    // shroomp re-roll). The temp shroomp goes through the canonical
+    // SkillRegistry.Distribute + BackstoryRegistry.AssignAndApply pipelines
+    // so the displayed values match what SimulationManager.SeedColony
+    // would produce. SeedColony copies the previews onto the live Shroomp
+    // when present, so what the player sees in the panel is what spawns
+    // in-game (modulo any pre-existing v0.5.x rolling for unset previews).
+    private void RollBackstoryAndSkills(ShroompTemplate t)
+    {
+        var tmp = new Shroomp
+        {
+            Role       = t.Role,
+            AgeInYears = t.Age,
+            Sex        = t.Sex,
+        };
+        SkillRegistry.Distribute(tmp, _rng);
+        BackstoryRegistry.AssignAndApply(tmp, _rng);
+        t.PreviewChildhood = tmp.Childhood;
+        t.PreviewAdulthood = tmp.Adulthood;
+        t.PreviewSkills    = new Dictionary<string, int>(tmp.Skills);
     }
 
     private void OnBeginPressed()
     {
         var used = new HashSet<string>();
-        foreach (var t in _config.Smurfs)
+        foreach (var t in _config.Shroomps)
         {
             if (string.IsNullOrWhiteSpace(t.Name))
-                t.Name = SmurfNameGenerator.Generate(used, _rng, t.Sex);
+                t.Name = ShroompNameGenerator.Generate(used, _rng, t.Sex);
             used.Add(t.Name);
         }
         if (string.IsNullOrWhiteSpace(_config.ColonyName))
@@ -1071,10 +1300,10 @@ internal static class ItemCatalog
             Description = "Starting rations. Phase 4 will convert these into typed Item instances with spoilage timers and mood modifiers.",
             Items = new Entry[]
             {
-                new("food.rations.3d",   "3-day rations",   "Three days of basic food for one smurf.", 25),
+                new("food.rations.3d",   "3-day rations",   "Three days of basic food for one shroomp.", 25),
                 new("food.rations.7d",   "7-day rations",   "A week of food. Standard expedition load.", 25),
                 new("food.rations.14d",  "14-day rations",  "Two weeks of food. Heavy but secure.", 12),
-                new("food.berry.basket", "Berry basket",    "Smurfberries — sweet, perishes in ~6 days.", 30),
+                new("food.berry.basket", "Berry basket",    "Capberries — sweet, perishes in ~6 days.", 30),
                 new("food.mushroom.crate","Mushroom crate", "Mixed mushrooms — fungal protein.", 20),
                 new("food.herb.bundle",  "Herb bundle",     "Magical herbs — slight resonance boost when eaten.", 20),
             },
@@ -1101,7 +1330,7 @@ internal static class ItemCatalog
                 new("apparel.tunic.cloth", "Cloth tunic",    "Basic warm clothing. No armor value.", 25),
                 new("apparel.cap.felt",    "Felt cap",       "Extra warmth — winter survival bonus.", 25),
                 new("apparel.cloak.wool",  "Wool cloak",     "Weather protection + 5 °C effective temperature.", 25),
-                new("apparel.boots.leather","Leather boots", "Foot protection + 5 % movement speed.", 25),
+                new("apparel.boots.hide",   "Hide boots",    "Foot protection + 5 % movement speed. (v0.5.16 — leather→hide for lore.)", 25),
             },
         },
         new()
@@ -1112,7 +1341,7 @@ internal static class ItemCatalog
             {
                 new("weapon.spear",  "Wooden spear",   "Guardian-tier melee weapon (Phase 7 stub).", 15),
                 new("weapon.sling",  "Sling",          "Light ranged weapon (Phase 7 stub).", 15),
-                new("weapon.dagger", "Iron dagger",    "Close-quarters defence (Phase 7 stub).", 15),
+                new("weapon.dagger", "Bone dagger",    "Close-quarters defence (Phase 7 stub). (v0.5.16 — iron→bone for lore.)", 15),
             },
         },
         new()

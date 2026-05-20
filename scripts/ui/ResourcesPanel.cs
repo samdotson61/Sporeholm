@@ -1,8 +1,8 @@
 using Godot;
 using System.Collections.Generic;
-using SmurfulationC;
-using SmurfulationC.Simulation.Items;
-using SmurfulationC.UI;
+using Sporeholm;
+using Sporeholm.Simulation.Items;
+using Sporeholm.UI;
 
 // v0.3.41 — granular resource ledger for the bottom-bar "📦 Resources" tab.
 // v0.3.46 (Phase 4 core) — populates from the live colony Inventory snapshot.
@@ -23,7 +23,7 @@ public partial class ResourcesPanel : Control
     private static readonly Color Spoiling  = new(0.85f, 0.55f, 0.20f);
     private static readonly Color Spoiled   = new(0.85f, 0.30f, 0.30f);
 
-    public SmurfulationC.SimulationManager Sim { get; set; } = null!;
+    public Sporeholm.SimulationManager Sim { get; set; } = null!;
 
     private VBoxContainer _categoriesVbox = null!;
 

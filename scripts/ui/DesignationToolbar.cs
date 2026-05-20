@@ -1,6 +1,6 @@
 using Godot;
 using System;
-using SmurfulationC.UI;
+using Sporeholm.UI;
 
 // Roadmap §3.x.2 — floating designation toolbar anchored to the bottom-centre
 // of the play area. Hosts the player's high-level designation categories:
@@ -8,10 +8,10 @@ using SmurfulationC.UI;
 // Priorities are stubbed at v0.3.21 (Phase 5 + later); the active tools work
 // via drag-box selection — pick a tool, then left-click-drag a rectangle over
 // the map. Every valid tile in the box is designated; the renderer overlays a
-// coloured glyph on each one. The nearest available smurf with the highest
+// coloured glyph on each one. The nearest available shroomp with the highest
 // role priority for that designation picks it up via BehaviorSystem.SelectTask.
 //
-// Move-orders for an individually-selected smurf are issued via right-click
+// Move-orders for an individually-selected shroomp are issued via right-click
 // (see GameController.TryHandleMouseButton) and are independent of the
 // toolbar's active tool — the old Tool.Move button was removed in v0.3.21
 // because the Gather designation supersedes its general-purpose use case.
@@ -33,13 +33,57 @@ public partial class DesignationToolbar : Control
         Haul     = DesignationTool.Haul,
         // v0.5.0 (Phase 5A) — stockpile zone painter (no longer a stub).
         Stockpile = DesignationTool.Stockpile,
-        Build_Wall   = 101,   // Phase 5B stub (construction pipeline)
+        // v0.5.19 (Phase 5B) — construction blueprints (no longer a stub).
+        BuildWall  = DesignationTool.BuildWall,
+        BuildFloor = DesignationTool.BuildFloor,
+        // v0.5.20 (Phase 5C) — Door tool.
+        BuildDoor  = DesignationTool.BuildDoor,
+        // v0.5.21 (Phase 5D) — Shelf storage furniture.
+        BuildShelf = DesignationTool.BuildShelf,
+        // v0.5.22 (Phase 5E) — Workbench.
+        BuildWorkbench = DesignationTool.BuildWorkbench,
+        // v0.5.24 (Phase 5G) — Hearth.
+        BuildHearth    = DesignationTool.BuildHearth,
+        // v0.5.35 (Phase 5 arc) — Bed.
+        BuildBed       = DesignationTool.BuildBed,
+        // v0.5.36 (Phase 5 arc) — Joy furniture (recreation).
+        BuildMeditationShrine = DesignationTool.BuildMeditationShrine,
+        BuildShroomBoard      = DesignationTool.BuildShroomBoard,
+        BuildGossipBench      = DesignationTool.BuildGossipBench,
+        // v0.5.37 (Phase 5 arc) — Table.
+        BuildTable     = DesignationTool.BuildTable,
+        // v0.5.84t — Torch. Cheap floor-tile decoration; +2°C per torch.
+        BuildTorch     = DesignationTool.BuildTorch,
+        // v0.5.25 (Phase 5C polish) — Allowed-area painter (per-shroomp).
+        AllowedArea    = DesignationTool.AllowedArea,
+        Demolish   = DesignationTool.Demolish,
         Priority     = 102,   // Phase 3.10 stub
     }
 
     [Signal] public delegate void ToolChangedEventHandler(int newTool);
 
+    // v0.5.32 — fires when the player picks a Build material from the
+    // BuildPanel chip row. DesignateRect reads ActiveBuildMaterial when
+    // placing blueprints. Defaults to Stone (matches pre-v0.5.32 hardcoded
+    // wall/floor/hearth default); BuildPanel switches to a wood variant
+    // automatically when the player picks a wood-only tool (Door/Shelf/
+    // Workbench), so the picker never has to handle "no material chosen".
+    [Signal] public delegate void BuildMaterialChangedEventHandler(int newMat);
+
+    // v0.5.44 — which named area the AllowedArea painter targets. Set by
+    // AreasPanel when the player picks an area to edit. Default "Home"
+    // because LocalMap auto-creates that area at world construction.
+    [Signal] public delegate void ActiveAreaNameChangedEventHandler(string newAreaName);
+
     public Tool ActiveTool { get; private set; } = Tool.None;
+    // v0.5.84i — default changed from generic Stone to Granite. Sam:
+    // "remove generic wood/stone entirely from the game and replace
+    // with the appropriate subtypes." Granite is the only stone subtype
+    // that appears in every biome's weight table, so it's the safest
+    // default — guaranteed present on every map.
+    public Sporeholm.World.StructureMat ActiveBuildMaterial { get; private set; }
+        = Sporeholm.World.StructureMat.Granite;
+    public string ActiveAreaName { get; private set; } = "Home";
 
     // Maps the live-mode tools onto the shared sim enum so GameController
     // can hand the active tool straight to SimulationManager.DesignateRect
@@ -52,6 +96,20 @@ public partial class DesignationToolbar : Control
         Tool.Cut       => DesignationTool.Cut,
         Tool.Haul      => DesignationTool.Haul,
         Tool.Stockpile => DesignationTool.Stockpile,   // v0.5.0
+        Tool.BuildWall  => DesignationTool.BuildWall,   // v0.5.19
+        Tool.BuildFloor => DesignationTool.BuildFloor,  // v0.5.19
+        Tool.BuildDoor  => DesignationTool.BuildDoor,   // v0.5.20
+        Tool.BuildShelf => DesignationTool.BuildShelf,  // v0.5.21
+        Tool.BuildWorkbench => DesignationTool.BuildWorkbench,   // v0.5.22
+        Tool.BuildHearth    => DesignationTool.BuildHearth,      // v0.5.24
+        Tool.BuildBed       => DesignationTool.BuildBed,         // v0.5.35
+        Tool.BuildMeditationShrine => DesignationTool.BuildMeditationShrine,   // v0.5.36
+        Tool.BuildShroomBoard      => DesignationTool.BuildShroomBoard,        // v0.5.36
+        Tool.BuildGossipBench      => DesignationTool.BuildGossipBench,        // v0.5.36
+        Tool.BuildTable     => DesignationTool.BuildTable,       // v0.5.37
+        Tool.BuildTorch     => DesignationTool.BuildTorch,       // v0.5.84t
+        Tool.AllowedArea    => DesignationTool.AllowedArea,      // v0.5.25
+        Tool.Demolish   => DesignationTool.Demolish,    // v0.5.19
         Tool.Remove    => DesignationTool.Remove,
         _              => DesignationTool.None,
     };
@@ -121,7 +179,7 @@ public partial class DesignationToolbar : Control
         // tooltips on/off; AddToolButton respects it.
         AddToolButton(Tool.Gather,   "🍓 Gather",   "Harvest food vegetation in box.");
         AddToolButton(Tool.ChopWood, "🪓 Chop",     "Fell wood-yielding shrooms.");
-        AddToolButton(Tool.Cut,      "✂ Cut",       "Clear any vegetation in box.");
+        AddToolButton(Tool.Cut,      "✂ Cut",       "Clear vegetation. Drops the relevant resource — Fungal Wood from large shrooms, food from food-yielders, Cuttings from undergrowth/moss.");
         AddToolButton(Tool.Excavate, "⛏ Excavate", "Clear impassable tiles for Stone / Wood.");
         // v0.4.12 — force-haul. Marks every dropped item in the box for
         // priority pick-up; haulers ignore their normal 32-tile search
@@ -143,8 +201,42 @@ public partial class DesignationToolbar : Control
     {
         if (t == ActiveTool) t = Tool.None;  // click again to deselect
         ActiveTool = t;
+        // v0.5.32 — auto-coerce the active material when the new tool only
+        // accepts one family. Doors / Shelves / Workbenches are wood-only;
+        // if the player switches into one of those with Stone selected,
+        // snap to DeadWood so the next paint produces a valid blueprint.
+        // Walls / Floors / Hearths accept Stone + every wood sub-material,
+        // so they leave whatever the player previously chose intact.
+        // Wood-only tools snap to DeadWood if Stone is selected. v0.5.35-37
+        // joins Beds, Joy furniture, and Tables to the wood-only family.
+        bool isWoodOnly =
+            t == Tool.BuildDoor              || t == Tool.BuildShelf            ||
+            t == Tool.BuildWorkbench         || t == Tool.BuildBed              ||
+            t == Tool.BuildMeditationShrine  || t == Tool.BuildShroomBoard      ||
+            t == Tool.BuildGossipBench       || t == Tool.BuildTable;
+        if (isWoodOnly &&
+            !Sporeholm.World.StructureMatMeta.IsWoodFamily(ActiveBuildMaterial))
+            SetActiveBuildMaterial(Sporeholm.World.StructureMat.DeadWood);
         Refresh();
         EmitSignal(SignalName.ToolChanged, (int)ActiveTool);
+    }
+
+    // v0.5.32 — material picker setter. BuildPanel chip click → here.
+    public void SetActiveBuildMaterial(Sporeholm.World.StructureMat mat)
+    {
+        if (mat == ActiveBuildMaterial) return;
+        ActiveBuildMaterial = mat;
+        EmitSignal(SignalName.BuildMaterialChanged, (int)mat);
+    }
+
+    // v0.5.44 — named-area picker setter. AreasPanel selector → here.
+    // The AllowedArea designation tool reads this when drag-paint dispatch
+    // runs in GameController; tiles flip in the named area's bitmap.
+    public void SetActiveAreaName(string areaName)
+    {
+        if (string.IsNullOrEmpty(areaName) || areaName == ActiveAreaName) return;
+        ActiveAreaName = areaName;
+        EmitSignal(SignalName.ActiveAreaNameChanged, areaName);
     }
 
     private void AddToolButton(Tool tool, string text, string tooltip, bool disabled = false)

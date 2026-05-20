@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
 using Godot;
-using SmurfulationC.World;
+using Sporeholm.World;
 
-namespace SmurfulationC.Simulation
+namespace Sporeholm.Simulation
 {
     // v0.3.47 (Phase 4 sub-B) — A* pathfinder over LocalMap passability.
-    // v0.4.18 — rewritten for the 250-smurf perf target. Key changes vs
+    // v0.4.18 — rewritten for the 250-shroomp perf target. Key changes vs
     // the v0.4.13 version:
     //
     //   • Generation-counter arrays. The old code reset gScore / parent /
@@ -17,7 +17,7 @@ namespace SmurfulationC.Simulation
     //   • Cached PriorityQueue. The old `new PriorityQueue<int, int>()`
     //     per call allocated a fresh heap backing array; the queue is now
     //     a thread-local field cleared at the start of each search.
-    //   • Fill-into-buffer result. Callers pass `Smurf.PathWaypoints` and
+    //   • Fill-into-buffer result. Callers pass `Shroomp.PathWaypoints` and
     //     it gets cleared + filled in place — no `new List<Vector2>(32)`
     //     per call.
     //   • Parallel `Dx` / `Dy` / `Cost` arrays. The old `foreach (var (dx,
@@ -39,7 +39,31 @@ namespace SmurfulationC.Simulation
         // this threshold; the constant stays for non-designation callers.)
         public const float PreferAStarDistSqPx = 128f * 128f;
 
+        // v0.5.84g — back to 1024 after v0.5.84f's 4096 caused sim-thread
+        // grind. The 4× per-call cost multiplied by the v0.5.84a per-tick
+        // re-call rate (CurrentTask=null branch firing 60×/sec on failure)
+        // ground the sim to a halt at 50 pop after ~1 min. With the new
+        // PathFailCooldownTicks (v0.5.84g) capping re-pick rate to ~2/sec,
+        // the call rate is throttled at the source and the 4096 budget
+        // becomes unnecessary. Reachable destinations through crowded
+        // chokepoints still get an A* path; if 1024 isn't enough the
+        // pawn waits 0.5 sec for the cluster to clear, then tries again.
+        // RimWorld's equivalent (Verse.PathFinder.SearchLimit ≈ 160 000)
+        // is workable for them because they have additional pathfinding
+        // tiers — region-graph hierarchical search amortising the per-
+        // call cost. Adopting that here is a future phase.
         public const int MaxNodes = 1024;
+
+        // v0.5.84 — diagnostic counters for the dev-panel perf section.
+        // Sim-thread is the sole writer (the comment above flags this); the
+        // dev panel reads them from the UI thread, which is a benign race —
+        // it surfaces deltas between polls so a torn read just shows a tiny
+        // glitch one frame and corrects on the next. No synchronization
+        // overhead in the A* hot loop.
+        public static long TotalCalls;
+        public static long TotalExpansions;
+        public static long TotalSuccesses;
+        public static long TotalFailures;
 
         // Diagonal cost ≈ √2; cardinal = 1.0. Multiplied by 100 and stored
         // as int so the priority queue can use cheap integer comparison.
@@ -47,7 +71,7 @@ namespace SmurfulationC.Simulation
         private const int DiagonalCost = 141;   // round(100 * √2)
 
         // v0.4.58 — RimWorld-style soft-cost crowd avoidance. Adds 175 per
-        // OTHER smurf currently occupying the candidate tile. Cardinal
+        // OTHER shroomp currently occupying the candidate tile. Cardinal
         // step is 100, so one blocker bumps a tile's effective cost
         // from 100 → 275 (1 cardinal vs ~2 cardinals' worth of detour).
         // Calibrated to match RimWorld's `Cost_PawnCollision = 175`
@@ -80,51 +104,52 @@ namespace SmurfulationC.Simulation
         // false when no path exists (unreachable, OOB, or expansion
         // budget exceeded); in that case `resultBuffer` is left empty.
         //
-        // v0.4.58 — `smurfPerTile` + `askerTileIdx` are an optional
+        // v0.4.58 — `shroompPerTile` + `askerTileIdx` are an optional
         // RimWorld-style crowd-avoidance input. When provided, each
         // candidate tile's expansion cost is increased by
-        // `PawnCollisionCost * (other_smurfs_on_tile)`. The asker's own
+        // `PawnCollisionCost * (other_shroomps_on_tile)`. The asker's own
         // tile is exempt (the asker's count is subtracted). Pass `null`
         // to disable (legacy behaviour). The array must be sized to at
         // least `map.Width * map.Height`; smaller buffers are ignored.
         public static bool FindPath(LocalMap map, Vector2 fromPixel,
             (int X, int Y) toTile, List<Vector2> resultBuffer,
-            int[]? smurfPerTile = null, int askerTileIdx = -1)
+            int[]? shroompPerTile = null, int askerTileIdx = -1)
         {
+            TotalCalls++;
             resultBuffer.Clear();
-            if (map == null) return false;
+            if (map == null) { TotalFailures++; return false; }
 
             int sx = (int)(fromPixel.X / LocalMap.TileSize);
             int sy = (int)(fromPixel.Y / LocalMap.TileSize);
             int tx = toTile.X;
             int ty = toTile.Y;
 
-            if (!map.InBounds(sx, sy) || !map.InBounds(tx, ty)) return false;
+            if (!map.InBounds(sx, sy) || !map.InBounds(tx, ty)) { TotalFailures++; return false; }
 
             int W = map.Width;
             int H = map.Height;
             bool[] passable = map.PassableUnsafe;
 
             // If the destination is impassable, route to the passable
-            // neighbour that shares the smurf's region when one exists
+            // neighbour that shares the shroomp's region when one exists
             // (v0.4.13). Falls back to the first 8-neighbour passable
             // tile for the SimPos-in-wall edge case.
             if (!passable[ty * W + tx])
             {
                 var adj = FindReachableAdjacent(map, sx, sy, tx, ty, passable, W, H)
                        ?? FindAdjacentPassable(passable, tx, ty, W, H);
-                if (!adj.HasValue) return false;
+                if (!adj.HasValue) { TotalFailures++; return false; }
                 tx = adj.Value.X; ty = adj.Value.Y;
             }
 
-            if (sx == tx && sy == ty) return true;   // already at goal
+            if (sx == tx && sy == ty) { TotalSuccesses++; return true; }   // already at goal
 
             // O(1) DF-region reachability gate. If start and goal sit in
             // distinct connected components there's provably no
             // 8-connected path, so fail fast before opening the heap.
             ushort sRid = map.GetRegion(sx, sy);
             ushort tRid = map.GetRegion(tx, ty);
-            if (sRid != 0 && tRid != 0 && sRid != tRid) return false;
+            if (sRid != 0 && tRid != 0 && sRid != tRid) { TotalFailures++; return false; }
 
             int cap = W * H;
             int[]    gScore = RentGScore(cap);
@@ -137,7 +162,7 @@ namespace SmurfulationC.Simulation
             // v0.4.58 — crowd-cost guard. Only enable if the caller passed
             // an occupancy array sized for this map. Sized mismatch would
             // be an out-of-band write into wrong cells; degrade silently.
-            bool useCrowdCost = smurfPerTile != null && smurfPerTile.Length >= cap;
+            bool useCrowdCost = shroompPerTile != null && shroompPerTile.Length >= cap;
 
             int startIdx = sy * W + sx;
             int goalIdx  = ty * W + tx;
@@ -153,6 +178,8 @@ namespace SmurfulationC.Simulation
             // and "expanded" depending on sign.
             int expanded = 0;
 
+            try
+            {
             while (open.Count > 0)
             {
                 int idx = open.Dequeue();
@@ -164,9 +191,10 @@ namespace SmurfulationC.Simulation
                 if (idx == goalIdx)
                 {
                     ReconstructInto(parent, idx, W, resultBuffer);
+                    TotalSuccesses++;
                     return true;
                 }
-                if (++expanded > MaxNodes) return false;
+                if (++expanded > MaxNodes) { TotalFailures++; return false; }
 
                 int cx = idx % W;
                 int cy = idx / W;
@@ -185,14 +213,14 @@ namespace SmurfulationC.Simulation
                     if (dx != 0 && dy != 0)
                     {
                         // Diagonal step: both orthogonals must be passable
-                        // or the smurf would cut through a wall corner.
+                        // or the shroomp would cut through a wall corner.
                         if (!passable[cy * W + nx]) continue;
                         if (!passable[ny * W + cx]) continue;
                     }
                     int nGen = genArr[nIdx];
                     if (nGen == -gen) continue;   // closed
                     int stepCost = Cost[i];
-                    // v0.4.58 — soft-cost crowd avoidance. Each smurf
+                    // v0.4.58 — soft-cost crowd avoidance. Each shroomp
                     // occupying the candidate tile adds PawnCollisionCost
                     // to the step. Self-exemption: if the candidate is
                     // the asker's own tile, subtract 1 from the count
@@ -202,7 +230,7 @@ namespace SmurfulationC.Simulation
                     // local-steering side-step fallbacks.
                     if (useCrowdCost)
                     {
-                        int crowd = smurfPerTile![nIdx];
+                        int crowd = shroompPerTile![nIdx];
                         if (nIdx == askerTileIdx && crowd > 0) crowd--;
                         if (crowd > 0) stepCost += PawnCollisionCost * crowd;
                     }
@@ -217,14 +245,20 @@ namespace SmurfulationC.Simulation
                 }
             }
 
+            TotalFailures++;
             return false;
+            }
+            finally
+            {
+                TotalExpansions += expanded;
+            }
         }
 
         // ── Legacy API shim (allocates a List; new callers should use the
         // fill-into-buffer overload above) ────────────────────────────────
 
         // Kept so any out-of-tree caller still compiles. Internal callers
-        // should pass `Smurf.PathWaypoints` to the buffer overload to
+        // should pass `Shroomp.PathWaypoints` to the buffer overload to
         // eliminate the per-call list allocation.
         public static List<Vector2>? FindPath(LocalMap map, Vector2 fromPixel, (int X, int Y) toTile)
         {
@@ -248,7 +282,7 @@ namespace SmurfulationC.Simulation
         private static void ReconstructInto(int[] parent, int goalIdx, int W, List<Vector2> outList)
         {
             // Walk parents from goal back to start, then reverse. The
-            // start tile (parent == -1) is excluded since the smurf is
+            // start tile (parent == -1) is excluded since the shroomp is
             // already there.
             int idx = goalIdx;
             float half = LocalMap.TileSize * 0.5f;

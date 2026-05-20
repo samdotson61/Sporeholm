@@ -1,16 +1,16 @@
 using System;
 using System.Collections.Generic;
 
-namespace SmurfulationC.Simulation.Items
+namespace Sporeholm.Simulation.Items
 {
     // v0.3.46 (Phase 4 core) — material identity for an item. DF-style:
-    // "Wood/Oak", "Stone/Granite", "Plant/Smurfberry", "Cloth/Linen".
+    // "Wood/Oak", "Stone/Granite", "Plant/Capberry", "Cloth/Linen".
     // Stored as a struct so equality / hashing is cheap and items can
     // stack in the inventory when their MaterialKey matches.
     //
     // Family identifies the broad material class (Wood, Stone, Cloth,
     // Plant, Magic, Bone, Hide, Metal). SubType is the specific variety
-    // within the family (Oak, Granite, Linen, Smurfberry, etc.). Most
+    // within the family (Oak, Granite, Linen, Capberry, etc.). Most
     // gameplay code branches on Family; UI / preference lookups use
     // SubType strings exclusively.
     public readonly record struct MaterialKey(string Family, string SubType)
@@ -45,19 +45,19 @@ namespace SmurfulationC.Simulation.Items
         // for Phase 5 to define Bronze formally). The DurabilityMul /
         // DecayRateMul values mirror the spec in roadmap §4 → "Material"
         // line: Magicwood × 0.5 decay, Cloth × 1.2, Food × 4.0, etc.
-        // v0.4.2 — taxonomy aligned with the miniaturised Smurf theme.
+        // v0.4.2 — taxonomy aligned with the miniaturised Shroomp theme.
         //   Wood: DeadWood (from DeadLog terrain), LivingWood (from LivingWood
         //         terrain), Fungal (from any LargeMushroom variant
         //         — LargeMushroom, LargeSandshroom, PalmShroom).
         //         Removed real-world species (Oak / Pine / Willow / Palm)
-        //         and the unused Magicwood. Smurfs harvest the world they
+        //         and the unused Magicwood. Shroomps harvest the world they
         //         actually live in: dead logs, fresh-cut living timber,
         //         and the mushroom caps the canon describes.
         //   Stone: Granite / Limestone / Marble / Obsidian / Quartz +
         //          Magicstone + MagicCrystal (rare ore vein). Removed the
         //          generic "Field Stone" — every Boulder now carries a
         //          specific stone subtype assigned at generation time.
-        //   Plant materials: covers food sub-types (Smurfberry, Small
+        //   Plant materials: covers food sub-types (Capberry, Small
         //          Mushroom, Magic Berry, etc.). MagicFlower replaced by
         //          MagicBerry per the player brief — a magic plant that
         //          yields both food AND essence.
@@ -73,24 +73,72 @@ namespace SmurfulationC.Simulation.Items
             new() { Key = new("Stone","Limestone"),   DisplayName = "Limestone",    Icon = "◻", DurabilityMul = 1.00f, DecayRateMul = 0.70f, ValueMul = 0.90f },
             new() { Key = new("Stone","Marble"),      DisplayName = "Marble",       Icon = "◼", DurabilityMul = 1.10f, DecayRateMul = 0.60f, ValueMul = 1.80f },
             new() { Key = new("Stone","Obsidian"),    DisplayName = "Obsidian",     Icon = "⬛", DurabilityMul = 0.80f, DecayRateMul = 0.30f, ValueMul = 1.50f },
+            // v0.5.16 — Quartz restored to realistic properties. Sam clarified
+            // that v0.5.15's "slightly weaker than stone, prettier, worth more"
+            // was an example phrasing, not a literal description — real quartz
+            // is Mohs 7 (harder than steel), durable + decorative + valuable.
+            // Reverted to v0.4.x baseline: Dur 1.05 / Val 1.40.
             new() { Key = new("Stone","Quartz"),      DisplayName = "Quartz",       Icon = "◇", DurabilityMul = 1.05f, DecayRateMul = 0.40f, ValueMul = 1.40f },
             new() { Key = new("Stone","Magicstone"),  DisplayName = "Magic Stone",  Icon = "✨", DurabilityMul = 1.60f, DecayRateMul = 0.30f, ValueMul = 3.00f },
             new() { Key = new("Stone","MagicCrystal"),DisplayName = "Magic Crystal",Icon = "💎", DurabilityMul = 1.80f, DecayRateMul = 0.20f, ValueMul = 4.50f },
+
+            // v0.5.15 (Phase 5C — rimport.md N16, lore revision) — Kentucky-
+            // inspired ground-level minerals. Replaced v0.5.14's Gold + Sapphire
+            // entries (which didn't fit shroomp-scale lore — shroomps mine "ground-
+            // level rocks and small rock formations" not deep gemstone shafts).
+            // Reference: rockchasing.com/kentucky-rocks-minerals-gems/.
+            // Each entry mapped from the real-world description (durability /
+            // rarity / value / appearance):
+            //
+            //   Hematite — "shiny, metallic, reddish-brown, heavy and durable"
+            //              → IRON ANALOG (Sam). Common ore-vein material;
+            //              high durability + decent value. Phase 6 crafting
+            //              will use as the base for tools / weapons / armour.
+            //   Garnet   — "extremely valuable, weak material" (Sam). The
+            //              gold-analog: rare gem, fragile but coveted.
+            //              Future trade / decoration material.
+            //   Pyrite   — "brassy yellow, fool's gold; harder than gold,
+            //              brittle". Decorative-deceptive: looks valuable
+            //              but isn't structurally sound. Weak + low value
+            //              but non-trivial visual presence.
+            //   Fluorite — "purple/green/blue/yellow, glassy, geometric".
+            //              Mid-rare collector mineral; moderate hardness;
+            //              prized for visual variety more than function.
+            //   Agate    — KENTUCKY STATE ROCK. "Colourful layered swirls".
+            //              Decorative, moderately hard, valued by collectors.
+            //              Banded patterns make every excavated chunk
+            //              visually unique (renderer hook in Phase 5D).
+            //   Coal     — KENTUCKY STATE MINERAL. Combustible. Power-network
+            //              fuel for Phase 11 (rimport N14). Placed sparsely
+            //              now so the deposits exist by the time the power
+            //              system needs them.
+            new() { Key = new("Stone","Hematite"),    DisplayName = "Hematite",     Icon = "🔴", DurabilityMul = 1.40f, DecayRateMul = 0.45f, ValueMul = 2.20f },
+            new() { Key = new("Stone","Garnet"),      DisplayName = "Garnet",       Icon = "🔻", DurabilityMul = 0.60f, DecayRateMul = 0.10f, ValueMul = 7.00f },
+            new() { Key = new("Stone","Pyrite"),      DisplayName = "Pyrite",       Icon = "🟨", DurabilityMul = 0.55f, DecayRateMul = 0.35f, ValueMul = 1.70f },
+            new() { Key = new("Stone","Fluorite"),    DisplayName = "Fluorite",     Icon = "🟪", DurabilityMul = 0.95f, DecayRateMul = 0.30f, ValueMul = 2.20f },
+            new() { Key = new("Stone","Agate"),       DisplayName = "Agate",        Icon = "🌀", DurabilityMul = 1.05f, DecayRateMul = 0.35f, ValueMul = 2.80f },
+            new() { Key = new("Stone","Coal"),        DisplayName = "Coal",         Icon = "⚫", DurabilityMul = 0.45f, DecayRateMul = 0.55f, ValueMul = 1.10f },
 
             // ── Plant / food materials ──────────────────────────────────
             // Food deterioration: × 4.0 baseline per the roadmap spec.
             // Quality keeps mattering as a separate axis (Fine berries decay
             // at the same rate as Crude ones, just buy more nutrition).
-            new() { Key = new("Plant","Smurfberry"),     DisplayName = "Smurfberry",     Icon = "🫐", DurabilityMul = 0.30f, DecayRateMul = 4.00f, ValueMul = 1.00f },
+            new() { Key = new("Plant","Capberry"),     DisplayName = "Capberry",     Icon = "🫐", DurabilityMul = 0.30f, DecayRateMul = 4.00f, ValueMul = 1.00f },
             new() { Key = new("Plant","SmallMushroom"),  DisplayName = "Small Mushroom", Icon = "🍄", DurabilityMul = 0.35f, DecayRateMul = 3.50f, ValueMul = 0.85f },
             new() { Key = new("Plant","LargeMushroom"),  DisplayName = "Large Mushroom", Icon = "🍄", DurabilityMul = 0.40f, DecayRateMul = 3.20f, ValueMul = 1.40f },
             new() { Key = new("Plant","HerbCluster"),    DisplayName = "Herb Cluster",   Icon = "🌿", DurabilityMul = 0.30f, DecayRateMul = 4.50f, ValueMul = 1.10f },
             new() { Key = new("Plant","MagicBerry"),     DisplayName = "Magic Berry",    Icon = "🌺", DurabilityMul = 0.40f, DecayRateMul = 3.00f, ValueMul = 2.00f },
             new() { Key = new("Plant","Cuttings"),       DisplayName = "Cuttings",       Icon = "🌱", DurabilityMul = 0.25f, DecayRateMul = 5.00f, ValueMul = 0.20f },
+            // v0.5.70 — Mosslet: spongy moss cuttings dropped specifically
+            // by cut MossPatch tiles (Underbrush still drops Cuttings). Reserved
+            // for a separate Phase 5+ system — Sam: "we'll use later." Held
+            // alongside Cuttings as a distinct biomass kind so the future
+            // system can branch on it without grepping every Cuttings call site.
+            new() { Key = new("Plant","Mosslet"),        DisplayName = "Mosslet",        Icon = "🟢", DurabilityMul = 0.30f, DecayRateMul = 3.50f, ValueMul = 0.25f },
 
             // ── Cloth (Phase 5+ — registered now for procedural rolls) ──
             new() { Key = new("Cloth","Linen"),       DisplayName = "Linen",      Icon = "🧵", DurabilityMul = 0.65f, DecayRateMul = 1.20f, ValueMul = 0.85f },
-            new() { Key = new("Cloth","Smurfwool"),   DisplayName = "Smurfwool",  Icon = "🧶", DurabilityMul = 0.75f, DecayRateMul = 1.10f, ValueMul = 1.00f },
+            new() { Key = new("Cloth","Shroompwool"),   DisplayName = "Shroompwool",  Icon = "🧶", DurabilityMul = 0.75f, DecayRateMul = 1.10f, ValueMul = 1.00f },
             new() { Key = new("Cloth","SpiderSilk"),  DisplayName = "Spider Silk",Icon = "🕸",  DurabilityMul = 0.85f, DecayRateMul = 0.90f, ValueMul = 1.80f },
             new() { Key = new("Cloth","Magicweave"),  DisplayName = "Magicweave", Icon = "✨", DurabilityMul = 1.10f, DecayRateMul = 0.50f, ValueMul = 3.00f },
 
@@ -98,11 +146,23 @@ namespace SmurfulationC.Simulation.Items
             new() { Key = new("Magic","RawEssence"),   DisplayName = "Raw Essence",   Icon = "✨", DurabilityMul = 0.50f, DecayRateMul = 1.50f, ValueMul = 1.50f },
             new() { Key = new("Magic","CrystalShard"), DisplayName = "Crystal Shard", Icon = "💎", DurabilityMul = 1.50f, DecayRateMul = 0.40f, ValueMul = 2.50f },
 
-            // ── Misc placeholders (Phase 7+ / Phase 9+) ────────────────
-            new() { Key = new("Bone","Generic"),  DisplayName = "Bone",  Icon = "🦴", DurabilityMul = 1.00f, DecayRateMul = 0.80f, ValueMul = 0.80f },
+            // ── Animal-derived materials (Bone live in v0.5.16, Hide v0.5.16+) ──
+            // v0.5.16 — Bone promoted from placeholder to live material.
+            // Drops from new Skeleton terrain (LocalMapGenerator gen pass)
+            // and from Phase 9 animal butchery. Sharp + lightweight: good
+            // for daggers / spear tips / arrowheads. Durability slightly
+            // above the v0.4.x placeholder so a Bone Spear feels worth
+            // crafting vs a Wooden Spear.
+            new() { Key = new("Bone","Generic"),  DisplayName = "Bone",  Icon = "🦴", DurabilityMul = 1.10f, DecayRateMul = 0.75f, ValueMul = 0.90f },
+            // Hide remains a Phase 9 placeholder — needs animal corpse +
+            // butchery work-task before it can actually drop.
             new() { Key = new("Hide","Generic"),  DisplayName = "Hide",  Icon = "🟫", DurabilityMul = 0.70f, DecayRateMul = 1.30f, ValueMul = 0.90f },
-            new() { Key = new("Metal","Iron"),    DisplayName = "Iron",  Icon = "⚙", DurabilityMul = 1.80f, DecayRateMul = 0.70f, ValueMul = 1.80f },
-            new() { Key = new("Metal","Bronze"),  DisplayName = "Bronze",Icon = "⚙", DurabilityMul = 1.50f, DecayRateMul = 0.60f, ValueMul = 1.50f },
+            // v0.5.16 — Iron + Bronze removed. Shroomps are small mushroom
+            // creatures who mine ground-level rocks; refined metalworking
+            // doesn't fit the lore. The "iron analog" role is filled by
+            // Hematite (Stone family, added v0.5.15). If a future Phase
+            // 11 tech tier introduces metalworking, those entries can be
+            // re-added then with explicit lore framing.
         };
 
         private static readonly Dictionary<MaterialKey, MaterialDef> _byKey;

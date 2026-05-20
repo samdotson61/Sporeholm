@@ -1,5 +1,6 @@
 using Godot;
 using System.Collections.Generic;
+using Sporeholm.UI;
 
 // RimWorld/DF-style event message log, anchored to the bottom-left corner.
 //
@@ -14,7 +15,10 @@ using System.Collections.Generic;
 //   plumbing is in place before the settings screen is built.
 public partial class MessageLog : Control
 {
-    public enum Category { Birth, Death, MoodDrop, Combat, Research, General }
+    // v0.5.84t — Starving: one-shot per-pawn rising-edge alert when Nutrition
+    // drops below the starvation threshold. Posted from GameController via
+    // SimulationManager.StarvationStarted signal.
+    public enum Category { Birth, Death, MoodDrop, Combat, Research, General, Starving }
 
     // Fired after a message is accepted (post-filter). Subscribe to implement
     // pause-on-event or notification sounds in a later phase.
@@ -46,6 +50,7 @@ public partial class MessageLog : Control
         [Category.Combat]   = true,
         [Category.Research] = true,
         [Category.General]  = true,
+        [Category.Starving] = true,
     };
 
     // Newest entry first.
@@ -62,10 +67,30 @@ public partial class MessageLog : Control
         AnchorTop    = 1f;
         AnchorBottom = 1f;
 
+        // v0.5.41 — lift the message log above the new full-width bottom
+        // tab bar so the two don't overlap. Bottom bar height ≈ tab
+        // button (38) + panel padding (~6) + edge inset (16) ≈ 60 logical
+        // px from the screen bottom; we add a couple extra px for the
+        // capsule shadow + visual separation. Sam: "move the message box
+        // up so the bottom is just above [the bottom bar]."
+        //
+        // v0.5.84t — Sam screenshot showed the messages clipping into the
+        // Orders button (the prior 68px hardcoded reserve undershot the
+        // actual bottom-tab capsule height, and didn't scale with UI scale).
+        // Recompute from UITheme constants so the reserve tracks scale +
+        // any future ToolbarButtonSize change. Plus an explicit 8 px gap
+        // above the bar per Sam's "move messages box entirely above the
+        // task bar, 8px distance."
+        const float CapsuleStyleboxPad = 8f;  // ~4 px top/bottom on the tab capsule
+        const float Gap = 8f;
+        float bottomBarHeight = UITheme.EdgeInset
+                              + UITheme.Scaled(UITheme.ToolbarButtonSize)
+                              + CapsuleStyleboxPad;
+        float BottomBarReserve = bottomBarHeight + Gap;
         OffsetLeft   = 10f;
         OffsetRight  = 510f;
-        OffsetTop    = -(20f + MaxVisible * LineHeight);
-        OffsetBottom = -20f;
+        OffsetTop    = -(BottomBarReserve + MaxVisible * LineHeight);
+        OffsetBottom = -BottomBarReserve;
 
         MouseFilter = MouseFilterEnum.Ignore;
 
@@ -188,6 +213,9 @@ public partial class MessageLog : Control
         Category.MoodDrop => new Color(0.95f, 0.80f, 0.35f),       // amber
         Category.Combat   => new Color(0.95f, 0.55f, 0.35f),       // orange
         Category.Research => new Color(0.55f, 0.80f, 0.95f),       // blue
+        // v0.5.84t — Starving: vivid red, brighter than Death so steady-state
+        // alerts pop in a busy log.
+        Category.Starving => new Color(1.00f, 0.42f, 0.42f),
         _                 => new Color(1.00f, 1.00f, 1.00f, 0.88f), // white
     };
 }

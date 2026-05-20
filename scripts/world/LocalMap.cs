@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
 using Godot;  // v0.3.33 — Vector2 for indexed designation lookups
-using SmurfulationC.Simulation.Items;
+using Sporeholm.Simulation;          // v0.5.68 — Shroomp type for PickupBestFoodAt
+using Sporeholm.Simulation.Items;
 
-namespace SmurfulationC.World
+namespace Sporeholm.World
 {
     // Dense playable tile grid. Default 80×50 (16×16 px tiles = 1280×800 total).
     // Width and Height are instance properties so maps can be scaled up at world-gen time.
@@ -20,11 +21,12 @@ namespace SmurfulationC.World
 
         private readonly LocalTile[,]       _tiles;
         private readonly VegetationSlot[,]  _vegetation;
+        private readonly StructureSlot[,]   _structures;     // v0.5.19 Phase 5B — walls, floors, etc.
 
         // v0.3.39 (O-M.2) — flat-array passability cache. Indexed by
         // `y * Width + x`. Maintained alongside `_tiles[x, y].Passable` so
         // BehaviorSystem's tight steering checks (8 candidate steps per
-        // smurf per tick × 1000 smurfs × 60 Hz = 480 k IsPassable calls/sec
+        // shroomp per tick × 1000 shroomps × 60 Hz = 480 k IsPassable calls/sec
         // at target scale) avoid the LocalTile struct copy + bounds check.
         // Always read through the public `IsPassable` method, which still
         // walls off out-of-bounds via the array length check below.
@@ -48,11 +50,11 @@ namespace SmurfulationC.World
         // top of `BehaviorSystem.Tick` and then suppresses any further
         // rebuild for the duration of the tick. Without this gate,
         // `ApplyTaskEffect` mutations (every dig completion) flip
-        // `_regionsDirty` mid-loop and the next smurf's
+        // `_regionsDirty` mid-loop and the next shroomp's
         // `FindNearestExcavate` re-runs the full W×H BFS — at 240×150 +
         // 17 simultaneous diggers that was ~50 ms / tick of pure rebuild
         // cost. Within a tick the stale region data is acceptable: the
-        // worst case is a smurf picking a target that was reachable a
+        // worst case is a shroomp picking a target that was reachable a
         // tick ago and is still reachable (excavation only adds
         // connectivity), so no correctness loss.
         private volatile bool _freezeRegionRebuilds;
@@ -67,7 +69,7 @@ namespace SmurfulationC.World
         // for O(1) update + bounded memory. The previous List-based version
         // did `RemoveAll(...)` on every write — O(N) per mutation, O(N²)
         // amortised on a long-running game with active excavation. At the
-        // planned 1000-smurf colony size with sustained work, the lists
+        // planned 1000-shroomp colony size with sustained work, the lists
         // could grow into the tens of thousands of entries and dominate
         // mutation cost. Dict gives constant-time last-write-wins.
         private readonly Dictionary<(int X, int Y), TerrainType>                  _terrainMutations = new();
@@ -90,13 +92,20 @@ namespace SmurfulationC.World
         // `Get`), but BehaviorSystem iterates these sets instead of doing a
         // 51×51 radial scan — turns nearest-designation lookup from O(R²)
         // into O(N) where N is the live designation count. With ~1000 active
-        // designations and 20 smurfs at 60 Hz that's a ~60× reduction in
+        // designations and 20 shroomps at 60 Hz that's a ~60× reduction in
         // tile-reads per second.
         //
-        // `_claims` (B.7) tracks which smurf is currently routing toward each
-        // designated tile so a second smurf scanning for work skips already-
-        // taken tiles. Prevents the "every smurf piles onto the same berry"
-        // failure mode. The Guid is the claimer's `Smurf.Id`.
+        // v0.5.61 — work-tile claims migrated from `_claims` dict to the
+        // unified ReservationManager (LayerWork). FindNearest* methods
+        // skip tiles claimed by other shroomps via
+        // `Reservations.IsTileReservedByOther(x, y, LayerWork, askerId)`.
+        // SimulationCore sets `ReservationManager.Active = this` when the
+        // map is bound so HaulSystem's static API can route to the same
+        // instance (LayerHaul for items). Prevents the per-system claim-
+        // dict drift that v0.5.59 discovered (Build was missing from
+        // ReleaseTaskClaim's eligible list and leaked claims forever).
+        public Sporeholm.Simulation.ReservationManager Reservations { get; } = new();
+
         private readonly HashSet<(int X, int Y)> _excavateDesignations = new();
         private readonly HashSet<(int X, int Y)> _gatherDesignations   = new();
         // v0.3.38 — indexes for the new Chop Wood / Cut Plants orders. Same
@@ -105,7 +114,6 @@ namespace SmurfulationC.World
         // designations instead of O(R²) radial scans.
         private readonly HashSet<(int X, int Y)> _chopWoodDesignations = new();
         private readonly HashSet<(int X, int Y)> _cutDesignations      = new();
-        private readonly Dictionary<(int X, int Y), Guid> _claims = new();
         private readonly object _designationsLock = new();
 
         // v0.5.0 (Phase 5A — rimport N1) — Stockpile zones. Player-painted
@@ -174,7 +182,7 @@ namespace SmurfulationC.World
         // allocates a (int,int,Item[])[] of size N plus an Item[] per
         // tile, four times per Snapshot call, twice per frame (ResourceHUD
         // + HUDController), so ~8 full snapshot allocations per frame
-        // were burned just to compute totals. With 50 smurfs running
+        // were burned just to compute totals. With 50 shroomps running
         // gather/excavate the dropped-tile count routinely hits 200+,
         // turning the per-frame allocation storm into a measurable
         // main-thread stutter. Caching the totals reduces those getters
@@ -392,6 +400,325 @@ namespace SmurfulationC.World
             }
         }
 
+        // v0.5.57 — find the nearest on-map tile carrying at least one item
+        // matching (Kind, Material.Family, optional Material.SubType). Used
+        // by the Build task to route a constructor to the source material
+        // stack before they can haul it to the blueprint (RimWorld parity).
+        // Returns null when no matching stack exists anywhere on the map.
+        //
+        // Distance metric is Chebyshev to align with the shroomp's per-tile
+        // movement cost. Walks the dropped-items dictionary directly under
+        // _itemsLock — O(N) in the number of distinct dropped-item tiles
+        // (typically dozens, not the full WxH grid).
+        // v0.5.84t — itemSubType (defaulted) discriminates Item.SubType
+        // (e.g. "StoneBlock" vs "Pebblestone") so a Pebblestone wall doesn't
+        // accidentally consume from a StoneBlock stack of the same stone
+        // family (or vice versa). Pass null = no Item.SubType filter
+        // (legacy behaviour for callers that don't care).
+        public (int X, int Y)? FindNearestMaterial(
+            int sx, int sy, ItemKind kind, string family, string? subType,
+            string? itemSubType = null)
+        {
+            if (string.IsNullOrEmpty(family)) return null;
+            int bestDist = int.MaxValue;
+            (int X, int Y)? best = null;
+            lock (_itemsLock)
+            {
+                foreach (var kv in _droppedItems)
+                {
+                    // Cheap reject: at least one item on this tile must match.
+                    bool hasMatch = false;
+                    foreach (var it in kv.Value)
+                    {
+                        if (it.Quantity <= 0) continue;
+                        if (it.Kind != kind) continue;
+                        if (it.Material.Family != family) continue;
+                        if (subType != null && it.Material.SubType != subType) continue;
+                        if (itemSubType != null && it.SubType != itemSubType) continue;
+                        hasMatch = true;
+                        break;
+                    }
+                    if (!hasMatch) continue;
+                    int dx = kv.Key.X - sx;
+                    int dy = kv.Key.Y - sy;
+                    if (dx < 0) dx = -dx;
+                    if (dy < 0) dy = -dy;
+                    int cheb = dx > dy ? dx : dy;
+                    if (cheb < bestDist) { bestDist = cheb; best = kv.Key; }
+                }
+            }
+            return best;
+        }
+
+        // v0.5.68 — find the Chebyshev-nearest tile carrying an edible item.
+        // Filters by Forbidden flag (skipped) and by State (Spoiled food only
+        // when allowSpoiled = true). Corpses are eligible only when
+        // allowCorpse = true. Mirrors FindNearestMaterial's shape so the Eat
+        // routing in BehaviorSystem.MakeEat reads naturally alongside the
+        // BuildHaul source-tile routing. RimWorld parity:
+        // FoodUtility.SpawnedFoodSearchInnerScan walks the storage cell list
+        // ranked by FoodUtility.FoodSourceOptimality.
+        public (int X, int Y)? FindNearestFoodTile(
+            int sx, int sy, bool allowSpoiled, bool allowCorpse)
+        {
+            int bestDist = int.MaxValue;
+            (int X, int Y)? best = null;
+            lock (_itemsLock)
+            {
+                foreach (var kv in _droppedItems)
+                {
+                    bool hasMatch = false;
+                    foreach (var it in kv.Value)
+                    {
+                        if (it.Quantity <= 0) continue;
+                        if (it.IsForbidden) continue;
+                        if (it.Kind == ItemKind.Food)
+                        {
+                            if (it.State == ItemState.Spoiled && !allowSpoiled) continue;
+                            hasMatch = true; break;
+                        }
+                        else if (it.Kind == ItemKind.Corpse && allowCorpse)
+                        {
+                            hasMatch = true; break;
+                        }
+                    }
+                    if (!hasMatch) continue;
+                    int dx = kv.Key.X - sx;
+                    int dy = kv.Key.Y - sy;
+                    if (dx < 0) dx = -dx;
+                    if (dy < 0) dy = -dy;
+                    int cheb = dx > dy ? dx : dy;
+                    if (cheb < bestDist) { bestDist = cheb; best = kv.Key; }
+                }
+            }
+            return best;
+        }
+
+        // v0.5.68 — consume one unit of the best edible item from a specific
+        // tile (the one the shroomp walked to). Picks the highest-nutrition
+        // stack respecting Spoiled / Corpse gates, decrements its Quantity by
+        // one, updates cached totals, reaps empties, fires ItemsChanged.
+        // Returns a snapshot copy of the consumed item so the caller can
+        // compute nutrition restored + emit thoughts (the live stack may
+        // shrink concurrently if other shroomps also pluck from it).
+        public Item? PickupBestFoodAt(
+            int tx, int ty, Shroomp eater, bool allowSpoiled, bool allowCorpse)
+        {
+            lock (_itemsLock)
+            {
+                if (!_droppedItems.TryGetValue((tx, ty), out var list)) return null;
+                Item? chosen = null;
+                float bestScore = float.MinValue;
+                foreach (var it in list)
+                {
+                    if (it.Quantity <= 0) continue;
+                    if (it.IsForbidden) continue;
+                    float baseNutrition;
+                    float stateMul = 1f;
+                    if (it.Kind == ItemKind.Food)
+                    {
+                        if (it.State == ItemState.Spoiled && !allowSpoiled) continue;
+                        var def = ItemRegistry.Get(it.Kind, it.SubType);
+                        if (def == null) continue;
+                        baseNutrition = def.BaseNutrition;
+                        if (it.State == ItemState.Stale)       stateMul = 0.6f;
+                        else if (it.State == ItemState.Spoiled) stateMul = 0.3f;
+                    }
+                    else if (it.Kind == ItemKind.Corpse && allowCorpse)
+                    {
+                        // Implicit corpse nutrition. RimWorld treats corpses
+                        // as ~75 Nutrition (3 meals); our nutrition system is
+                        // scaled differently (food unit yields ~5 nutrition).
+                        // 15 here gives roughly 2.5 days of food per corpse
+                        // before AteCorpse becomes the dominant mood debt.
+                        baseNutrition = 15f;
+                        stateMul = 0.5f;
+                    }
+                    else continue;
+
+                    float score = baseNutrition * QualityMeta.NutritionMul(it.Quality) * stateMul;
+                    if (eater?.Preferences != null && eater.Preferences.LikesItem(it.SubType))
+                        score *= 1.5f;
+                    if (eater?.Preferences != null && eater.Preferences.DislikesItem(it.SubType))
+                        score *= 0.5f;
+                    if (score > bestScore) { bestScore = score; chosen = it; }
+                }
+                if (chosen == null) return null;
+
+                var snapshot = new Item
+                {
+                    Kind         = chosen.Kind,
+                    SubType      = chosen.SubType,
+                    Material     = chosen.Material,
+                    Quality      = chosen.Quality,
+                    State        = chosen.State,
+                    AvgCondition = chosen.AvgCondition,
+                    Quantity     = 1,
+                    CorpseInfo   = chosen.CorpseInfo,
+                };
+                chosen.Quantity -= 1;
+                _droppedKindTotals.TryGetValue(chosen.Kind, out int kTot);
+                _droppedKindTotals[chosen.Kind] = kTot - 1;
+                string family = chosen.Material.Family;
+                if (!string.IsNullOrEmpty(family))
+                {
+                    var fkey = (chosen.Kind, family);
+                    _droppedFamilyTotals.TryGetValue(fkey, out int fTot);
+                    _droppedFamilyTotals[fkey] = fTot - 1;
+                }
+                list.RemoveAll(item => item.Quantity <= 0);
+                if (list.Count == 0) _droppedItems.Remove((tx, ty));
+
+                ItemsChanged?.Invoke(tx, ty);
+                return snapshot;
+            }
+        }
+
+        // v0.5.57 — pick up `amount` units of a matching material from a
+        // specific tile (the source the shroomp walked to). Removes the
+        // consumed quantity from the on-map stack, decrements the cached
+        // dropped totals, reaps zero stacks, and fires ItemsChanged. Returns
+        // the units actually taken (0 when no matching stack exists).
+        // Differs from ConsumeDroppedItemsByMaterial in that it only touches
+        // ONE tile (where the shroomp is standing) — not a global sweep.
+        // v0.5.84t — itemSubType (defaulted) discriminates Item.SubType
+        // (e.g. "StoneBlock" vs "Pebblestone") so the Build delivery step
+        // only draws from the right stack type. Pass null = no Item.SubType
+        // filter (legacy behaviour for callers that don't care).
+        public int PickupDroppedAt(
+            int tx, int ty, ItemKind kind, string family, string? subType, int amount,
+            string? itemSubType = null)
+        {
+            if (amount <= 0 || string.IsNullOrEmpty(family)) return 0;
+            int taken = 0;
+            bool changed = false;
+            lock (_itemsLock)
+            {
+                if (!_droppedItems.TryGetValue((tx, ty), out var list)) return 0;
+                for (int i = 0; i < list.Count && taken < amount; i++)
+                {
+                    var it = list[i];
+                    if (it.Quantity <= 0) continue;
+                    if (it.Kind != kind) continue;
+                    if (it.Material.Family != family) continue;
+                    if (subType != null && it.Material.SubType != subType) continue;
+                    if (itemSubType != null && it.SubType != itemSubType) continue;
+                    int take = System.Math.Min(amount - taken, it.Quantity);
+                    it.Quantity -= take;
+                    taken += take;
+                    _droppedKindTotals.TryGetValue(kind, out int kTot);
+                    _droppedKindTotals[kind] = kTot - take;
+                    var fkey = (kind, family);
+                    _droppedFamilyTotals.TryGetValue(fkey, out int fTot);
+                    _droppedFamilyTotals[fkey] = fTot - take;
+                    changed = true;
+                }
+                list.RemoveAll(it => it.Quantity <= 0);
+                if (list.Count == 0) _droppedItems.Remove((tx, ty));
+            }
+            if (changed) ItemsChanged?.Invoke(tx, ty);
+            return taken;
+        }
+
+        // v0.5.84t — clear IsForbidden on every dropped item at (tx, ty).
+        // Used by BehaviorSystem when a blueprint completes framing: any
+        // material items still sitting on the tile after the framing pass
+        // consumed `cost` units are leftovers (over-deposit from before the
+        // single-hauler reservation, or save-game state). Unforbidding them
+        // lets HaulSystem pick them up to a stockpile rather than leaving
+        // forbidden orphans on built tiles forever (Sam's playtest screenshot
+        // showed 1-6 unit stacks sitting permanently on every completed
+        // floor in a hallway run). Returns the number of items unforbidden.
+        public int UnforbidDroppedAt(int tx, int ty)
+        {
+            int changed = 0;
+            lock (_itemsLock)
+            {
+                if (!_droppedItems.TryGetValue((tx, ty), out var list)) return 0;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var it = list[i];
+                    if (it.Quantity <= 0) continue;
+                    if (!it.IsForbidden) continue;
+                    it.IsForbidden = false;
+                    changed++;
+                }
+            }
+            if (changed > 0) ItemsChanged?.Invoke(tx, ty);
+            return changed;
+        }
+
+        // v0.5.55 — material-strict consume from on-map stockpiles + ground
+        // drops. Walks every (tile, items) bucket, finds stacks matching the
+        // requested (Kind, Material.Family, optional Material.SubType) triple,
+        // and consumes up to `amount` units from them — smallest-stacks-first
+        // so the on-map item count stays visually clean as a stockpile drains.
+        // Returns the actual amount removed (≤ requested).
+        //
+        // Why this exists: pre-v0.5.55 the Build task's TryConsumeBuildMaterials
+        // only checked `ColonyResources.Inventory`, which is essentially the
+        // scenario starting kit plus a few legacy float-write paths. Hauled
+        // wood / stone goes onto the MAP via map.DropItem, never into
+        // ColonyResources.Inventory — so a colony with full stockpiles of
+        // FungalWood logs would have the HUD show "Wood: 47" but Build
+        // would stall every tick because Inventory.ConsumeByMaterial saw
+        // zero matches. Sam: "Shroomps don't properly build buildings from
+        // materials that are in the stockpile."
+        //
+        // Fires ItemsChanged for each affected tile so the renderer + any
+        // HUD totals refresh on the next frame.
+        public int ConsumeDroppedItemsByMaterial(
+            ItemKind kind, string family, string? subType, int amount)
+        {
+            if (amount <= 0 || string.IsNullOrEmpty(family)) return 0;
+            int taken = 0;
+            var affectedTiles = new List<(int X, int Y)>();
+            lock (_itemsLock)
+            {
+                // Collect matching stacks across every tile so we can sort
+                // by Quantity and drain smallest-first.
+                var matches = new List<(int X, int Y, Item Item)>();
+                foreach (var kv in _droppedItems)
+                {
+                    foreach (var it in kv.Value)
+                    {
+                        if (it.Kind != kind) continue;
+                        if (it.Material.Family != family) continue;
+                        if (subType != null && it.Material.SubType != subType) continue;
+                        if (it.Quantity > 0) matches.Add((kv.Key.X, kv.Key.Y, it));
+                    }
+                }
+                matches.Sort((a, b) => a.Item.Quantity.CompareTo(b.Item.Quantity));
+                foreach (var (x, y, item) in matches)
+                {
+                    if (taken >= amount) break;
+                    int take = System.Math.Min(amount - taken, item.Quantity);
+                    item.Quantity -= take;
+                    taken += take;
+                    // Decrement totals by exactly the consumed delta.
+                    _droppedKindTotals.TryGetValue(kind, out int kTot);
+                    _droppedKindTotals[kind] = kTot - take;
+                    var fkey = (kind, family);
+                    _droppedFamilyTotals.TryGetValue(fkey, out int fTot);
+                    _droppedFamilyTotals[fkey] = fTot - take;
+                    if (affectedTiles.Count == 0 || affectedTiles[^1] != (x, y))
+                        affectedTiles.Add((x, y));
+                }
+                // Reap zero-quantity stacks + empty tile buckets.
+                var emptyKeys = new List<(int X, int Y)>();
+                foreach (var kv in _droppedItems)
+                {
+                    kv.Value.RemoveAll(it => it.Quantity <= 0);
+                    if (kv.Value.Count == 0) emptyKeys.Add(kv.Key);
+                }
+                foreach (var k in emptyKeys) _droppedItems.Remove(k);
+            }
+            // Notify outside the lock — listeners may re-enter map state.
+            foreach (var (x, y) in affectedTiles)
+                ItemsChanged?.Invoke(x, y);
+            return taken;
+        }
+
         // v0.4.33 — corpse rot. Called from SimulationCore on the day
         // boundary so corpses don't sit on the map forever. ~7 in-game
         // days from a fresh body to a fully-decayed empty tile, matching
@@ -490,7 +817,7 @@ namespace SmurfulationC.World
         // by Haul lookups + the renderer; both call paths tolerate stale
         // reads — the renderer redraws on ItemsChanged, the lookup
         // tolerates returning a list that's about to be picked up by
-        // another smurf (Haul does an existence-and-claim re-check
+        // another shroomp (Haul does an existence-and-claim re-check
         // before deciding to pick up).
         public IReadOnlyList<Item> GetItemsOnTile(int x, int y)
         {
@@ -506,7 +833,7 @@ namespace SmurfulationC.World
         // callers (haul target selection). The previous path forced every
         // hauler to call `EnumerateDroppedItems` which snapshotted the
         // entire dict into a `(int,int,Item[])[]` and a per-tile
-        // `Item[]` — at 500 dropped tiles × 50 smurfs × 1+ haul scan per
+        // `Item[]` — at 500 dropped tiles × 50 shroomps × 1+ haul scan per
         // task selection, that was the dominant main-thread + sim-thread
         // allocation source under heavy gather/excavate. This method holds
         // the items lock for the whole walk (typically <100 μs at 500
@@ -514,7 +841,7 @@ namespace SmurfulationC.World
         // because sim thread is the sole writer of `_droppedItems` and
         // the callback is bounded to read-only access. The `radiusSq`
         // gate cuts the inner work by ~10× since most dropped tiles are
-        // outside any given smurf's 32-tile radius.
+        // outside any given shroomp's 32-tile radius.
         public void ForEachDroppedInRadius(int sx, int sy, int radiusSq,
             System.Action<int, int, IReadOnlyList<Item>> visit)
         {
@@ -636,6 +963,86 @@ namespace SmurfulationC.World
         public MaterialKey? GetTileStone(int x, int y) =>
             _tileStone.TryGetValue((x, y), out var k) ? k : null;
 
+        // v0.5.84d — set of StructureMat values that have at least one
+        // source somewhere on this map. Sam: "Ensure no structures or
+        // items can be built with materials that are not generated/dropped.
+        // Reflect this in the UI." BuildPanel calls this on map bind to
+        // know which material chips to enable. Cheap: O(stone-tile-count
+        // + map area) — typical 80×50 map runs in <1 ms.
+        //
+        // Always-present: generic Stone + generic Wood (fallback materials
+        // available via family-consume even when no explicit subtype is
+        // in the world; useful for legacy saves and items spawned by dev
+        // tools).
+        //
+        // Per-material sources:
+        //   • Stone subtypes (Granite/Limestone/Marble/Obsidian/Quartz) —
+        //     read from `_tileStone` dictionary populated by
+        //     LocalMapGenerator.AssignStoneVariation.
+        //   • DeadWood — any DeadLog terrain tile.
+        //   • LivingWood — any LivingWood terrain tile.
+        //   • FungalWood — any LargeMushroom / LargeSandshroom / PalmShroom
+        //     vegetation tile.
+        //
+        // Result is cached on first call; invalidated by ApplyMapDelta /
+        // SetTerrain / SetVegetation (the call sites that change source
+        // tile state). Material availability over a session is otherwise
+        // monotonically decreasing (excavation depletes sources) — chips
+        // staying enabled when sources go to zero is intentional, so the
+        // player can still build with their banked stockpile.
+        private System.Collections.Generic.HashSet<StructureMat>? _availMatsCache;
+
+        public System.Collections.Generic.HashSet<StructureMat> GetAvailableStructureMats()
+        {
+            if (_availMatsCache != null) return _availMatsCache;
+            var set = new System.Collections.Generic.HashSet<StructureMat>
+            {
+                StructureMat.Stone,
+                StructureMat.Wood,
+            };
+            // Stone subtypes from _tileStone.
+            foreach (var kv in _tileStone)
+            {
+                var sub = kv.Value.SubType;
+                if      (sub == "Granite")   set.Add(StructureMat.Granite);
+                else if (sub == "Limestone") set.Add(StructureMat.Limestone);
+                else if (sub == "Marble")    set.Add(StructureMat.Marble);
+                else if (sub == "Obsidian")  set.Add(StructureMat.Obsidian);
+                else if (sub == "Quartz")    set.Add(StructureMat.Quartz);
+            }
+            // Wood subtypes from terrain + vegetation.
+            for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width;  x++)
+            {
+                var terr = _tiles[x, y].Terrain;
+                if (terr == TerrainType.DeadLog)    set.Add(StructureMat.DeadWood);
+                if (terr == TerrainType.LivingWood) set.Add(StructureMat.LivingWood);
+                var veg = _vegetation[x, y];
+                if (veg.IsPresent && (veg.Type == VegetationType.LargeMushroom
+                                   || veg.Type == VegetationType.LargeSandshroom
+                                   || veg.Type == VegetationType.PalmShroom))
+                    set.Add(StructureMat.FungalWood);
+            }
+            // v0.5.84t — Pebblestone is craftable from any stone subtype via
+            // the "Refine *Material* Pebblestone" recipes. Always available as
+            // a build chip so the player can plan pebblestone walls/floors —
+            // matches the existing chip-stays-enabled-after-source-depletion
+            // policy. If no Pebblestone has been crafted yet the blueprint
+            // simply waits for delivery, same as other materials.
+            if (set.Contains(StructureMat.Granite)   ||
+                set.Contains(StructureMat.Limestone) ||
+                set.Contains(StructureMat.Marble)    ||
+                set.Contains(StructureMat.Obsidian)  ||
+                set.Contains(StructureMat.Quartz))
+            {
+                set.Add(StructureMat.Pebblestone);
+            }
+            _availMatsCache = set;
+            return set;
+        }
+
+        public void InvalidateAvailableMatsCache() => _availMatsCache = null;
+
         // v0.4.7 (bugreport B-7) — snapshot every (x, y) → stone-subtype
         // entry for save. Only tiles whose terrain is still Boulder
         // matter; excavated tiles are mud and the entry is moot.
@@ -657,19 +1064,21 @@ namespace SmurfulationC.World
             Height      = height;
             _tiles      = new LocalTile[width, height];
             _vegetation = new VegetationSlot[width, height];
+            _structures = new StructureSlot[width, height];   // v0.5.19 Phase 5B
             _passable   = new bool[width * height];
             _regionId   = new ushort[width * height];
             _cellZoneId = new int[width * height];   // v0.5.0 Phase 5A — stockpile zone ownership grid
             // _tiles starts default-zeroed (Terrain=Water, Passable=false).
             // LocalMapGenerator will populate via Set() which routes through
             // the public mutators; the cache stays in sync from there.
+            EnsureDefaultAreas();   // v0.5.44 — "Home" area exists from creation
         }
 
         // ── DF-style region connectivity (v0.4.13) ────────────────────────────────
 
         // Flood-fills `_regionId` from every passable tile using the same
         // 8-connected + diagonal-cut-corner rule as `Pathfinder.FindPath`,
-        // so a region-id match is a true "smurfs can walk between these"
+        // so a region-id match is a true "shroomps can walk between these"
         // guarantee. Impassable tiles stay at 0. Region ids start at 1 and
         // are reused on every rebuild.
         private void RebuildRegions()
@@ -739,7 +1148,7 @@ namespace SmurfulationC.World
 
         // v0.4.14 — explicit tick boundaries for the sim thread.
         // `BehaviorSystem.Tick` calls `BeginTick()` once before iterating
-        // smurfs and `EndTick()` once after. Between them the region
+        // shroomps and `EndTick()` once after. Between them the region
         // graph is frozen against further rebuilds even if excavation
         // mutations dirty it. The full rebuild happens at most once per
         // tick regardless of how many tiles flipped. On a 240×150 map
@@ -776,12 +1185,12 @@ namespace SmurfulationC.World
             return a != 0 && a == GetRegion(x1, y1);
         }
 
-        // "Can the smurf at (sx, sy) actually reach a tile of work at
+        // "Can the shroomp at (sx, sy) actually reach a tile of work at
         // (tx, ty)?" Handles both passable work (gather, cut, chop on a
         // passable tile) and impassable work (excavate Boulder; chop
         // LargeMushroom whose cap is still up). For the impassable case
-        // any 8-neighbour passable tile in the same region as the smurf
-        // counts as reachable — the smurf can stand there and act on the
+        // any 8-neighbour passable tile in the same region as the shroomp
+        // counts as reachable — the shroomp can stand there and act on the
         // wall. Uses cached region data, so it's an O(1) test plus at most
         // 8 neighbour lookups.
         public bool IsWorkReachable(int sx, int sy, int tx, int ty)
@@ -789,16 +1198,16 @@ namespace SmurfulationC.World
             if ((uint)tx >= (uint)Width || (uint)ty >= (uint)Height) return false;
             EnsureRegions();
 
-            // v0.4.16 — robust wall-stuck fallback. Collect the smurf's
+            // v0.4.16 — robust wall-stuck fallback. Collect the shroomp's
             // *set* of candidate region ids: their own tile if passable,
             // otherwise every distinct non-zero region adjacent to them.
             // The previous version used a single `startRid` variable and
-            // an inner-only `break` in the fallback, so if the smurf had
+            // an inner-only `break` in the fallback, so if the shroomp had
             // SimPos-drifted into a wall whose 8-neighbours straddled
             // two caverns the last-checked neighbour's region won and
-            // the smurf wrongly blacklisted reachable targets in the
+            // the shroomp wrongly blacklisted reachable targets in the
             // other region. With the multi-region set, *any* neighbour
-            // region the smurf could step onto satisfies reachability.
+            // region the shroomp could step onto satisfies reachability.
             ushort r0 = 0, r1 = 0, r2 = 0, r3 = 0;
             int regionCount = 0;
 
@@ -841,7 +1250,7 @@ namespace SmurfulationC.World
                 return Matches(tRid);
             }
             // Impassable target → check 8 neighbours for a passable cell
-            // in any of the smurf's candidate regions.
+            // in any of the shroomp's candidate regions.
             for (int dy = -1; dy <= 1; dy++)
             for (int dx = -1; dx <= 1; dx++)
             {
@@ -888,7 +1297,7 @@ namespace SmurfulationC.World
         // inner expansion loop, which queries up to 24 cells per node
         // expansion (8 neighbours × cardinal + cut-corner). Going through
         // `IsPassable` per call adds a virtual-call + double bounds check
-        // on every probe; at 250 smurfs × frequent A* runs the overhead
+        // on every probe; at 250 shroomps × frequent A* runs the overhead
         // showed up as the task-reassignment spikes the player reported.
         // Callers must respect bounds themselves (`Width`/`Height` properties).
         // Stable across the LocalMap's lifetime — same array reference for
@@ -897,7 +1306,7 @@ namespace SmurfulationC.World
 
         // v0.3.43 — cheap "is there any work the player has designated
         // anywhere on the map?" probe used by BehaviorSystem to decide
-        // whether an idle-lingering smurf should re-evaluate. O(1) — just
+        // whether an idle-lingering shroomp should re-evaluate. O(1) — just
         // counts across the four designation HashSets.
         public bool HasAnyDesignation() =>
                _excavateDesignations.Count > 0
@@ -908,7 +1317,7 @@ namespace SmurfulationC.World
         // v0.5.9 — per-tile designation existence probes. Used by the
         // BehaviorSystem.IsTaskStillValid check (RimWorld JobDriver
         // FailOn-pattern equivalent) to bail out of a task whose
-        // designation was cleared by another smurf, the player's Remove
+        // designation was cleared by another shroomp, the player's Remove
         // tool, or task completion elsewhere. O(1) HashSet.Contains under
         // the designation lock for thread-safety with the painter +
         // ClearDesignationsAt mutators.
@@ -976,18 +1385,326 @@ namespace SmurfulationC.World
         public VegetationSlot GetVegetation(int x, int y)                       => _vegetation[x, y];
         public void           SetVegetation(int x, int y, VegetationSlot slot)  => _vegetation[x, y] = slot;
 
+        // v0.5.19 (Phase 5B) — structure accessors. Mirrors the vegetation
+        // pattern. SetStructure also recomputes the per-tile passability
+        // cache because StructureType.Wall makes a tile impassable even
+        // when the underlying terrain is Grass / Sand / etc. Other
+        // structure types (Floor / blueprints / frames) don't change
+        // passability — terrain stays the source of truth.
+        public StructureSlot GetStructure(int x, int y) => _structures[x, y];
+        public void SetStructure(int x, int y, StructureSlot slot)
+        {
+            if (!InBounds(x, y)) return;
+            // v0.5.84c — preserve floor underneath. Sam: "Furniture and its
+            // blueprints should also appear/be able to be built on top of
+            // flooring." Three cases of carry-through:
+            //   (a) Old slot was a built Floor + new slot is non-Floor →
+            //       capture (old material) into FloorBeneath.
+            //   (b) Old slot was a FloorPlanned + new slot is non-Floor →
+            //       blueprint over a planned floor; floor blueprint is gone
+            //       (player overrode). No carry — there's no built floor.
+            //   (c) Old slot was non-Floor with HasFloorBeneath set + new
+            //       slot is non-Floor → carry the FloorBeneath forward.
+            //   Else: no carry.
+            // New Floor placement always replaces (Floor slot is itself).
+            var old = _structures[x, y];
+            if (slot.Type != StructureType.Floor && slot.Type != StructureType.FloorPlanned)
+            {
+                if (old.Type == StructureType.Floor)
+                {
+                    slot.HasFloorBeneath = true;
+                    slot.FloorBeneath    = old.Material;
+                }
+                else if (old.HasFloorBeneath)
+                {
+                    slot.HasFloorBeneath = true;
+                    slot.FloorBeneath    = old.FloorBeneath;
+                }
+            }
+            _structures[x, y] = slot;
+            // Recompute passability from terrain + structure together.
+            // Wall blocks regardless of underlying terrain.
+            int idx = y * Width + x;
+            bool terrainPass = IsPassableTerrain(_tiles[x, y].Terrain);
+            bool structurePass = !slot.IsImpassable;
+            _passable[idx] = terrainPass && structurePass;
+            // v0.5.19 — maintain blueprint index for fast O(1) "find nearest
+            // blueprint" scans. Same pattern as the designation HashSets.
+            lock (_designationsLock)
+            {
+                if (slot.IsBlueprint) _blueprints.Add((x, y));
+                else                  _blueprints.Remove((x, y));
+            }
+            StructureChanged?.Invoke(x, y);
+            // v0.5.19 — region graph dirty when a wall lands or comes
+            // down (passability changed). Cheap flag flip; the next
+            // Pathfinder call will rebuild lazily.
+            if (slot.IsImpassable != !structurePass) _regionsDirty = true;
+            // v0.5.23 — flag rooms dirty so the next room query triggers
+            // a RoomDetector rebuild. Walls + doors + furniture all matter
+            // (furniture for beauty, walls for enclosure). Rebuild is
+            // cheap (~0.1ms at 80×50) but doing it eagerly per SetStructure
+            // call would still O(N) flood-fill per painted blueprint —
+            // dirty-flag is the right granularity.
+            _roomsDirty = true;
+        }
+        private bool _roomsDirty = true;
+        // Lazy rebuild trigger — call before reading rooms.
+        public void EnsureRooms()
+        {
+            if (!_roomsDirty) return;
+            _roomsDirty = false;
+            RoomDetector.Rebuild(this);
+        }
+        public event System.Action<int, int>? StructureChanged;
+
+        // ── v0.5.84s — Phase 5.5 Crafting Bills System ────────────────────
+        //
+        // Per-workbench bills queue. Keyed by tile coords (so the bill
+        // list moves cleanly through SetStructure / SnapshotStructures
+        // without touching the StructureSlot value-type struct).
+        // BillSystem reads this on every Crafter SelectTask to find a
+        // satisfiable bill on any reachable workbench.
+        private readonly Dictionary<(int X, int Y), List<Sporeholm.Simulation.Crafting.Bill>> _workbenchBills = new();
+
+        // UI signal — TilePropertiesPanel re-snapshots on this event so
+        // the Bills section updates immediately after add / remove.
+        public event System.Action<int, int>? WorkbenchBillsChanged;
+
+        public List<Sporeholm.Simulation.Crafting.Bill> GetWorkbenchBills(int x, int y)
+        {
+            if (_workbenchBills.TryGetValue((x, y), out var list)) return list;
+            return new List<Sporeholm.Simulation.Crafting.Bill>(0);   // empty (don't auto-create — caller decides)
+        }
+
+        public void AddWorkbenchBill(int x, int y, Sporeholm.Simulation.Crafting.Bill bill)
+        {
+            if (!_workbenchBills.TryGetValue((x, y), out var list))
+            {
+                list = new List<Sporeholm.Simulation.Crafting.Bill>(4);
+                _workbenchBills[(x, y)] = list;
+            }
+            list.Add(bill);
+            WorkbenchBillsChanged?.Invoke(x, y);
+        }
+
+        public void RemoveWorkbenchBill(int x, int y, int index)
+        {
+            if (!_workbenchBills.TryGetValue((x, y), out var list)) return;
+            if (index < 0 || index >= list.Count) return;
+            list.RemoveAt(index);
+            if (list.Count == 0) _workbenchBills.Remove((x, y));
+            WorkbenchBillsChanged?.Invoke(x, y);
+        }
+
+        public void ClearWorkbenchBills(int x, int y)
+        {
+            if (_workbenchBills.Remove((x, y)))
+                WorkbenchBillsChanged?.Invoke(x, y);
+        }
+
+        // Enumerate every workbench-tile + its bills. BillSystem calls
+        // this on Crafter SelectTask to find any unclaimed satisfiable
+        // bill. Yield-return so the caller can short-circuit.
+        public IEnumerable<((int X, int Y) Tile, List<Sporeholm.Simulation.Crafting.Bill> Bills)> AllWorkbenchBills()
+        {
+            foreach (var kv in _workbenchBills)
+                yield return (kv.Key, kv.Value);
+        }
+
+        // Save/load support — snapshot returns a flat list the SaveManager
+        // can serialise; apply re-attaches at load time. Called from
+        // SaveManager + WorldState.
+        public List<(int X, int Y, List<Sporeholm.Simulation.Crafting.Bill> Bills)> SnapshotWorkbenchBills()
+        {
+            var result = new List<(int, int, List<Sporeholm.Simulation.Crafting.Bill>)>(_workbenchBills.Count);
+            foreach (var kv in _workbenchBills)
+                result.Add((kv.Key.X, kv.Key.Y, new List<Sporeholm.Simulation.Crafting.Bill>(kv.Value)));
+            return result;
+        }
+
+        public void ApplyWorkbenchBills(int x, int y, List<Sporeholm.Simulation.Crafting.Bill> bills)
+        {
+            if (bills == null || bills.Count == 0) { _workbenchBills.Remove((x, y)); return; }
+            _workbenchBills[(x, y)] = new List<Sporeholm.Simulation.Crafting.Bill>(bills);
+            WorkbenchBillsChanged?.Invoke(x, y);
+        }
+        public bool HasStructure(int x, int y) => InBounds(x, y) && _structures[x, y].IsPresent;
+
+        // v0.5.23 (Phase 5F — Roadmap §5.4) — room registry + accessors.
+        // Maintained by RoomDetector.Rebuild after wall / door changes.
+        // Indexed by ushort Id; outdoor room is reserved Id 1.
+        private readonly Dictionary<ushort, Room> _rooms = new();
+        public Room? GetRoom(ushort id)
+        {
+            lock (_designationsLock) return _rooms.TryGetValue(id, out var r) ? r : null;
+        }
+        public bool HasRoom(ushort id) { lock (_designationsLock) return _rooms.ContainsKey(id); }
+        public void ClearRoomRegistry()
+        {
+            lock (_designationsLock) _rooms.Clear();
+        }
+        public void RegisterRoom(Room r)
+        {
+            lock (_designationsLock) _rooms[r.Id] = r;
+        }
+        // Per-tile RoomId stamp — modifies StructureSlot in place. Used by
+        // RoomDetector.Rebuild to flood-fill room ownership across passable
+        // tiles. NOT routed through SetStructure (no event fire, no
+        // passability recompute) — RoomId is metadata, not gameplay-affecting.
+        public void SetStructureRoomId(int x, int y, ushort roomId)
+        {
+            if (!InBounds(x, y)) return;
+            var slot = _structures[x, y];
+            slot.RoomId = roomId;
+            _structures[x, y] = slot;
+        }
+
+        // v0.5.21 (Phase 5D — rimport.md N2) — find nearest built Shelf
+        // to (fx, fy). Used by HaulSystem.PickDeliveryTileFor as the
+        // furniture-style storage destination (preferred over spawn-cluster
+        // fallback when no stockpile zone accepts the item). Walks every
+        // structure tile linearly — acceptable at typical scales (<100
+        // shelves on a normal map); a per-shelf HashSet can land later if
+        // shelf-heavy bases need it.
+        public (int X, int Y)? FindNearestShelf(int fx, int fy)
+        {
+            int best = int.MaxValue;
+            (int X, int Y)? winner = null;
+            for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width;  x++)
+            {
+                if (_structures[x, y].Type != StructureType.Shelf) continue;
+                int dx = x - fx, dy = y - fy;
+                int d = dx * dx + dy * dy;
+                if (d < best) { best = d; winner = (x, y); }
+            }
+            return winner;
+        }
+
+        // v0.5.35 — find nearest built Bed for the Sleep task. Same linear
+        // scan as FindNearestShelf; per-bed HashSet can come later if
+        // bed-heavy bases need it. Returns null when no bed exists, which
+        // makes Sleep fall back to floor-sleep at the shroomp's current pos.
+        public (int X, int Y)? FindNearestBed(int fx, int fy)
+        {
+            int best = int.MaxValue;
+            (int X, int Y)? winner = null;
+            for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width;  x++)
+            {
+                if (_structures[x, y].Type != StructureType.Bed) continue;
+                int dx = x - fx, dy = y - fy;
+                int d = dx * dx + dy * dy;
+                if (d < best) { best = d; winner = (x, y); }
+            }
+            return winner;
+        }
+
+        // v0.5.36 — find nearest built Joy furniture matching one of the
+        // requested types. Caller picks which category to seek (e.g.,
+        // MeditationShrine for Solitary, ShroomBoard for Cerebral).
+        public (int X, int Y)? FindNearestJoyFurniture(int fx, int fy,
+            StructureType[] kinds)
+        {
+            int best = int.MaxValue;
+            (int X, int Y)? winner = null;
+            for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width;  x++)
+            {
+                var t = _structures[x, y].Type;
+                bool match = false;
+                for (int i = 0; i < kinds.Length; i++)
+                    if (t == kinds[i]) { match = true; break; }
+                if (!match) continue;
+                int dx = x - fx, dy = y - fy;
+                int d = dx * dx + dy * dy;
+                if (d < best) { best = d; winner = (x, y); }
+            }
+            return winner;
+        }
+
+        // v0.5.37 — find nearest built Table for the Eat task. Shroomps prefer
+        // to eat adjacent to a table; if no table exists, the eat happens
+        // in-place (existing v0.3.43 behaviour) with the AteWithoutTable
+        // mood penalty.
+        public (int X, int Y)? FindNearestTable(int fx, int fy)
+        {
+            int best = int.MaxValue;
+            (int X, int Y)? winner = null;
+            for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width;  x++)
+            {
+                if (_structures[x, y].Type != StructureType.Table) continue;
+                int dx = x - fx, dy = y - fy;
+                int d = dx * dx + dy * dy;
+                if (d < best) { best = d; winner = (x, y); }
+            }
+            return winner;
+        }
+
+        // v0.5.19 (Phase 5B) — blueprint fast-lookup index. Maintained by
+        // SetStructure above; mirrored from `_excavateDesignations` etc.
+        // Used by FindNearestBlueprint to assign Build tasks without
+        // scanning the full grid per shroomp per tick.
+        private readonly HashSet<(int X, int Y)> _blueprints = new();
+        public bool HasAnyBlueprint() { lock (_designationsLock) return _blueprints.Count > 0; }
+
+        // Same shape as FindNearestExcavate (v0.4.13 reachability + v0.4.29
+        // approach-blocked + v0.5.7 cut-corner-aware). Returns the closest
+        // unclaimed-by-other blueprint tile reachable from `fromPixel`.
+        //
+        // v0.5.84t — `extraLayer` (optional) skips tiles also reserved by
+        // another shroomp on the given layer. BuildHaul callers pass
+        // LayerBuildHaul so two haulers can't simultaneously commit to the
+        // same blueprint (kills the v0.5.84 over-supply + conga-line bug
+        // where N haulers each fetched a full carry-load for the same
+        // 1-cost Floor blueprint, then N-1 abandoned at the blueprint with
+        // material still in inventory and looped forever trying to deliver).
+        public (int X, int Y)? FindNearestBlueprint(Vector2 fromPixel, Guid claimerId,
+            (int X, int Y, int TicksLeft)[]? avoid = null,
+            System.Func<int, int, bool>? approachBlocked = null,
+            string? extraLayer = null)
+        {
+            int cx = (int)(fromPixel.X / TileSize);
+            int cy = (int)(fromPixel.Y / TileSize);
+            int best = int.MaxValue;
+            (int X, int Y)? winner = null;
+            EnsureRegions();
+            lock (_designationsLock)
+            {
+                foreach (var pos in _blueprints)
+                {
+                    if (IsInAvoidList(avoid, pos.X, pos.Y)) continue;
+                    if (Reservations.IsTileReservedByOther(pos.X, pos.Y, Sporeholm.Simulation.ReservationManager.LayerWork, claimerId)) continue;
+                    if (extraLayer != null
+                        && Reservations.IsTileReservedByOther(pos.X, pos.Y, extraLayer, claimerId)) continue;
+                    // Blueprints are passable themselves (shroomp walks ONTO
+                    // the tile to construct), so reachability check uses
+                    // IsWorkReachable on the tile itself, not a neighbour.
+                    if (!IsWorkReachable(cx, cy, pos.X, pos.Y)) continue;
+                    if (approachBlocked != null && approachBlocked(pos.X, pos.Y)) continue;
+                    int dx = pos.X - cx, dy = pos.Y - cy;
+                    int d  = dx * dx + dy * dy;
+                    if (d < best) { best = d; winner = pos; }
+                }
+            }
+            return winner;
+        }
+
         // ── Passability helper ─────────────────────────────────────────────────────
 
         public static bool IsPassableTerrain(TerrainType t) =>
             t != TerrainType.Water && t != TerrainType.Boulder &&
-            t != TerrainType.DeadLog && t != TerrainType.LivingWood;
-        // Shallows IS passable — smurfs wade through (slower; Phase 5
+            t != TerrainType.DeadLog && t != TerrainType.LivingWood &&
+            t != TerrainType.Skeleton;   // v0.5.16 — partial buried skeleton, drops Bone
+        // Shallows IS passable — shroomps wade through (slower; Phase 5
         // movement-cost work will dial in the actual speed multiplier).
         // The default IsPassableTerrain treats Shallows as passable
         // because it's NOT in the impassable list above.
 
         // Finds a cluster of passable tiles closest to the map's geometric centre,
-        // used for initial smurf spawning so every level reliably has them visible
+        // used for initial shroomp spawning so every level reliably has them visible
         // and grouped together rather than scattered (or hidden inside rock walls).
         // BFS spreads outward from centre; the first N passable tiles encountered
         // form the cluster. Returns fewer than N only if the map is so dense that
@@ -1048,7 +1765,7 @@ namespace SmurfulationC.World
                 else
                 {
                     _excavateDesignations.Remove((x, y));
-                    _claims.Remove((x, y));
+                    Reservations.ForceReleaseTile(x, y, Sporeholm.Simulation.ReservationManager.LayerWork);
                 }
                 if (clearedGather) _gatherDesignations  .Remove((x, y));
                 if (clearedChop)   _chopWoodDesignations.Remove((x, y));
@@ -1085,7 +1802,7 @@ namespace SmurfulationC.World
                 else
                 {
                     _gatherDesignations.Remove((x, y));
-                    _claims.Remove((x, y));
+                    Reservations.ForceReleaseTile(x, y, Sporeholm.Simulation.ReservationManager.LayerWork);
                 }
                 if (clearedExcavate) _excavateDesignations.Remove((x, y));
                 if (clearedChop)     _chopWoodDesignations.Remove((x, y));
@@ -1124,7 +1841,7 @@ namespace SmurfulationC.World
                 else
                 {
                     _chopWoodDesignations.Remove((x, y));
-                    _claims.Remove((x, y));
+                    Reservations.ForceReleaseTile(x, y, Sporeholm.Simulation.ReservationManager.LayerWork);
                 }
                 if (clearedExcavate) _excavateDesignations.Remove((x, y));
                 if (clearedGather)   _gatherDesignations  .Remove((x, y));
@@ -1160,7 +1877,7 @@ namespace SmurfulationC.World
                 else
                 {
                     _cutDesignations.Remove((x, y));
-                    _claims.Remove((x, y));
+                    Reservations.ForceReleaseTile(x, y, Sporeholm.Simulation.ReservationManager.LayerWork);
                 }
                 if (clearedExcavate) _excavateDesignations.Remove((x, y));
                 if (clearedGather)   _gatherDesignations  .Remove((x, y));
@@ -1199,7 +1916,7 @@ namespace SmurfulationC.World
                 _gatherDesignations  .Remove((x, y));
                 _chopWoodDesignations.Remove((x, y));
                 _cutDesignations     .Remove((x, y));
-                _claims.Remove((x, y));
+                Reservations.ForceReleaseTile(x, y, Sporeholm.Simulation.ReservationManager.LayerWork);
             }
             DesignationChanged?.Invoke(x, y);
         }
@@ -1278,6 +1995,160 @@ namespace SmurfulationC.World
             }
         }
 
+        // v0.5.39 — cheap "does any stockpile zone exist?" probe used by
+        // HaulSystem.SelectHaulTarget to skip the whole map-walk when the
+        // player hasn't painted any stockpile. Pairs with HasAnyShelf
+        // (FindNearestShelf-shaped scan would be O(W*H); this is O(1)).
+        // RimWorld-parity: without a destination, haul work simply
+        // doesn't exist — pawns idle instead of trucking items back to
+        // an implicit spawn-cluster default.
+        public bool HasAnyStockpile()
+        {
+            lock (_designationsLock) return _stockpileZones.Count > 0;
+        }
+
+        // v0.5.44 — colony-shared NAMED areas (RimWorld parity). Replaces
+        // the v0.5.25 per-shroomp bitmap with a single set of named area
+        // masks that shroomps reference by name via `Shroomp.AssignedAreaName`.
+        // Multiple shroomps assigned to the same area share the same bitmap;
+        // painting once updates every assigned shroomp's effective work
+        // range. Defaults: "Home" exists from world creation as an empty
+        // area (no tiles painted yet). The player paints tiles into it
+        // via the Areas tab. A shroomp assigned to an area with no tiles
+        // painted will have nothing to do — idles. Same semantics as
+        // RimWorld's "this area has zero cells" edge case.
+        private readonly System.Collections.Generic.Dictionary<string, bool[]> _namedAreas = new();
+        private const string DefaultAreaName = "Home";
+
+        public System.Collections.Generic.IReadOnlyList<string> AreaNames()
+        {
+            lock (_designationsLock)
+            {
+                var list = new System.Collections.Generic.List<string>(_namedAreas.Keys);
+                list.Sort();
+                return list;
+            }
+        }
+
+        // Returns the bitmask for the named area; lazy-allocates empty on
+        // first read. Indexed `y * Width + x`. Returns the live array — do
+        // not mutate outside the dedicated paint API.
+        public bool[] GetAreaCells(string areaName)
+        {
+            lock (_designationsLock)
+            {
+                if (!_namedAreas.TryGetValue(areaName, out var cells))
+                {
+                    cells = new bool[Width * Height];
+                    _namedAreas[areaName] = cells;
+                }
+                return cells;
+            }
+        }
+
+        // Paints a rectangle of tiles into the named area's bitmap.
+        // `allow=true` adds the tiles; `allow=false` removes them.
+        // Lazy-allocates the area on first paint.
+        public void PaintAreaRect(string areaName, int xMin, int yMin, int xMax, int yMax, bool allow)
+        {
+            var cells = GetAreaCells(areaName);
+            int x0 = System.Math.Max(0, System.Math.Min(xMin, xMax));
+            int y0 = System.Math.Max(0, System.Math.Min(yMin, yMax));
+            int x1 = System.Math.Min(Width  - 1, System.Math.Max(xMin, xMax));
+            int y1 = System.Math.Min(Height - 1, System.Math.Max(yMin, yMax));
+            for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++)
+                cells[y * Width + x] = allow;
+        }
+
+        public bool AreaContains(string areaName, int x, int y)
+        {
+            if (!InBounds(x, y)) return false;
+            var cells = GetAreaCells(areaName);
+            return cells[y * Width + x];
+        }
+
+        // Returns true if any tile in the named area is painted.
+        public bool AreaHasAnyCells(string areaName)
+        {
+            var cells = GetAreaCells(areaName);
+            for (int i = 0; i < cells.Length; i++)
+                if (cells[i]) return true;
+            return false;
+        }
+
+        // Called once at LocalMap construction so "Home" always exists in
+        // the area-name list, even before the player paints anything.
+        // Idempotent.
+        public void EnsureDefaultAreas()
+        {
+            lock (_designationsLock)
+            {
+                if (!_namedAreas.ContainsKey(DefaultAreaName))
+                    _namedAreas[DefaultAreaName] = new bool[Width * Height];
+            }
+        }
+
+        // v0.5.45 — multi-area lifecycle. AreasPanel's Create / Rename /
+        // Delete buttons route through these. Returns false on invalid
+        // operations (name collision on create / rename, missing target
+        // on rename / delete) so the UI can flash an error rather than
+        // silently corrupting state.
+        public bool CreateArea(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            lock (_designationsLock)
+            {
+                if (_namedAreas.ContainsKey(name)) return false;
+                _namedAreas[name] = new bool[Width * Height];
+                return true;
+            }
+        }
+
+        // Rename preserves the cell bitmap (no painting lost) and any shroomp
+        // assignments that referenced the old name keep working only if
+        // the caller updates them — which `SimulationManager.RenameArea`
+        // does via a sweep over `_core.AllShroomps()`. The Home area itself
+        // is renameable too (RimWorld lets you rename Home).
+        public bool RenameArea(string oldName, string newName)
+        {
+            if (string.IsNullOrWhiteSpace(newName)) return false;
+            if (oldName == newName) return true;
+            lock (_designationsLock)
+            {
+                if (!_namedAreas.TryGetValue(oldName, out var cells)) return false;
+                if (_namedAreas.ContainsKey(newName)) return false;
+                _namedAreas.Remove(oldName);
+                _namedAreas[newName] = cells;
+                return true;
+            }
+        }
+
+        // Delete drops the bitmap entirely. SimulationManager wrapper
+        // un-assigns any shroomps that had this area set so they fall back
+        // to "Unrestricted" instead of pointing at a missing key.
+        public bool DeleteArea(string name)
+        {
+            lock (_designationsLock)
+            {
+                return _namedAreas.Remove(name);
+            }
+        }
+
+        // v0.5.39 — companion "any built shelf?" probe. Walks the
+        // structure grid linearly; cached result invalidated on
+        // SetStructure. For now a simple scan is fine — typical maps
+        // have ≤80×50 = 4000 tiles and the probe only runs on Haul
+        // selection (max ~10/sec across the colony).
+        public bool HasAnyShelf()
+        {
+            for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width;  x++)
+                if (_structures[x, y].Type == StructureType.Shelf)
+                    return true;
+            return false;
+        }
+
         // Snapshot of all zones, ordered by Priority descending (haul-target
         // selection walks this list). Caller must not mutate the returned
         // zones' cell lists or settings outside the lock.
@@ -1300,11 +2171,25 @@ namespace SmurfulationC.World
         // Cell capacity check is delegated to the same per-tile rules
         // `TryDropOnTile` uses internally — type-locked + 250-cap.
         public (int X, int Y)? FindStockpileCellFor(Item item, int fromTileX, int fromTileY)
+            => FindStockpileCellFor(item, fromTileX, fromTileY, System.Guid.Empty);
+
+        // v0.5.82 — RimWorld-parity overload: skip cells already reserved by
+        // another shroomp via the haul-destination layer. Mirrors the
+        // RimWorld JobDriver_HaulToCell pattern where Target B (the cell)
+        // is reserved at job-start so two haulers never converge on the
+        // same destination. The legacy zero-Guid overload above stays for
+        // any caller that doesn't have an asking-shroomp context (e.g.
+        // tests, drop-on-death). Pre-v0.5.82 the picker ignored claims —
+        // N haulers in the same tick all picked the same closest cell,
+        // jammed on convergence at the destination, and oscillated.
+        // Phase 1 of the v0.5.82 RimWorld-pathing adapt-pass.
+        public (int X, int Y)? FindStockpileCellFor(Item item, int fromTileX, int fromTileY, System.Guid askingId)
         {
             if (item == null) return null;
             var zones = SnapshotStockpileZones();
             (int X, int Y)? best = null;
             int bestPri = -1, bestD2 = int.MaxValue;
+            var mgr = Sporeholm.Simulation.ReservationManager.Active;
             foreach (var z in zones)
             {
                 if (!z.Accepts(item)) continue;
@@ -1313,6 +2198,13 @@ namespace SmurfulationC.World
                 foreach (var (cx, cy) in z.Cells)
                 {
                     if (!CellCanAcceptItem(cx, cy, item)) continue;
+                    // v0.5.82 — destination-cell claim check. Empty asker
+                    // bypasses the check (legacy callers / non-shroomp
+                    // sources can still find a cell).
+                    if (askingId != System.Guid.Empty && mgr != null
+                        && mgr.IsTileReservedByOther(cx, cy,
+                            Sporeholm.Simulation.ReservationManager.LayerHaul, askingId))
+                        continue;
                     int dx = cx - fromTileX, dy = cy - fromTileY;
                     int d2 = dx * dx + dy * dy;
                     if (zPri > bestPri || d2 < bestD2)
@@ -1344,9 +2236,9 @@ namespace SmurfulationC.World
         // ── Indexed designation lookups (v0.3.33 — replaces 51×51 scans) ───────────
 
         // Returns the unclaimed designation tile closest to `fromPixel` (or
-        // claimed by `claimerId` itself — letting a smurf re-find its own
+        // claimed by `claimerId` itself — letting a shroomp re-find its own
         // task target). v0.3.40 — `avoid` is now a small FIFO of recently-
-        // given-up tiles (with per-entry TTL) so a smurf that's bounced off
+        // given-up tiles (with per-entry TTL) so a shroomp that's bounced off
         // several unreachable targets in a row blacklists all of them
         // simultaneously. Entries with TicksLeft == 0 are inactive slots.
         public (int X, int Y)? FindNearestExcavate(Vector2 fromPixel, Guid claimerId,
@@ -1357,15 +2249,15 @@ namespace SmurfulationC.World
             int cy = (int)(fromPixel.Y / TileSize);
             int best = int.MaxValue;
             (int X, int Y)? winner = null;
-            // v0.4.13 — region-aware filter. Ensure the smurf can actually
+            // v0.4.13 — region-aware filter. Ensure the shroomp can actually
             // reach an excavate target before claiming it; the previous
             // version returned the closest-by-distance designation even
-            // when sealed behind rock, producing the "smurfs cluster at
+            // when sealed behind rock, producing the "shroomps cluster at
             // the edge of the dig site and jitter" bug.
             //
             // v0.4.29 — approachBlocked callback also lets the BehaviorSystem
             // veto targets whose only passable approaches are currently
-            // occupied by other smurfs. Without this, multiple smurfs
+            // occupied by other shroomps. Without this, multiple shroomps
             // cascade into a single-tile tunnel: each picks the nearest
             // open boulder, all converge on the one entry tile, and jam
             // the tunnel for everyone (no progress, no exit). The check
@@ -1377,7 +2269,7 @@ namespace SmurfulationC.World
                 foreach (var pos in _excavateDesignations)
                 {
                     if (IsInAvoidList(avoid, pos.X, pos.Y)) continue;
-                    if (_claims.TryGetValue(pos, out var owner) && owner != claimerId) continue;
+                    if (Reservations.IsTileReservedByOther(pos.X, pos.Y, Sporeholm.Simulation.ReservationManager.LayerWork, claimerId)) continue;
                     if (!IsWorkReachable(cx, cy, pos.X, pos.Y)) continue;
                     if (approachBlocked != null && approachBlocked(pos.X, pos.Y)) continue;
                     int dx = pos.X - cx, dy = pos.Y - cy;
@@ -1403,7 +2295,7 @@ namespace SmurfulationC.World
         }
 
         // Same for Gather. Also filters out tiles whose vegetation has gone
-        // depleted in the meantime (autonomous harvest by some other smurf,
+        // depleted in the meantime (autonomous harvest by some other shroomp,
         // regrowth race condition, etc.) so the caller can't be routed to a
         // dead designation.
         public (int X, int Y)? FindNearestGather(Vector2 fromPixel, Guid claimerId,
@@ -1420,20 +2312,20 @@ namespace SmurfulationC.World
                 foreach (var pos in _gatherDesignations)
                 {
                     if (IsInAvoidList(avoid, pos.X, pos.Y)) continue;
-                    if (_claims.TryGetValue(pos, out var owner) && owner != claimerId) continue;
+                    if (Reservations.IsTileReservedByOther(pos.X, pos.Y, Sporeholm.Simulation.ReservationManager.LayerWork, claimerId)) continue;
                     var veg = _vegetation[pos.X, pos.Y];
                     if (!veg.IsPresent || veg.IsDepleted) continue;
                     if (!IsWorkReachable(cx, cy, pos.X, pos.Y)) continue;
                     // v0.5.7 — approach-occupancy filter, ported from
                     // FindNearestExcavate (v0.4.29). Without this, Gather
-                    // smurfs claim berry bushes whose only passable
-                    // adjacent tiles are already occupied by other smurfs;
+                    // shroomps claim berry bushes whose only passable
+                    // adjacent tiles are already occupied by other shroomps;
                     // they walk over, jam against the blocked perimeter,
                     // jitter until StuckThreshold (~1.5 s), give up,
-                    // re-pick the SAME tile next idle cycle (per-smurf
-                    // AvoidTiles only blacklists for one smurf), repeat.
-                    // Sam: "Smurfs keep getting stuck on tasks like
-                    // excavating and gather when there are lots of smurfs
+                    // re-pick the SAME tile next idle cycle (per-shroomp
+                    // AvoidTiles only blacklists for one shroomp), repeat.
+                    // Sam: "Shroomps keep getting stuck on tasks like
+                    // excavating and gather when there are lots of shroomps
                     // on-screen." RimWorld parity — JobGiver_Work skips
                     // targets whose reservation surface is currently
                     // blocked.
@@ -1447,7 +2339,7 @@ namespace SmurfulationC.World
         }
 
         // v0.3.38 — same shape as FindNearestGather but iterates the
-        // Chop-Wood-designations set. Skips depleted vegetation so a smurf
+        // Chop-Wood-designations set. Skips depleted vegetation so a shroomp
         // can't be routed to a tile whose shroom is already cleared.
         public (int X, int Y)? FindNearestChopWood(Vector2 fromPixel, Guid claimerId,
             (int X, int Y, int TicksLeft)[]? avoid = null,
@@ -1463,7 +2355,7 @@ namespace SmurfulationC.World
                 foreach (var pos in _chopWoodDesignations)
                 {
                     if (IsInAvoidList(avoid, pos.X, pos.Y)) continue;
-                    if (_claims.TryGetValue(pos, out var owner) && owner != claimerId) continue;
+                    if (Reservations.IsTileReservedByOther(pos.X, pos.Y, Sporeholm.Simulation.ReservationManager.LayerWork, claimerId)) continue;
                     var veg = _vegetation[pos.X, pos.Y];
                     if (!veg.IsPresent || veg.IsDepleted) continue;
                     if (!IsWorkReachable(cx, cy, pos.X, pos.Y)) continue;
@@ -1494,7 +2386,7 @@ namespace SmurfulationC.World
                 foreach (var pos in _cutDesignations)
                 {
                     if (IsInAvoidList(avoid, pos.X, pos.Y)) continue;
-                    if (_claims.TryGetValue(pos, out var owner) && owner != claimerId) continue;
+                    if (Reservations.IsTileReservedByOther(pos.X, pos.Y, Sporeholm.Simulation.ReservationManager.LayerWork, claimerId)) continue;
                     var veg = _vegetation[pos.X, pos.Y];
                     if (!veg.IsPresent || veg.IsDepleted) continue;
                     if (!IsWorkReachable(cx, cy, pos.X, pos.Y)) continue;
@@ -1512,32 +2404,23 @@ namespace SmurfulationC.World
 
         // ── Designation claims (v0.3.33 — B.7 soft-claim) ──────────────────────────
         //
-        // A smurf calls TryClaim when it picks up a designation as its task
-        // target. The claim is stored in `_claims` keyed by tile coord, with
-        // the smurf's Id as the value. Other smurfs scanning for designations
-        // skip claimed tiles via the `claimerId != owner` filter above. On
-        // task completion or stuck-give-up the smurf calls ReleaseClaim. The
-        // claim is also auto-released whenever the underlying designation
-        // flag is cleared (in SetX / ClearDesignationsAt above).
+        // A shroomp calls TryClaim when it picks up a designation as its task
+        // target. v0.5.61 — claims are stored in the unified Reservations
+        // manager (LayerWork). Other shroomps scanning for designations skip
+        // claimed tiles via Reservations.IsTileReservedByOther in the
+        // FindNearest* loops. On task completion or stuck-give-up the shroomp
+        // calls ReleaseClaim. The claim is also auto-released whenever the
+        // underlying designation flag is cleared (in SetX / ClearDesignationsAt
+        // above, via Reservations.ForceReleaseTile).
 
+        // v0.5.61 — thin wrappers around ReservationManager (LayerWork).
+        // Public API surface preserved so call sites in BehaviorSystem and
+        // elsewhere keep working unchanged.
         public bool TryClaim(int x, int y, Guid claimerId)
-        {
-            lock (_designationsLock)
-            {
-                if (_claims.TryGetValue((x, y), out var owner)) return owner == claimerId;
-                _claims[(x, y)] = claimerId;
-                return true;
-            }
-        }
+            => Reservations.ReserveTile(x, y, Sporeholm.Simulation.ReservationManager.LayerWork, claimerId);
 
         public void ReleaseClaim(int x, int y, Guid claimerId)
-        {
-            lock (_designationsLock)
-            {
-                if (_claims.TryGetValue((x, y), out var owner) && owner == claimerId)
-                    _claims.Remove((x, y));
-            }
-        }
+            => Reservations.ReleaseTile(x, y, Sporeholm.Simulation.ReservationManager.LayerWork, claimerId);
 
         // Snapshot of every flagged tile for the visual overlay. Returned as
         // a freshly allocated list — callers shouldn't mutate it. v0.3.38
@@ -1567,7 +2450,7 @@ namespace SmurfulationC.World
         // yields Magic Essence — those are not Gather targets).
         public static bool IsFoodYielding(VegetationType v) => v switch
         {
-            VegetationType.SmurfberryBush  => true,
+            VegetationType.CapberryBush  => true,
             VegetationType.SmallMushroom   => true,
             VegetationType.HerbCluster     => true,
             VegetationType.SmallSandshroom => true,
@@ -1706,7 +2589,7 @@ namespace SmurfulationC.World
 
         // Phase 3 stub: harvests one unit from a vegetation slot.
         //
-        // Food plants (SmurfberryBush, SmallMushroom, etc.) dim to half opacity when
+        // Food plants (CapberryBush, SmallMushroom, etc.) dim to half opacity when
         // depleted, then silently regrow after their RegrowthDays timer.
         //
         // LargeMushroom: the tree disappears on full depletion (tile becomes passable,
@@ -1798,6 +2681,119 @@ namespace SmurfulationC.World
             foreach (var (key, val) in _vegMutations)
                 list.Add((key.X, key.Y, val.Yield, val.Regrow));
             return list;
+        }
+
+        // v0.5.73 — structure snapshot for save. Returns every non-empty
+        // StructureSlot keyed by (X, Y). RoomId is intentionally NOT included
+        // — RoomDetector rebuilds the room registry from walls / doors on
+        // first room query after load. Sam: "structures disappear on save"
+        // — pre-v0.5.73 nothing serialised the StructureSlot[,] array.
+        public IReadOnlyList<(int X, int Y, StructureSlot Slot)> SnapshotStructures()
+        {
+            var list = new List<(int X, int Y, StructureSlot)>(64);
+            for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width;  x++)
+            {
+                var slot = _structures[x, y];
+                if (slot.IsPresent) list.Add((x, y, slot));
+            }
+            return list;
+        }
+
+        // Restores one tile's structure slot at load time. Routes through
+        // SetStructure so the passability cache + blueprint index + region/
+        // room dirty flags all update the same as a normal placement.
+        public void ApplyStructureDelta(int x, int y, StructureSlot slot)
+        {
+            if (!InBounds(x, y)) return;
+            SetStructure(x, y, slot);
+        }
+
+        // v0.5.73 — stockpile-zone snapshot for save. Returns every active
+        // zone with its full cell list + priority + accepted-kinds set.
+        // Pre-v0.5.73 stockpile zones disappeared on save alongside structures.
+        // Named ...ForSave to avoid collision with the gameplay-side
+        // SnapshotStockpileZones() that returns List<StockpileZone>.
+        public IReadOnlyList<(int Id, string Name, StoragePriority Priority,
+            IReadOnlyList<ItemKind> AcceptedKinds, IReadOnlyList<(int X, int Y)> Cells)> SnapshotStockpileZonesForSave()
+        {
+            lock (_designationsLock)
+            {
+                var list = new List<(int, string, StoragePriority,
+                    IReadOnlyList<ItemKind>, IReadOnlyList<(int, int)>)>(_stockpileZones.Count);
+                foreach (var (id, zone) in _stockpileZones)
+                {
+                    var kinds = new List<ItemKind>(zone.AcceptedKinds);
+                    var cells = new List<(int, int)>(zone.Cells);
+                    list.Add((id, zone.Name, zone.Priority, kinds, cells));
+                }
+                return list;
+            }
+        }
+
+        // Re-installs a saved stockpile zone wholesale. Preserves the
+        // original Id so any saved per-zone settings round-trip. The zone
+        // is created fresh + cells painted via the internal grid so
+        // _cellZoneId stays in lock-step. Called from WorldState.LoadFromSave.
+        public void ApplyStockpileZone(int id, string name, StoragePriority priority,
+            IReadOnlyList<ItemKind> acceptedKinds, IReadOnlyList<(int X, int Y)> cells)
+        {
+            if (id <= 0 || cells == null || cells.Count == 0) return;
+            lock (_designationsLock)
+            {
+                var zone = new StockpileZone(id, name) { Priority = priority };
+                foreach (var k in acceptedKinds) zone.AcceptedKinds.Add(k);
+                foreach (var (cx, cy) in cells)
+                {
+                    if (!InBounds(cx, cy)) continue;
+                    int idx = cy * Width + cx;
+                    if (_cellZoneId[idx] != 0) continue;   // already owned
+                    zone.Cells.Add((cx, cy));
+                    _cellZoneId[idx] = id;
+                }
+                if (zone.Cells.Count == 0) return;
+                _stockpileZones[id] = zone;
+                if (id >= _nextStockpileId) _nextStockpileId = id + 1;
+            }
+            // Fire one event per cell so the overlay redraws cleanly.
+            foreach (var (cx, cy) in cells) StockpileChanged?.Invoke(cx, cy);
+        }
+
+        // v0.5.73 — named-area snapshot for save. Returns each area's name
+        // + a flattened (x, y) cell list (only painted tiles). Default
+        // "Home" area always exists (per EnsureDefaultAreas); empty areas
+        // are still emitted so the player's named-but-empty areas survive.
+        public IReadOnlyList<(string Name, IReadOnlyList<(int X, int Y)> Cells)> SnapshotNamedAreas()
+        {
+            lock (_designationsLock)
+            {
+                var list = new List<(string, IReadOnlyList<(int, int)>)>(_namedAreas.Count);
+                foreach (var (name, mask) in _namedAreas)
+                {
+                    var cells = new List<(int, int)>();
+                    for (int y = 0; y < Height; y++)
+                    for (int x = 0; x < Width;  x++)
+                        if (mask[y * Width + x]) cells.Add((x, y));
+                    list.Add((name, cells));
+                }
+                return list;
+            }
+        }
+
+        // Re-installs a saved named area + cells. Creates the area key (so
+        // even empty areas re-appear in the picker) then sets each saved
+        // cell's bit. Idempotent on the area key — overwrites any default-
+        // allocated mask.
+        public void ApplyNamedArea(string areaName, IReadOnlyList<(int X, int Y)> cells)
+        {
+            if (string.IsNullOrEmpty(areaName)) return;
+            var mask = GetAreaCells(areaName);   // allocates if missing
+            if (cells == null) return;
+            foreach (var (cx, cy) in cells)
+            {
+                if (!InBounds(cx, cy)) continue;
+                mask[cy * Width + cx] = true;
+            }
         }
     }
 }

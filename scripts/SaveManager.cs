@@ -3,9 +3,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
-using SmurfulationC.Simulation;
-using SmurfulationC.Simulation.Items;
-using SmurfulationC.World;
+using Sporeholm.Simulation;
+using Sporeholm.Simulation.Items;
+using Sporeholm.World;
 
 // Autoload singleton. Named save slots stored in user://saves/{name}.json.
 // The reserved slot "exit-save" is created automatically on Exit to Main Menu.
@@ -14,22 +14,21 @@ public partial class SaveManager : Node
 	public static SaveManager Instance { get; private set; } = null!;
 
 	private const string SaveDir     = "user://saves";
-	private const string LegacyPath  = "user://smurfulation_save.json";
 
 	public bool        HasSave       { get; private set; }
 	public ColonySave? CurrentSave   { get; private set; }
 	public string?     CurrentSlot   { get; private set; }
 
 	// v0.3.47 — wired by GameController.StartSim so SaveToSlot can read
-	// the live colony inventory + per-smurf work priorities at save
+	// the live colony inventory + per-shroomp work priorities at save
 	// time. Null until the in-game scene starts.
-	private SmurfulationC.SimulationManager? _sim;
-	public void RegisterSimulation(SmurfulationC.SimulationManager sim) => _sim = sim;
+	private Sporeholm.SimulationManager? _sim;
+	public void RegisterSimulation(Sporeholm.SimulationManager sim) => _sim = sim;
 	public void UnregisterSimulation() => _sim = null;
 
 	// ── Data transfer objects ──────────────────────────────────────────────────
 
-	public record SmurfSaveData(
+	public record ShroompSaveData(
 		string Name, int Age, string Sex, string Role,
 		float Nutrition, float Rest, float Social, float MagicResonance, float Safety)
 	{
@@ -45,7 +44,7 @@ public partial class SaveManager : Node
 		public List<string>?              Personality { get; init; } = null;
 		public Dictionary<string, float>? BodyParts   { get; init; } = null;
 
-		// v0.4.7 (bugreport B-1) — per-smurf state added since v0.3.40 now
+		// v0.4.7 (bugreport B-1) — per-shroomp state added since v0.3.40 now
 		// round-trips through saves. All fields are nullable so older
 		// saves (pre-equipment / pre-handedness / pre-preferences / pre-
 		// thoughts) still load and the missing fields fall back to the
@@ -55,11 +54,23 @@ public partial class SaveManager : Node
 		public ItemSaveData?                   CarriedItem    { get; init; } = null;
 		public PreferencesSaveData?            Preferences    { get; init; } = null;
 		public List<ThoughtSaveData>?          Thoughts       { get; init; } = null;
+		// v0.5.73 — full per-shroomp inventory list (Shroomp.Inventory).
+		// Pre-v0.5.73 only the topmost stack (s.CarriedItem getter returns
+		// Inventory[^1]) was serialised, so a hauler carrying multiple
+		// stacks lost everything but the last on save. Loaders prefer
+		// Inventory when present; fall back to CarriedItem for old saves.
+		public List<ItemSaveData>?             Inventory      { get; init; } = null;
+		// v0.5.81 — Phase 7 bleeding state. BloodLoss accumulates over
+		// time when wounds are active and decays when none are; saving
+		// it preserves "bandaged but still anaemic" state across reload.
+		// BleedRate is derived from body-part conditions every sim tick
+		// (Shroomp.RecomputeBleedRate) so doesn't need persisting.
+		public float                           BloodLoss      { get; init; } = 0f;
 	}
 
 	public record ColonySave(
 		int Year, string Season, int Day,
-		List<SmurfSaveData> Smurfs)
+		List<ShroompSaveData> Shroomps)
 	{
 		// World fields — nullable/default so old saves still deserialise.
 		public int    WorldSeed      { get; init; } = 0;
@@ -76,6 +87,10 @@ public partial class SaveManager : Node
 		public float  RainBias       { get; init; } = 0f;
 		public float  TempBias       { get; init; } = 0f;
 		public float  MagicBias      { get; init; } = 0f;
+		// v0.5.84t — worldgen resource scarcity. Default 1.0 = Abundant (the
+		// pre-v0.5.84t behaviour, so saves predating the slider deserialise
+		// to the same generation density they shipped with).
+		public float  ResourceScarcity { get; init; } = 1.0f;
 
 		// Phase 2.5 delta lists — null when no mutations exist (omitted from JSON).
 		// On load: regenerate map from seed, then apply these deltas to restore runtime state.
@@ -95,8 +110,8 @@ public partial class SaveManager : Node
 		// for saves predating Phase 4 sub-A.
 		public List<ItemSaveData>? ColonyInventory { get; init; } = null;
 
-		// v0.3.47 — per-smurf work priorities (RimWorld Jobs tab). Outer
-		// dict keyed by smurf Name; inner dict keyed by category string
+		// v0.3.47 — per-shroomp work priorities (RimWorld Jobs tab). Outer
+		// dict keyed by shroomp Name; inner dict keyed by category string
 		// (Doctor / Mine / Cook / Haul / etc.); values are 0 (off) or
 		// 1-4 (priority). Null for saves predating the Jobs tab.
 		public Dictionary<string, Dictionary<string, byte>>? WorkPriorities { get; init; } = null;
@@ -111,7 +126,83 @@ public partial class SaveManager : Node
 		// the generator would re-produce. Null for saves predating the
 		// stone variation system (pre-v0.4.2).
 		public List<StoneTileDelta>? StoneTileDeltas { get; init; } = null;
+
+		// v0.5.73 — built structures + in-progress blueprints (walls,
+		// floors, doors, shelves, workbenches, hearths, beds, joy
+		// furniture, tables). Sam: "Ensure all structures, items,
+		// inventories, etc. are saved/loaded. Structures disappear on
+		// save." Pre-v0.5.73 nothing serialised StructureSlot[,].
+		public List<StructureDelta>? StructureDeltas { get; init; } = null;
+
+		// v0.5.73 — stockpile zones (id, name, priority, accepted kinds,
+		// cell list per zone). Pre-v0.5.73 zones also disappeared on save.
+		public List<StockpileZoneSave>? StockpileZones { get; init; } = null;
+
+		// v0.5.73 — colony-shared named areas ("Home" + any custom ones)
+		// with their painted cell lists. Pre-v0.5.73 areas reset to a
+		// fresh empty "Home" on load.
+		public List<NamedAreaSave>? NamedAreas { get; init; } = null;
+
+		// v0.5.84s — per-workbench bills (Phase 5.5 Crafting Bills System).
+		// Each entry pairs a workbench tile with its list of queued bills.
+		// Saves predating v0.5.84s deserialise to null — workbenches load
+		// with no bills (auto-cook fallback remains active).
+		public List<WorkbenchBillsSave>? WorkbenchBills { get; init; } = null;
 	}
+
+	// v0.5.73 — one tile's structure snapshot. RoomId is NOT saved (the
+	// RoomDetector rebuilds the room registry on first room query after
+	// load). Type / Material / Quality serialise as enum names so the
+	// save stays readable even if enum values are reordered.
+	public record StructureDelta(
+		int    X,
+		int    Y,
+		string Type,
+		string Material,
+		ushort BuildProgress,
+		byte   MaterialsDelivered,
+		string Quality,
+		// v0.5.84c — floor underneath. Nullable for old-save compat: a
+		// save predating v0.5.84 deserialises with FloorBeneath = null,
+		// which ApplyStructureDelta treats as "no floor beneath" (the
+		// existing v0.5.73 behaviour).
+		string? FloorBeneath = null,
+		bool    HasFloorBeneath = false);
+
+	// v0.5.84s — bills for one workbench tile (Phase 5.5).
+	public record WorkbenchBillsSave(
+		int       X,
+		int       Y,
+		List<BillSave> Bills);
+
+	public record BillSave(
+		string RecipeId,
+		byte   Mode,             // BillRepeatMode enum value
+		int    RepeatCount,
+		int    TargetCount,
+		int    Suspended,
+		int    ProgressTicks,
+		int    RepeatsRemaining);
+
+	// v0.5.73 — one stockpile zone's full state.
+	public record StockpileZoneSave(
+		int           Id,
+		string        Name,
+		string        Priority,             // StoragePriority enum name
+		List<string>  AcceptedKinds,        // ItemKind enum names; empty = accept all
+		List<TileXY>  Cells);
+
+	// v0.5.73 — one named area + its painted cells. Cells-list (not raw
+	// bitmap) keeps the JSON compact — typical area is a handful of cells,
+	// not the full 80×50 = 4000-bit mask.
+	public record NamedAreaSave(
+		string       Name,
+		List<TileXY> Cells);
+
+	// v0.5.73 — compact tile coordinate used by StockpileZoneSave +
+	// NamedAreaSave. (int X, int Y) tuples don't round-trip cleanly
+	// through System.Text.Json without a custom converter.
+	public record TileXY(int X, int Y);
 
 	// v0.4.7 (bugreport B-7) — one Boulder tile whose stone subtype
 	// differs from what the deterministic generator would produce. On
@@ -125,7 +216,7 @@ public partial class SaveManager : Node
 	// dropped + inventory all share the same Item serialisation.
 	public record EquipmentSaveData(string Slot, ItemSaveData Item);
 
-	// v0.4.7 (bugreport B-1) — per-smurf preferences. Mirrors the
+	// v0.4.7 (bugreport B-1) — per-shroomp preferences. Mirrors the
 	// `Preferences` class with all six list fields. Null on legacy saves
 	// → loader rolls a fresh preference set as it did pre-v0.4.7.
 	public record PreferencesSaveData
@@ -134,11 +225,11 @@ public partial class SaveManager : Node
 		public List<string> DislikedItems      { get; init; } = new();
 		public List<string> LikedActivities    { get; init; } = new();
 		public List<string> DislikedActivities { get; init; } = new();
-		public List<string> LikedSmurfs        { get; init; } = new();
-		public List<string> DislikedSmurfs     { get; init; } = new();
+		public List<string> LikedShroomps        { get; init; } = new();
+		public List<string> DislikedShroomps     { get; init; } = new();
 	}
 
-	// v0.4.7 (bugreport B-1) — per-smurf thought ring slot. Only active
+	// v0.4.7 (bugreport B-1) — per-shroomp thought ring slot. Only active
 	// thoughts (TicksRemaining > 0) are written; the loader rebuilds the
 	// 8-slot ring on restore. MoodOffset is saved so a registry change
 	// can't silently re-tune a in-flight thought's contribution.
@@ -170,7 +261,7 @@ public partial class SaveManager : Node
 	}
 
 	// v0.4.35 — biographical sidecar for Corpse-kind items. Saves the
-	// dead smurf's static attributes so the unit-card / hover obituary
+	// dead shroomp's static attributes so the unit-card / hover obituary
 	// survives reload. `DeathAgeTicks` is stored relative to the save's
 	// current tick (so a body that died 2 days ago still reads "2 days
 	// ago" after a reload at any later tick — same convention as
@@ -210,7 +301,6 @@ public partial class SaveManager : Node
 	{
 		Instance = this;
 		EnsureSaveDir();
-		MigrateLegacySave();
 		RefreshHasSave();
 	}
 
@@ -238,15 +328,15 @@ public partial class SaveManager : Node
 		SimulationSnapshot snapshot,
 		Dictionary<string, (Godot.Vector2 Pos, Godot.Vector2 Target)>? positions = null)
 	{
-		// v0.3.47 (Phase 4 sub-B) — colony inventory snapshot + per-smurf
+		// v0.3.47 (Phase 4 sub-B) — colony inventory snapshot + per-shroomp
 		// work priorities. Both come from the registered SimulationManager;
 		// in headless test runs (no SimulationManager) these stay null.
 		List<ItemSaveData>? invSave = null;
 		Dictionary<string, Dictionary<string, byte>>? prios = null;
-		// v0.4.7 (bugreport B-1) — per-smurf extras + dropped-items
+		// v0.4.7 (bugreport B-1) — per-shroomp extras + dropped-items
 		// snapshot. Populated from the registered SimulationManager
 		// alongside the inventory + work priorities.
-		Dictionary<string, SmurfulationC.SimulationManager.SmurfSaveExtras>? extras = null;
+		Dictionary<string, Sporeholm.SimulationManager.ShroompSaveExtras>? extras = null;
 		List<DroppedItemSaveData>? droppedItems = null;
 		long globalTick = 0;
 		if (_sim != null)
@@ -269,11 +359,11 @@ public partial class SaveManager : Node
 			}
 			var all = _sim.GetWorkPrioritiesSnapshot();
 			if (all != null && all.Count > 0) prios = all;
-			extras = _sim.GetSmurfSaveExtras(globalTick);
+			extras = _sim.GetShroompSaveExtras(globalTick);
 			droppedItems = _sim.GetDroppedItemsSnapshot(globalTick);
 		}
 
-		var smurfs = BuildSmurfList(snapshot, positions, extras);
+		var shroomps = BuildShroompList(snapshot, positions, extras);
 
 		// Collect terrain and vegetation deltas from the live local map.
 		var localMap = WorldState.Instance?.CurrentLocalMap;
@@ -297,11 +387,53 @@ public partial class SaveManager : Node
 			.Select(t => new StoneTileDelta(t.X, t.Y, t.MaterialSubType))
 			.ToList();
 
+		// v0.5.73 — structures (walls / floors / doors / blueprints / etc.),
+		// stockpile zones, and named areas. Root cause of Sam's "structures
+		// disappear on save" was StructureSlot[,] never being serialised.
+		var structureDeltas = localMap?.SnapshotStructures()
+			.Select(s => new StructureDelta(
+				s.X, s.Y,
+				s.Slot.Type.ToString(),
+				s.Slot.Material.ToString(),
+				s.Slot.BuildProgress,
+				s.Slot.MaterialsDelivered,
+				s.Slot.Quality.ToString(),
+				FloorBeneath:    s.Slot.HasFloorBeneath ? s.Slot.FloorBeneath.ToString() : null,
+				HasFloorBeneath: s.Slot.HasFloorBeneath))
+			.ToList();
+
+		var stockpileZones = localMap?.SnapshotStockpileZonesForSave()
+			.Select(z => new StockpileZoneSave(
+				z.Id, z.Name, z.Priority.ToString(),
+				z.AcceptedKinds.Select(k => k.ToString()).ToList(),
+				z.Cells.Select(c => new TileXY(c.X, c.Y)).ToList()))
+			.ToList();
+
+		var namedAreas = localMap?.SnapshotNamedAreas()
+			.Select(a => new NamedAreaSave(
+				a.Name,
+				a.Cells.Select(c => new TileXY(c.X, c.Y)).ToList()))
+			.ToList();
+
+		// v0.5.84s — workbench bills (Phase 5.5).
+		var workbenchBills = localMap?.SnapshotWorkbenchBills()
+			.Select(w => new WorkbenchBillsSave(
+				w.X, w.Y,
+				w.Bills.Select(b => new BillSave(
+					b.RecipeId,
+					(byte)b.Mode,
+					b.RepeatCount,
+					b.TargetCount,
+					b.Suspended,
+					b.ProgressTicks,
+					b.RepeatsRemaining)).ToList()))
+			.ToList();
+
 		var save = new ColonySave(
 			snapshot.Date.Year,
 			snapshot.Date.Season.ToString(),
 			snapshot.Date.Day,
-			smurfs)
+			shroomps)
 		{
 			WorldSeed        = WorldState.Instance?.WorldSeed      ?? 0,
 			WorldTileX       = WorldState.Instance?.SelectedTileX  ?? WorldMapGenerator.DefaultGridSize / 2,
@@ -315,6 +447,7 @@ public partial class SaveManager : Node
 			RainBias         = WorldState.Instance?.RainBias       ?? 0f,
 			TempBias         = WorldState.Instance?.TempBias       ?? 0f,
 			MagicBias        = WorldState.Instance?.MagicBias      ?? 0f,
+			ResourceScarcity = WorldState.Instance?.ResourceScarcity ?? 1.0f,
 			TerrainDeltas     = (tDeltas?.Count ?? 0) > 0 ? tDeltas : null,
 			VegetationDeltas  = (vDeltas?.Count ?? 0) > 0 ? vDeltas : null,
 			DesignationDeltas = (dDeltas?.Count ?? 0) > 0 ? dDeltas : null,
@@ -322,6 +455,10 @@ public partial class SaveManager : Node
 			WorkPriorities    = prios,
 			DroppedItems      = droppedItems,
 			StoneTileDeltas   = (stoneDeltas?.Count ?? 0) > 0 ? stoneDeltas : null,
+			StructureDeltas   = (structureDeltas?.Count ?? 0) > 0 ? structureDeltas : null,
+			StockpileZones    = (stockpileZones?.Count  ?? 0) > 0 ? stockpileZones  : null,
+			NamedAreas        = (namedAreas?.Count      ?? 0) > 0 ? namedAreas      : null,
+			WorkbenchBills    = (workbenchBills?.Count  ?? 0) > 0 ? workbenchBills  : null,
 		};
 
 		string path = SlotPath(slotName);
@@ -334,7 +471,7 @@ public partial class SaveManager : Node
 			CurrentSave  = save;
 			CurrentSlot  = slotName;
 			HasSave      = true;
-			GD.Print($"[Save] Saved '{slotName}' — {smurfs.Count} smurfs at {save.Season} Y{save.Year}.");
+			GD.Print($"[Save] Saved '{slotName}' — {shroomps.Count} shroomps at {save.Season} Y{save.Year}.");
 		}
 		catch (Exception ex)
 		{
@@ -359,7 +496,7 @@ public partial class SaveManager : Node
 			if (CurrentSave == null) return false;
 			CurrentSlot = slotName;
 			HasSave     = true;
-			GD.Print($"[Save] Loaded '{slotName}' — Y{CurrentSave.Year}, {CurrentSave.Smurfs.Count} smurfs.");
+			GD.Print($"[Save] Loaded '{slotName}' — Y{CurrentSave.Year}, {CurrentSave.Shroomps.Count} shroomps.");
 			return true;
 		}
 		catch (Exception ex)
@@ -470,15 +607,6 @@ public partial class SaveManager : Node
 			DirAccess.MakeDirAbsolute(ProjectSettings.GlobalizePath(SaveDir));
 	}
 
-	private void MigrateLegacySave()
-	{
-		if (!FileAccess.FileExists(LegacyPath)) return;
-		string src = ProjectSettings.GlobalizePath(LegacyPath);
-		string dst = ProjectSettings.GlobalizePath($"{SaveDir}/autosave.json");
-		DirAccess.RenameAbsolute(src, dst);
-		GD.Print("[Save] Migrated legacy save → autosave slot.");
-	}
-
 	private void RefreshHasSave()
 	{
 		using var dir = DirAccess.Open(SaveDir);
@@ -502,7 +630,7 @@ public partial class SaveManager : Node
 			var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 			var save = JsonSerializer.Deserialize<ColonySave>(file.GetAsText(), opts);
 			if (save != null)
-				return $"{save.Season} Y{save.Year} · {save.Smurfs.Count} smurfs";
+				return $"{save.Season} Y{save.Year} · {save.Shroomps.Count} shroomps";
 		}
 		catch { }
 		return slot;
@@ -517,22 +645,22 @@ public partial class SaveManager : Node
 		catch { return 0L; }
 	}
 
-	private static List<SmurfSaveData> BuildSmurfList(
+	private static List<ShroompSaveData> BuildShroompList(
 		SimulationSnapshot snapshot,
 		Dictionary<string, (Godot.Vector2 Pos, Godot.Vector2 Target)>? positions,
-		Dictionary<string, SmurfulationC.SimulationManager.SmurfSaveExtras>? extras = null)
+		Dictionary<string, Sporeholm.SimulationManager.ShroompSaveExtras>? extras = null)
 	{
-		var smurfs = new List<SmurfSaveData>();
-		foreach (var s in snapshot.Smurfs)
+		var shroomps = new List<ShroompSaveData>();
+		foreach (var s in snapshot.Shroomps)
 		{
 			if (!s.IsAlive) continue;
 			(Godot.Vector2 Pos, Godot.Vector2 Target) p = default;
 			positions?.TryGetValue(s.Name, out p);
 
-			SmurfulationC.SimulationManager.SmurfSaveExtras? ex = null;
+			Sporeholm.SimulationManager.ShroompSaveExtras? ex = null;
 			extras?.TryGetValue(s.Name, out ex);
 
-			smurfs.Add(new SmurfSaveData(
+			shroomps.Add(new ShroompSaveData(
 				s.Name, s.AgeInYears, s.Sex.ToString(), s.Role,
 				s.Nutrition, s.Rest, s.Social, s.MagicResonance, s.Safety)
 			{
@@ -543,16 +671,18 @@ public partial class SaveManager : Node
 				Skills      = new Dictionary<string, int>(s.Skills),
 				Personality = new List<string>(s.Personality),
 				BodyParts   = new Dictionary<string, float>(s.BodyParts),
-				// v0.4.7 (bugreport B-1) — per-smurf state added since
+				// v0.4.7 (bugreport B-1) — per-shroomp state added since
 				// v0.3.40. Null when no extras passed (e.g. headless
 				// test runs) so older save flows still work.
 				Handedness  = ex?.Handedness,
 				Equipment   = ex?.Equipment,
 				CarriedItem = ex?.CarriedItem,
+				Inventory   = ex?.Inventory,           // v0.5.73 — full inventory list
 				Preferences = ex?.Preferences,
 				Thoughts    = ex?.Thoughts,
+				BloodLoss   = s.BloodLossPct,          // v0.5.81 — bleeding reservoir
 			});
 		}
-		return smurfs;
+		return shroomps;
 	}
 }

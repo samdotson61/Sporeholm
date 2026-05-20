@@ -1,7 +1,7 @@
 using System.Collections.Generic;
-using SmurfulationC.Simulation.Items;
+using Sporeholm.Simulation.Items;
 
-namespace SmurfulationC.World
+namespace Sporeholm.World
 {
     // v0.5.0 (Phase 5A — rimport N1) — RimWorld-style storage priority. Six
     // levels in RimWorld's enum, but Phase 5A ships with four to keep the

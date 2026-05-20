@@ -1,4 +1,4 @@
-namespace SmurfulationC.World
+namespace Sporeholm.World
 {
     public struct LocalTile
     {
@@ -21,6 +21,21 @@ namespace SmurfulationC.World
         // Harvests + clears the vegetation slot. No resource drop (intended
         // for clearing playfield space, not gathering).
         public bool DesignatedForCut;
+
+        // v0.5.84t — per-tile roof flag (RimWorld parity: RoofGrid.cs stores
+        // a parallel per-tile RoofDef grid). True for any tile inside a
+        // solid mass at worldgen: Boulder / DeadLog / LivingWood / Skeleton
+        // terrain, plus any passable cave-interior tile (≥3 impassable
+        // cardinal neighbours) carved by LocalMapGenerator.CarveUniversalCaves.
+        // PERSISTS through mining — when a Boulder is excavated, the
+        // resulting passable Mud tile keeps IsRoofed=true, producing
+        // RimWorld's "you dug a cave with a natural roof" effect.
+        // Constructed roofs (player-built ceilings) deferred to v0.6+.
+        // Read by ItemDeteriorationSystem.ResolveInsulationMul +
+        // future weather/rain dodge logic. Renderer applies a subtle
+        // dark tint multiplier on roofed tiles so players can see the
+        // ceiling at a glance.
+        public bool IsRoofed;
 
         // Populated in later phases:
         public int ResourceId;    // Phase 4

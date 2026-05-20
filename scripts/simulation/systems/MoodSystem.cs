@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
-using SmurfulationC.Simulation;
+using Sporeholm.Simulation;
 
-namespace SmurfulationC.Simulation.Systems
+namespace Sporeholm.Simulation.Systems
 {
-    // Recalculates each smurf's mood score from need satisfaction each tick.
-    // Mood score drives behavioral state; see Smurf.MoodState for thresholds.
+    // Recalculates each shroomp's mood score from need satisfaction each tick.
+    // Mood score drives behavioral state; see Shroomp.MoodState for thresholds.
     public static class MoodSystem
     {
         // v0.3.36 (B.14) — change threshold below which the mood recompute is
@@ -18,9 +18,9 @@ namespace SmurfulationC.Simulation.Systems
         // skip is correct.
         private const float MoodEpsilon = 0.1f;
 
-        public static void Tick(IReadOnlyList<Smurf> smurfs)
+        public static void Tick(IReadOnlyList<Shroomp> shroomps)
         {
-            foreach (var s in smurfs)
+            foreach (var s in shroomps)
             {
                 if (!s.IsAlive) continue;
 
@@ -52,7 +52,7 @@ namespace SmurfulationC.Simulation.Systems
             }
         }
 
-        private static bool NeedsChangedEnough(Smurf s)
+        private static bool NeedsChangedEnough(Shroomp s)
         {
             // NaN cache means "never computed" — force the first pass.
             if (float.IsNaN(s.MoodCacheNutrition)) return true;
@@ -70,7 +70,7 @@ namespace SmurfulationC.Simulation.Systems
         // Nutrition 0.25→0.22, Rest 0.20→0.18, Social 0.20→0.18, Magic 0.20→0.17,
         // Safety 0.15→0.15). Mood now reflects whether the colony works
         // without joy as well as whether they're physically fed/rested.
-        public static float NeedsContribution(Smurf s) =>
+        public static float NeedsContribution(Shroomp s) =>
             Math.Clamp(
                 s.Nutrition      * 0.22f +
                 s.Rest           * 0.18f +
@@ -81,7 +81,7 @@ namespace SmurfulationC.Simulation.Systems
                 0f, 100f);
 
         // Flat mood offset from personality traits.
-        public static float PersonalityModifier(Smurf s)
+        public static float PersonalityModifier(Shroomp s)
         {
             float total = 0f;
             foreach (var name in s.Personality)

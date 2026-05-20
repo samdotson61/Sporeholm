@@ -1,10 +1,10 @@
 using Godot;
 using System.Collections.Generic;
-using SmurfulationC.UI;
+using Sporeholm.UI;
 
 // Roadmap §3.x.6 — alerts pane. Reworked in v0.3.18 from an always-visible
 // top-right column into a centred dismissible popup that only appears when
-// critical alerts are pushed (smurf death, mental-break thresholds, raid
+// critical alerts are pushed (shroomp death, mental-break thresholds, raid
 // inbound, starvation, plague onset, etc.). Idle gameplay shows no alert
 // surface at all — the UI gets out of the way until something demands the
 // player's attention.

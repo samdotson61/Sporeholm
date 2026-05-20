@@ -1,6 +1,6 @@
 using Godot;
-using SmurfulationC.UI;
-using SmurfulationC.World;
+using Sporeholm.UI;
+using Sporeholm.World;
 
 // v0.3.21 — live preview rectangle drawn while the player is dragging a
 // designation box. GameController sets the tile-grid rect and active tool;

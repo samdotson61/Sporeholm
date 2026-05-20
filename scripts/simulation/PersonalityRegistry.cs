@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace SmurfulationC.Simulation
+namespace Sporeholm.Simulation
 {
     public static class PersonalityRegistry
     {
@@ -11,7 +11,7 @@ namespace SmurfulationC.Simulation
 
         public static readonly PersonalityDef[] All =
         {
-            // ── Smurf-canon archetypes ────────────────────────────────────────────
+            // ── Shroomp-canon archetypes ────────────────────────────────────────────
             new("Know-It-All",
                 "Corrects everyone constantly — even when wrong.",      -2f),
             new("Grumpy",
@@ -33,7 +33,7 @@ namespace SmurfulationC.Simulation
             new("Gossip",
                 "Knows everyone's business before they do.",            +2f),
 
-            // ── Real psychology with a Smurf twist ────────────────────────────────
+            // ── Real psychology with a Shroomp twist ────────────────────────────────
             new("Introvert",
                 "Recharges alone inside a quiet mushroom.",             +3f),
             new("Optimist",
@@ -55,7 +55,7 @@ namespace SmurfulationC.Simulation
             new("Thrill-Seeker",
                 "Runs TOWARD the cat.",                                 +4f),
 
-            // ── Smurf-specific humour ─────────────────────────────────────────────
+            // ── Shroomp-specific humour ─────────────────────────────────────────────
             new("Sarsaparilla Snob",
                 "Only the finest leaves. ONLY.",                        -1f),
             new("Mushroom Whisperer",
@@ -69,7 +69,7 @@ namespace SmurfulationC.Simulation
         };
 
         // v0.4.64 (G8 from rimport.md) — pairs that can't coexist on the
-        // same smurf. Mirrors RimWorld's `TraitDef.conflictingTraits`. The
+        // same shroomp. Mirrors RimWorld's `TraitDef.conflictingTraits`. The
         // assignment loop below removes the conflicting partner from the
         // pool whenever it picks one of these. Conflict is symmetric —
         // we store ordered pairs and check both directions in the lookup.
@@ -101,11 +101,11 @@ namespace SmurfulationC.Simulation
         }
 
         // Assigns 1–5 personality traits weighted by age.
-        // Young smurfs get fewer traits; elders accumulate more quirks over time.
+        // Young shroomps get fewer traits; elders accumulate more quirks over time.
         // v0.4.64 (G8) — conflict-aware: a candidate that contradicts an
         // already-picked trait is skipped and a different one is rolled.
         // The pool can run dry on small trait counts before reaching the
-        // requested count; in that case the smurf just gets fewer traits
+        // requested count; in that case the shroomp just gets fewer traits
         // (no infinite loop).
         public static List<string> Assign(Random rng, int ageInYears = 50)
         {
@@ -188,7 +188,7 @@ namespace SmurfulationC.Simulation
         private static string? TraitEffects(string name) => name switch
         {
             "Introvert"          => "Idle: prefers Observe over Converse.\nEats earlier when alone (lower social-need threshold).",
-            "Gossip"             => "Idle: strongly prefers Converse with nearby smurfs.",
+            "Gossip"             => "Idle: strongly prefers Converse with nearby shroomps.",
             "Daydreamer"         => "Idle: prefers Observe and Loiter.",
             "Brawny"             => "Idle: prefers Wander; rarely Loiters.",
             "Sleepyhead"         => "Idle: prefers Loiter; rarely Wanders.",
@@ -200,7 +200,7 @@ namespace SmurfulationC.Simulation
             "Optimist"           => "Bonus mood smooths over normal need decay.",
             "Pessimist"          => "Steep mood penalty — needs careful management.",
             "Stoic"              => "Strong mood resilience; rarely cracks under stress.",
-            "Empath"             => "Mood drops when nearby smurfs are unhappy.",
+            "Empath"             => "Mood drops when nearby shroomps are unhappy.",
             "Cat Paranoid"       => "Steep mood penalty; frightened-thoughts persist longer.",
             "Greedy Gut"         => "Lower mood; tends to grab the largest available food stack.",
             "Sarsaparilla Snob"  => "Refuses Crude-quality food more often.",

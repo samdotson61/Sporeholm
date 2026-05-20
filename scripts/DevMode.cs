@@ -1,6 +1,6 @@
 using System;
 
-namespace SmurfulationC
+namespace Sporeholm
 {
     // v0.4.32 — RimWorld-style Developer Mode global toggle.
     //

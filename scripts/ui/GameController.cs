@@ -1,26 +1,26 @@
 using Godot;
-using SmurfulationC.UI;
+using Sporeholm.UI;
 using System.Collections.Generic;
 using System.Linq;
-using SmurfulationC;
-using SmurfulationC.World;
+using Sporeholm;
+using Sporeholm.World;
 
 // Root node for the in-game scene. Wires simulation → tile map → colony view → HUD.
 public partial class GameController : Node
 {
 	private SimulationManager  _sim            = null!;
 	private LocalMapRenderer   _mapRenderer    = null!;
-	private SmurfColonyView    _colony         = null!;
+	private ShroompColonyView    _colony         = null!;
 	private Camera2D           _camera         = null!;
 	private HUDController      _hud            = null!;
-	private SmurfCardPanel     _card           = null!;
+	private ShroompCardPanel     _card           = null!;
 	private PauseMenuPanel     _pauseMenu      = null!;
 	private SettingsPanel      _settings       = null!;
 	private SaveFileBrowser    _saveBrowser    = null!;
 	private GameOverPanel      _gameOver       = null!;
 	private Control            _savingOverlay  = null!;
 	private TileInfoOverlay    _tileInfo       = null!;
-	private SmurfulationC.UI.DevPanel _devPanel = null!;
+	private Sporeholm.UI.DevPanel _devPanel = null!;
 	private TilePropertiesPanel _tileProps     = null!;
 	private SelectionOverlay   _selOverlay     = null!;   // v0.4.47 — single-tile selection brackets
 
@@ -38,21 +38,23 @@ public partial class GameController : Node
 	private DesignationOverlay    _designations    = null!;
 	private ItemDropOverlay       _itemOverlay     = null!;
 	private StockpileOverlay      _stockpileOverlay = null!;   // v0.5.0 Phase 5A
+	private StructureOverlay      _structureOverlay = null!;   // v0.5.19 Phase 5B
+	private DayNightOverlay       _dayNight         = null!;   // v0.5.58 visual day/night cycle
 	private OrderQueueOverlay     _orderQueueOverlay = null!;  // v0.5.2 chain-order waypoints
 	private DragSelectionPreview  _dragPreview     = null!;
-	// v0.3.24 — tabbed bottom shell + Smurfs roster + RTS box-select + flash.
+	// v0.3.24 — tabbed bottom shell + Shroomps roster + RTS box-select + flash.
 	private BottomTabPanel        _bottomTabs      = null!;
-	private SmurfRosterPanel      _roster          = null!;
+	private ShroompRosterPanel      _roster          = null!;
 	private SelectionBoxPreview   _selectBox       = null!;
 	private OrderFeedbackOverlay  _orderFeedback   = null!;
 	// v0.3.24 — multi-select replaces the v0.3.20 single string. HashSet so
 	// repeat-adds during box-select are O(1) and lookup for "is X selected?"
-	// is O(1). Mirrored into SmurfColonyView via SetSelection each time it
+	// is O(1). Mirrored into ShroompColonyView via SetSelection each time it
 	// changes so the yellow selection ring tracks the colony view's draw.
-	private readonly System.Collections.Generic.HashSet<string> _selectedSmurfs = new();
-	// Name of the smurf currently selected (or null). Right-click move orders
-	// target this smurf when set. Mirrors `VisualSmurf.Selected` in colony view.
-	// _selectedSmurfName removed v0.3.24 — replaced by _selectedSmurfs HashSet above.
+	private readonly System.Collections.Generic.HashSet<string> _selectedShroomps = new();
+	// Name of the shroomp currently selected (or null). Right-click move orders
+	// target this shroomp when set. Mirrors `VisualShroomp.Selected` in colony view.
+	// _selectedShroompName removed v0.3.24 — replaced by _selectedShroomps HashSet above.
 
 	private bool _returning;
 	private bool _wasPausedBeforeMenu;
@@ -80,9 +82,18 @@ public partial class GameController : Node
 			GetTree().Root.Theme = BuildTooltipTheme(SettingsPanel.TooltipFontSize("large"));
 		}
 
-		BuildGameWorld();   // Camera + tile map renderer (no map yet) + smurf view
+		BuildGameWorld();   // Camera + tile map renderer (no map yet) + shroomp view
 		BuildUILayer();     // HUD + panels + browser (camera-exempt CanvasLayer)
 		StartSim();
+
+		// v0.5.47 — convert every Control's TooltipText into a narrow,
+		// word-wrapped popup via the Tooltips helper. Replaces Godot's
+		// default tooltip rendering (which stretched long descriptions
+		// across the entire viewport width). Runs once now + again on
+		// every UIScaleChanged (panels rebuild → new Controls → new
+		// TooltipText strings → re-scan picks them up).
+		CallDeferred(nameof(ApplyTooltipsConversion));
+		UITheme.UIScaleChanged += () => CallDeferred(nameof(ApplyTooltipsConversion));
 
 		MusicManager.Instance?.Play(MusicManager.Context.Peace);
 
@@ -96,6 +107,7 @@ public partial class GameController : Node
 			_designations.SetMap(preloadedMap);
 			_itemOverlay.SetMap(preloadedMap);
 			_stockpileOverlay.SetMap(preloadedMap);   // v0.5.0
+			_structureOverlay.SetMap(preloadedMap);   // v0.5.19
 			_colony.UpdateMapSize(preloadedMap);
 			// Phase 3: bind the LocalMap to the sim thread so BehaviorSystem
 			// can read terrain/vegetation and seed sim positions. Without this,
@@ -126,6 +138,7 @@ public partial class GameController : Node
 			_designations.SetMap(map);
 			_itemOverlay.SetMap(map);
 			_stockpileOverlay.SetMap(map);   // v0.5.0
+			_structureOverlay.SetMap(map);   // v0.5.19
 			// Re-centre the camera on the actual generated map. BuildGameWorld() used
 			// DefaultWidth/DefaultHeight to initialise camera position, which can be
 			// smaller than the generated map, leaving the camera stuck in the top-left.
@@ -155,9 +168,14 @@ public partial class GameController : Node
 		_camera.Position = new Vector2(mapW / 2f, mapH / 2f);
 		AddChild(_camera);
 
-		// Tile map drawn first so smurfs appear on top.
+		// Tile map drawn first so shroomps appear on top.
 		// Map is NOT assigned here — SetMap() is called after generation completes.
-		_mapRenderer = new LocalMapRenderer { Name = "MapRenderer" };
+		// v0.5.71 — explicit ZIndex=-2 so the terrain stays under the
+		// StructureOverlay's new floor sub-layer at z=-1 (Sam: "Floor
+		// should appear below stockpile"). The stockpile overlay at z=0
+		// renders above the floor; walls/doors/blueprints in the structure
+		// overlay's z=0 root stay above the stockpile tint.
+		_mapRenderer = new LocalMapRenderer { Name = "MapRenderer", ZIndex = -2 };
 		AddChild(_mapRenderer);
 
 		// v0.5.0 (Phase 5A) — stockpile zone fill. v0.5.6 — moved up in
@@ -170,20 +188,29 @@ public partial class GameController : Node
 		_stockpileOverlay = new StockpileOverlay { Name = "StockpileOverlay" };
 		AddChild(_stockpileOverlay);
 
+		// v0.5.19 (Phase 5B) — structure overlay (walls, floors, blueprints).
+		// Sits between stockpile (z=0, tree-order earlier) and designations
+		// (z=0, tree-order later) so blueprint ghosts read on top of the
+		// floor tint but designation glyphs (excavate, gather, etc.)
+		// stack above. Walls are impassable terrain — pathfinding sees
+		// them via the LocalMap._passable cache that SetStructure updates.
+		_structureOverlay = new StructureOverlay { Name = "StructureOverlay" };
+		AddChild(_structureOverlay);
+
 		// v0.3.21 — designation overlay (Node2D in world space). Draws coloured
 		// glyphs on every tile flagged for Excavate / Gather. Added after the
-		// map but before the colony so smurfs render on top of the markers.
+		// map but before the colony so shroomps render on top of the markers.
 		_designations = new DesignationOverlay { Name = "Designations" };
 		AddChild(_designations);
 
 		// v0.4.2 — on-tile item drops. Sits between designation glyphs
-		// (z=0) and the smurf colony view (z=1) so smurfs walking over
+		// (z=0) and the shroomp colony view (z=1) so shroomps walking over
 		// items visually obscure them. Reads from LocalMap.ItemsChanged.
 		_itemOverlay = new ItemDropOverlay { Name = "ItemDrops" };
 		AddChild(_itemOverlay);
 
 		// v0.4.47 — single-tile selection brackets (RimWorld style) drawn
-		// over the map and items but under the smurf colony, so a
+		// over the map and items but under the shroomp colony, so a
 		// selected tile reads with the bracket frame around any items
 		// dropped on it.
 		_selOverlay = new SelectionOverlay { Name = "SelectionOverlay" };
@@ -191,7 +218,7 @@ public partial class GameController : Node
 
 		// v0.5.2 — RTS chain-order waypoint visualisation. Cyan dots +
 		// connecting line at each pending shift+right-click destination
-		// for selected smurfs only.
+		// for selected shroomps only.
 		_orderQueueOverlay = new OrderQueueOverlay { Name = "OrderQueueOverlay" };
 		AddChild(_orderQueueOverlay);
 
@@ -200,7 +227,7 @@ public partial class GameController : Node
 		_dragPreview = new DragSelectionPreview { Name = "DragPreview" };
 		AddChild(_dragPreview);
 
-		// v0.3.24 — RTS box-select rectangle (visible only during smurf-
+		// v0.3.24 — RTS box-select rectangle (visible only during shroomp-
 		// selection drag, distinct from the designation drag preview).
 		_selectBox = new SelectionBoxPreview { Name = "SelectBox" };
 		AddChild(_selectBox);
@@ -213,9 +240,17 @@ public partial class GameController : Node
 		_generatingOverlay = BuildGeneratingOverlay();
 		AddChild(_generatingOverlay);
 
-		// Smurf colony view drawn over the tile map.
-		_colony = new SmurfColonyView { Name = "Colony" };
+		// Shroomp colony view drawn over the tile map.
+		_colony = new ShroompColonyView { Name = "Colony" };
 		AddChild(_colony);
+
+		// v0.5.58 — visual day/night cycle. Owns a CanvasModulate that tints
+		// the entire world canvas based on SimulationDate.Hour. Only affects
+		// nodes in the same canvas as GameController (the world layer at
+		// Layer 0); UI on CanvasLayer 10/20 is unaffected. Sim is wired in
+		// StartSim() along with the other late-bound panels.
+		_dayNight = new DayNightOverlay { Name = "DayNightOverlay" };
+		AddChild(_dayNight);
 	}
 
 	private static Control BuildGeneratingOverlay()
@@ -251,7 +286,7 @@ public partial class GameController : Node
 		// reads it at construction time and scales its own font sizes /
 		// minimum sizes — anchors stay at viewport edges, only content shrinks.
 		float scale = SettingsPanel.LoadSavedUIScale();
-		SmurfulationC.UI.UITheme.SetUIScale(scale);
+		Sporeholm.UI.UITheme.SetUIScale(scale);
 
 		// Two-layer canvas: gameplay UI on UILayer (10), modal overlays on
 		// ModalLayer (20). Higher Layer values render on top, so every overlay
@@ -271,7 +306,7 @@ public partial class GameController : Node
 		_hud = new HUDController { Name = "HUD" };
 		ul.AddChild(_hud);
 
-		_card = new SmurfCardPanel { Name = "SmurfCard" };
+		_card = new ShroompCardPanel { Name = "ShroompCard" };
 		ul.AddChild(_card);
 
 		_tileInfo = new TileInfoOverlay { Name = "TileInfo" };
@@ -282,7 +317,7 @@ public partial class GameController : Node
 		// of that. Plugs `Sim`, the map node (for cursor → tile), and a
 		// callback that returns the current selection so it doesn't need
 		// a hard reference back to GameController fields.
-		_devPanel = new SmurfulationC.UI.DevPanel { Name = "DevPanel" };
+		_devPanel = new Sporeholm.UI.DevPanel { Name = "DevPanel" };
 		ul.AddChild(_devPanel);
 		// v0.4.55 — `_devPanel.Sim` is assigned in StartSim() alongside
 		// the other panels' Sim bindings (HUD / Resources / Jobs / Card).
@@ -293,17 +328,17 @@ public partial class GameController : Node
 		// needs ×1" while the action was a no-op, which is what
 		// produced Sam's "I clicked Drain 10 times and nothing happened"
 		// report. The v0.4.54 hit/miss diagnostic surfaced this as
-		// "Smurf not found ×1" once it could see the null result;
+		// "Shroomp not found ×1" once it could see the null result;
 		// rather than keep the diagnostic and limp along with a broken
 		// binding, the binding itself is moved to StartSim where `_sim`
-		// is actually populated. MapNode and GetSelectedSmurfs are set
+		// is actually populated. MapNode and GetSelectedShroomps are set
 		// here because they don't depend on the sim instance.
 		_devPanel.MapNode = _mapRenderer;
-		_devPanel.GetSelectedSmurfs = () => _selectedSmurfs;
+		_devPanel.GetSelectedShroomps = () => _selectedShroomps;
 
 		// v0.4.34 — stationary-target inspector. Floating card mirroring
-		// SmurfCardPanel; opens on left-click on a tile with items or
-		// vegetation when no smurf was hit. Snapshot-only — no per-tick
+		// ShroompCardPanel; opens on left-click on a tile with items or
+		// vegetation when no shroomp was hit. Snapshot-only — no per-tick
 		// refresh — so a stale view is the trade-off for zero idle cost.
 		_tileProps = new TilePropertiesPanel { Name = "TilePropertiesPanel" };
 		ul.AddChild(_tileProps);
@@ -313,18 +348,18 @@ public partial class GameController : Node
 
 		// v0.3.24 — bottom-anchored tabbed shell. Two tabs:
 		//   • Orders   → embedded DesignationToolbar (existing buttons).
-		//   • Smurfs   → new SmurfRosterPanel (roster list, double-click = zoom).
+		//   • Shroomps   → new ShroompRosterPanel (roster list, double-click = zoom).
 		// The container does the bottom-centre anchoring; the toolbar fills
 		// its tab slot rather than self-anchoring like it used to.
 		_toolbar         = new DesignationToolbar { Name = "DesignationToolbar" };
-		_roster          = new SmurfRosterPanel   { Name = "SmurfRoster" };
+		_roster          = new ShroompRosterPanel   { Name = "ShroompRoster" };
 		_resourcesPanel  = new ResourcesPanel     { Name = "ResourcesPanel" };
 		_jobsPanel       = new JobsPanel          { Name = "JobsPanel" };
 		_bottomTabs      = new BottomTabPanel     { Name = "BottomTabs" };
 		ul.AddChild(_bottomTabs);
-		_bottomTabs.Attach(_toolbar, _roster, _resourcesPanel, _jobsPanel);
-		_roster.SmurfZoomRequested   += OnRosterZoomRequested;
-		_roster.SmurfSelectRequested += OnRosterSelectRequested;
+		_bottomTabs.Attach(_toolbar, _roster, _resourcesPanel, _jobsPanel, _sim);   // v0.5.44 — Areas tab needs Sim
+		_roster.ShroompZoomRequested   += OnRosterZoomRequested;
+		_roster.ShroompSelectRequested += OnRosterSelectRequested;
 
 		// ── Modal overlays (higher layer) ─────────────────────────────────
 		_pauseMenu = new PauseMenuPanel { Name = "PauseMenu" };
@@ -354,7 +389,7 @@ public partial class GameController : Node
 		_alertsPane = new AlertsPane { Name = "AlertsPane" };
 		ml.AddChild(_alertsPane);
 
-		_colony.SmurfClicked += OnSmurfClicked;
+		_colony.ShroompClicked += OnShroompClicked;
 
 		_card.RoleChangeRequested += (name, newRole) =>
 			_sim.RequestRoleChange(name, newRole);
@@ -362,12 +397,12 @@ public partial class GameController : Node
 
 	// Roadmap §3.x.3 / v0.3.21 — designation input dispatcher.
 	//
-	// Right-click is always a move-order on the currently-selected smurf,
+	// Right-click is always a move-order on the currently-selected shroomp,
 	// independent of the active tool (RimWorld convention — right-click is
 	// the universal "do this with the selected pawn" verb).
 	//
 	// Left-click is tool-aware:
-	//   • Tool.None      → falls through to SmurfColonyView selection.
+	//   • Tool.None      → falls through to ShroompColonyView selection.
 	//   • Tool.Gather    → drag-box paints DesignatedForGather on every food-
 	//                      yielding plant inside the rect on mouse-up.
 	//   • Tool.Excavate  → drag-box paints DesignatedForExcavation on every
@@ -388,11 +423,11 @@ public partial class GameController : Node
 
 	// v0.3.24 — left-click semantics depend on what's under the cursor and
 	// what tool is active:
-	//   • No tool, click on a smurf       → single-select (clears others).
+	//   • No tool, click on a shroomp       → single-select (clears others).
 	//   • No tool, drag on empty terrain  → RTS box-select (multi).
 	//   • Tool active                     → designation drag-box (existing).
 	//
-	// Right-click semantics with one-or-more smurfs selected:
+	// Right-click semantics with one-or-more shroomps selected:
 	//   • Right-click on enemy            → combat order stub (Phase 8 stub).
 	//   • Right-click on passable tile    → move order to all selected.
 	// v0.4.3 — context-aware right-click action descriptor. Resolved by
@@ -410,7 +445,7 @@ public partial class GameController : Node
 
 	private System.Collections.Generic.List<RightClickAction> ResolveRightClickActions(
 		(int x, int y) tile, Vector2 worldPos,
-		SmurfulationC.World.LocalMap map)
+		Sporeholm.World.LocalMap map)
 	{
 		var list = new System.Collections.Generic.List<RightClickAction>();
 
@@ -419,7 +454,7 @@ public partial class GameController : Node
 		if (items.Count > 0)
 		{
 			var first = items[0];
-			var subDef = SmurfulationC.Simulation.Items.ItemRegistry.Get(first.Kind, first.SubType);
+			var subDef = Sporeholm.Simulation.Items.ItemRegistry.Get(first.Kind, first.SubType);
 			string display = subDef?.DisplayName ?? first.SubType;
 			list.Add(new RightClickAction
 			{
@@ -427,7 +462,7 @@ public partial class GameController : Node
 				Glyph = "📦",
 				Execute = () =>
 				{
-					foreach (var name in _selectedSmurfs)
+					foreach (var name in _selectedShroomps)
 						_sim.RequestPickUp(name, worldPos);
 					_orderFeedback.RingPickUp(worldPos);
 				},
@@ -468,7 +503,7 @@ public partial class GameController : Node
 				Glyph = "→",
 				Execute = () =>
 				{
-					_sim.RequestPlayerMoveOrderGroup(_selectedSmurfs, worldPos);
+					_sim.RequestPlayerMoveOrderGroup(_selectedShroomps, worldPos);
 					_orderFeedback.RingMove(worldPos);
 				},
 			});
@@ -546,7 +581,7 @@ public partial class GameController : Node
 		// "right-click on terrain = issue order" behaviour, we record the
 		// press position and let `PanWithMouseDrag` decide whether the gesture
 		// became a pan. On release, if the player never crossed the pan
-		// threshold AND smurfs are selected, we issue the move order at the
+		// threshold AND shroomps are selected, we issue the move order at the
 		// release tile. If they did pan, no order fires.
 		if (mb.ButtonIndex == MouseButton.Right)
 		{
@@ -564,7 +599,7 @@ public partial class GameController : Node
 			if (wasPanning) return true;  // pan completed; no action — preserves right-drag camera pan
 
 			// v0.5.2 — RimWorld-style stationary-right-click priority cascade.
-			// Sam follow-up: deselecting smurfs / closing panels via
+			// Sam follow-up: deselecting shroomps / closing panels via
 			// right-click would break the planned RTS combat controls
 			// (right-click on enemy = attack), so right-click cancellation
 			// is now SCOPED to the toolbar tool only — never to the
@@ -575,20 +610,20 @@ public partial class GameController : Node
 			//      behaviour, applied to both Orders-tab and Zones-tab
 			//      tools (single source of active-tool truth via
 			//      DesignationToolbar.SetActiveTool).
-			//   2. Smurf(s) selected + actionable tile → context-action
+			//   2. Shroomp(s) selected + actionable tile → context-action
 			//      (move / pickup / forbid). Selection persists across the
 			//      order so the player can chain commands.
 			//
 			// SHIFT + right-click variant: when shift is held during the
 			// release, the order is QUEUED via the new chain-order API
-			// (Smurf.MoveOrderQueue) instead of replacing the smurf's
+			// (Shroomp.MoveOrderQueue) instead of replacing the shroomp's
 			// CurrentTask. Standard RTS pattern (StarCraft / Warcraft):
 			// shift-click queues, plain click replaces + clears queue.
 			//
 			// Right-DRAG that crossed the pan threshold is intercepted at
 			// `wasPanning` above, so the cascade only runs for
 			// genuinely-stationary right-clicks. Camera pan workflow
-			// unaffected. Smurf selection + open panels are NEVER cleared
+			// unaffected. Shroomp selection + open panels are NEVER cleared
 			// by right-click (per Sam's feedback) — the player uses
 			// left-click on empty space (or future Esc binding) for that.
 
@@ -601,8 +636,8 @@ public partial class GameController : Node
 				return true;
 			}
 
-			// Priority 2 — context action with selected smurfs.
-			if (_selectedSmurfs.Count > 0
+			// Priority 2 — context action with selected shroomps.
+			if (_selectedShroomps.Count > 0
 				&& tile.HasValue
 				&& map.IsPassable(tile.Value.x, tile.Value.y))
 			{
@@ -616,8 +651,12 @@ public partial class GameController : Node
 				// from. Otherwise execute the top-priority action
 				// automatically.
 				var actions = ResolveRightClickActions(tile.Value, click, map);
-				bool altHeld = Input.IsActionPressed("kb_context_menu")
-							   || Input.IsKeyPressed(Key.Alt);
+				// v0.5.75 — Alt-held opens the multi-action context menu.
+				// Pre-v0.5.75 also checked Input.IsActionPressed("kb_context_menu")
+				// but that keybinding was unused in the Settings UI and
+				// has been removed; the hardcoded Alt check stays as the
+				// only modifier.
+				bool altHeld = Input.IsKeyPressed(Key.Alt);
 				if (altHeld && actions.Count > 1)
 				{
 					OpenContextMenu(GetViewport().GetMousePosition(), actions);
@@ -631,7 +670,7 @@ public partial class GameController : Node
 					// order type lands when combat orders need queueing.
 					if (shiftHeld)
 					{
-						_sim.RequestPlayerMoveOrderGroupQueued(_selectedSmurfs, click);
+						_sim.RequestPlayerMoveOrderGroupQueued(_selectedShroomps, click);
 						_orderFeedback.RingMove(click);
 					}
 					else
@@ -643,7 +682,7 @@ public partial class GameController : Node
 			}
 
 			// No active tool, no actionable target — right-click is a no-op.
-			// Player must use left-click on empty space to deselect smurfs
+			// Player must use left-click on empty space to deselect shroomps
 			// (preserves RTS combat-control plan where right-click on enemy
 			// = attack, never deselect).
 			return false;
@@ -654,7 +693,7 @@ public partial class GameController : Node
 		var desig = _toolbar.ActiveDesignation;
 
 		// ── Tool active → designation drag-box (existing behaviour) ───────
-		if (desig != SmurfulationC.UI.DesignationTool.None && tile.HasValue)
+		if (desig != Sporeholm.UI.DesignationTool.None && tile.HasValue)
 		{
 			if (mb.Pressed)
 			{
@@ -665,7 +704,24 @@ public partial class GameController : Node
 			{
 				_dragPreview.Update(tile.Value.x, tile.Value.y);
 				var (x0, y0, x1, y1) = _dragPreview.GetRect();
-				_sim.DesignateRect(_dragPreview.Tool, x0, y0, x1, y1);
+				// v0.5.44 — Allowed-Area paint now targets the colony-shared
+				// NamedAreas bitmap (was: per-shroomp bitmap via the v0.5.25
+				// PaintAllowedArea API). Toolbar tracks which named area the
+				// painter is editing (default "Home"); AreasPanel sets it
+				// when the player picks an area. Painting affects every
+				// shroomp assigned to that area at once. RimWorld-parity.
+				if (_dragPreview.Tool == DesignationTool.AllowedArea)
+				{
+					_sim.PaintAreaCells(_toolbar.ActiveAreaName, x0, y0, x1, y1, allow: true);
+				}
+				else
+				{
+					// v0.5.32 — pass active build material (Stone /
+					// FungalWood / DeadWood / LivingWood). For non-build
+					// tools the parameter is ignored.
+					_sim.DesignateRect(_dragPreview.Tool, x0, y0, x1, y1,
+						buildMaterial: _toolbar.ActiveBuildMaterial);
+				}
 				// v0.4.27 — force the overlay to ingest the new tiles
 				// inside the same input frame. `DesignateRect` writes
 				// the designation flags directly on the main thread now
@@ -680,20 +736,25 @@ public partial class GameController : Node
 			return false;
 		}
 
-		// ── No tool active → smurf selection (single-click or box-drag) ───
+		// ── No tool active → shroomp selection (single-click or box-drag) ───
 		if (mb.Pressed)
 		{
-			var hit = _colony.GetSmurfNameAt(click);
+			var hit = _colony.GetShroompNameAt(click);
 			if (hit != null)
 			{
-				SelectSingleSmurf(hit);
-				_colony.EmitSmurfClicked(hit);  // existing wiring opens SmurfCardPanel
+				SelectSingleShroomp(hit);
+				_colony.EmitShroompClicked(hit);  // existing wiring opens ShroompCardPanel
 				return true;
 			}
-			// v0.4.34 — no smurf hit. If the clicked tile has items or
+			// v0.4.34 — no shroomp hit. If the clicked tile has items or
 			// vegetation, open the stationary-inspector card; otherwise
 			// fall through to the existing select-box drag and close any
 			// inspector that was open from a previous click.
+			// v0.5.55 — also open when the tile has a structure or blueprint
+			// so the player can click a placed blueprint to see its material /
+			// build progress / cost in TilePropertiesPanel.Structure (v0.5.25).
+			// Pre-v0.5.55 only items/vegetation triggered the open, leaving
+			// freshly-placed empty-tile blueprints uninspectable.
 			if (tile.HasValue)
 			{
 				var lmap = WorldState.Instance?.CurrentLocalMap;
@@ -701,9 +762,11 @@ public partial class GameController : Node
 				{
 					bool hasItems = lmap.GetItemsOnTile(tile.Value.x, tile.Value.y).Count > 0;
 					bool hasVeg   = lmap.GetVegetation(tile.Value.x, tile.Value.y).IsPresent;
-					if (hasItems || hasVeg)
+					bool hasStructure = lmap.GetStructure(tile.Value.x, tile.Value.y).Type
+						!= Sporeholm.World.StructureType.None;
+					if (hasItems || hasVeg || hasStructure)
 					{
-						_card.Visible = false;        // mutually exclusive with the smurf card
+						_card.Visible = false;        // mutually exclusive with the shroomp card
 						_tileProps.Open(tile.Value.x, tile.Value.y, lmap);
 						_selOverlay.SetTileSelection(tile.Value.x, tile.Value.y);
 						return true;
@@ -714,9 +777,9 @@ public partial class GameController : Node
 			_selOverlay.ClearSelection();
 			// v0.4.36 — Ctrl-gate the box-select drag (settings toggle,
 			// default ON). Without Ctrl held, an empty left-drag just
-			// clears the selection instead of roping a dozen smurfs into
-			// an accidental crowd order. Single-smurf left-clicks still
-			// work either way (the smurf-hit branch above already
+			// clears the selection instead of roping a dozen shroomps into
+			// an accidental crowd order. Single-shroomp left-clicks still
+			// work either way (the shroomp-hit branch above already
 			// returned).
 			if (SettingsPanel.BoxSelectRequiresCtrl
 				&& !Input.IsKeyPressed(Key.Ctrl))
@@ -738,11 +801,11 @@ public partial class GameController : Node
 				ClearSelection();
 				return true;
 			}
-			var names = _colony.GetSmurfNamesInRect(rect);
+			var names = _colony.GetShroompNamesInRect(rect);
 			ClearSelection();
-			foreach (var n in names) _selectedSmurfs.Add(n);
-			_colony.SetSelection(_selectedSmurfs);
-			_orderQueueOverlay?.SetSelection(_selectedSmurfs);   // v0.5.2
+			foreach (var n in names) _selectedShroomps.Add(n);
+			_colony.SetSelection(_selectedShroomps);
+			_orderQueueOverlay?.SetSelection(_selectedShroomps);   // v0.5.2
 			return true;
 		}
 		return false;
@@ -766,24 +829,24 @@ public partial class GameController : Node
 
 	// ── Selection plumbing (v0.3.24) ──────────────────────────────────────────
 
-	private void SelectSingleSmurf(string name)
+	private void SelectSingleShroomp(string name)
 	{
-		_selectedSmurfs.Clear();
-		_selectedSmurfs.Add(name);
-		_colony.SetSelection(_selectedSmurfs);
-		_orderQueueOverlay?.SetSelection(_selectedSmurfs);   // v0.5.2
+		_selectedShroomps.Clear();
+		_selectedShroomps.Add(name);
+		_colony.SetSelection(_selectedShroomps);
+		_orderQueueOverlay?.SetSelection(_selectedShroomps);   // v0.5.2
 	}
 
 	private void ClearSelection()
 	{
-		_selectedSmurfs.Clear();
-		_colony.SetSelection(_selectedSmurfs);
-		_orderQueueOverlay?.SetSelection(_selectedSmurfs);   // v0.5.2
+		_selectedShroomps.Clear();
+		_colony.SetSelection(_selectedShroomps);
+		_orderQueueOverlay?.SetSelection(_selectedShroomps);   // v0.5.2
 	}
 
 	private void OnRosterZoomRequested(string name)
 	{
-		var pos = _colony.GetSmurfPosition(name);
+		var pos = _colony.GetShroompPosition(name);
 		if (pos.HasValue)
 		{
 			_camera.Position = pos.Value;
@@ -794,8 +857,8 @@ public partial class GameController : Node
 
 	private void OnRosterSelectRequested(string name)
 	{
-		SelectSingleSmurf(name);
-		_colony.EmitSmurfClicked(name);
+		SelectSingleShroomp(name);
+		_colony.EmitShroompClicked(name);
 	}
 
 	private static Control BuildSavingOverlay()
@@ -840,6 +903,16 @@ public partial class GameController : Node
 			l.AddThemeFontOverride("font", GD.Load<FontFile>(font));
 	}
 
+	// v0.5.47 — converts all Godot-default tooltips in the scene tree to
+	// the new Tooltips popup. Called once after BuildUILayer and again
+	// after every UIScaleChanged so newly-built Controls also get
+	// converted (panels rebuild on UI Size change with fresh TooltipText
+	// strings). Idempotent — managed Controls are skipped on re-scan.
+	private void ApplyTooltipsConversion()
+	{
+		Sporeholm.UI.Tooltips.ScanAndConvert(GetTree().Root);
+	}
+
 	public static Theme BuildTooltipTheme(int fontSize = 10)
 	{
 		var theme = new Theme();
@@ -877,6 +950,15 @@ public partial class GameController : Node
 		// in BuildUILayer where _sim was still null. See note at the
 		// _devPanel construction site.
 		_devPanel.Sim = _sim;
+		// v0.5.53 — same late-bind for AreasPanel. BuildUILayer's
+		// BottomTabPanel.Attach call passed a null _sim earlier, so
+		// AreasPanel.Sim was never set — Create/Rename/Delete button
+		// handlers were NRE'ing on every click. Wired here alongside the
+		// other panels.
+		_bottomTabs.Areas.Sim = _sim;
+		// v0.5.58 — DayNightOverlay needs Sim to read the current in-game
+		// hour for its per-frame tint update.
+		_dayNight.Sim = _sim;
 		// v0.3.47 — register the live SimulationManager with SaveManager
 		// so save writes can pull the colony inventory + work priorities.
 		SaveManager.Instance?.RegisterSimulation(_sim);
@@ -895,8 +977,19 @@ public partial class GameController : Node
 		_sim.Connect(SimulationManager.SignalName.TickCompleted,
 			Callable.From<string, int, int, int>(OnTick));
 
-		_sim.Connect(SimulationManager.SignalName.SmurfDied,
-			Callable.From<string, int, string>(OnSmurfDied));
+		_sim.Connect(SimulationManager.SignalName.ShroompDied,
+			Callable.From<string, int, string>(OnShroompDied));
+
+		// v0.5.81 — drain the initial snapshot through OnTick RIGHT NOW so
+		// the colony renders on the first frame post-load, not on the next
+		// unpaused sim tick. SimulationCore.Start (v0.5.81 earlier in this
+		// session) already pushed the initial snapshot into the queue
+		// before the worker thread spawned; the race was the
+		// queue-to-signal handoff via _Process happening before this
+		// Connect ran. Forcing the drain after Connect closes the race.
+		// Sam: "The player now has to always unpause the game to … see
+		// shroomps on game load. Fix this."
+		_sim.DrainSnapshotsAndEmit();
 
 		_sim.Connect(SimulationManager.SignalName.BirthOccurred,
 			Callable.From<string, string>(OnBirthOccurred));
@@ -910,6 +1003,9 @@ public partial class GameController : Node
 
 		_sim.Connect(SimulationManager.SignalName.MoodThresholdCrossed,
 			Callable.From<string, string, string>(OnMoodThresholdCrossed));
+		// v0.5.84t — starving alert one-shot per pawn.
+		_sim.Connect(SimulationManager.SignalName.StarvationStarted,
+			Callable.From<string>(OnStarvationStarted));
 	}
 
 	private void SeedColonyVisuals()
@@ -920,7 +1016,7 @@ public partial class GameController : Node
 		if (SaveManager.Instance?.HasSave == true && SaveManager.Instance.CurrentSave is { } save)
 		{
 			positions = new();
-			foreach (var s in save.Smurfs)
+			foreach (var s in save.Shroomps)
 			{
 				roster.Add((s.Name, s.Role));
 				positions[s.Name] = (new Godot.Vector2(s.PosX, s.PosY),
@@ -932,12 +1028,12 @@ public partial class GameController : Node
 			// Read the LIVE sim roster instead of the founding-seven hard-coded
 			// names that v0.3.13 inherited from the pre-scenario placeholder.
 			// SimulationManager.SeedColony has already run by this point and has
-			// either materialised the scenario's smurfs or fallen back to the
+			// either materialised the scenario's shroomps or fallen back to the
 			// founding seven itself, so this query is the authoritative source.
 			var snap = _sim.GetLastSnapshot();
 			if (snap != null)
 			{
-				foreach (var s in snap.Smurfs) roster.Add((s.Name, s.Role));
+				foreach (var s in snap.Shroomps) roster.Add((s.Name, s.Role));
 			}
 			// If no snapshot has arrived yet (paused-on-start before first tick),
 			// fall back to the founding seven so we never seed an empty roster.
@@ -948,7 +1044,7 @@ public partial class GameController : Node
 					("Papa",      "Elder"),
 					("Brainy",    "Scholar"),
 					("Hefty",     "Guardian"),
-					("Smurfette", "Caretaker"),
+					("SporeMother", "Caretaker"),
 					("Clumsy",    "Forager"),
 					("Handy",     "Crafter"),
 					("Grouchy",   "Forager"),
@@ -956,7 +1052,7 @@ public partial class GameController : Node
 			}
 		}
 
-		_colony.SeedSmurfs(roster, positions);
+		_colony.SeedShroomps(roster, positions);
 	}
 
 	public override void _Process(double delta)
@@ -1009,9 +1105,10 @@ public partial class GameController : Node
 		// to land here without TryHandleMouseButton seeing the release),
 		// ActiveDesignation has already moved to the new tool.
 		var tool = _dragPreview.Tool;
-		if (tool != SmurfulationC.UI.DesignationTool.None)
+		if (tool != Sporeholm.UI.DesignationTool.None)
 		{
-			_sim.DesignateRect(tool, x0, y0, x1, y1);
+			_sim.DesignateRect(tool, x0, y0, x1, y1,
+				buildMaterial: _toolbar.ActiveBuildMaterial);   // v0.5.32
 			_designations.RebuildIfDirty();   // v0.4.27 — instant visual
 			_orderFeedback.FlashDesignationRect(tool, x0, y0, x1, y1);  // v0.3.24
 		}
@@ -1131,7 +1228,7 @@ public partial class GameController : Node
 
 	// v0.3.28 — superset of IsMouseOverCard: returns true whenever the cursor
 	// is over any non-modal in-game UI panel. Used to suppress the mouse-wheel
-	// zoom path so scrolling over the Smurfs roster (or any other tab content)
+	// zoom path so scrolling over the Shroomps roster (or any other tab content)
 	// doesn't yank the camera. Modal overlays already block input upstream via
 	// IsAnyOverlayOpen — they don't need to be listed here.
 	private bool IsMouseOverUI()
@@ -1217,7 +1314,7 @@ public partial class GameController : Node
 					// v0.3.21 — designation dispatcher handles both press and
 					// release for left-click (drag-box semantics). Right-click
 					// only fires on press. Falls through (no SetInputAsHandled)
-					// when no tool is active and no smurf is selected, so the
+					// when no tool is active and no shroomp is selected, so the
 					// colony view's left-click selection still runs.
 					if (TryHandleMouseButton(mb))
 						GetViewport().SetInputAsHandled();
@@ -1264,8 +1361,8 @@ public partial class GameController : Node
 		var snap = _sim.GetLastSnapshot();
 		if (snap != null)
 		{
-			_colony.UpdateFromTick(snap.Smurfs);
-			// v0.5.2 — chain-order overlay reads MoveOrderQueue per smurf
+			_colony.UpdateFromTick(snap.Shroomps);
+			// v0.5.2 — chain-order overlay reads MoveOrderQueue per shroomp
 			// from the snapshot. Push on every tick so completed queue
 			// entries (popped by BehaviorSystem) clear from the visualisation
 			// the same frame they execute.
@@ -1273,20 +1370,20 @@ public partial class GameController : Node
 			// v0.4.26 — visibility-gated panel refreshes. `_card.Refresh`
 			// and the roster Refresh (rows list construction + the per-
 			// row UpdateRow that touches multiple Label.Text values per
-			// smurf) both ran on every snapshot push (60 Hz at 1× speed)
+			// shroomp) both ran on every snapshot push (60 Hz at 1× speed)
 			// regardless of whether the user could see them — at 250
-			// smurfs the hidden roster alone was burning ~525 ms/sec on
+			// shroomps the hidden roster alone was burning ~525 ms/sec on
 			// the main thread (250 rows × ~35 µs of label diffs and
 			// ProgressBar value updates × 60 Hz). That's exactly the
-			// 0.6 FPS-per-smurf linear cost Sam measured. Now the
+			// 0.6 FPS-per-shroomp linear cost Sam measured. Now the
 			// refreshes only run when the panel is actually displayed;
 			// while hidden, the snapshot still drives `_colony.UpdateFromTick`
-			// (smurfs move) but the heavy roster diff stays off the
+			// (shroomps move) but the heavy roster diff stays off the
 			// main thread.
 			if (_card.IsVisibleInTree())
 				_card.Refresh(snap);  // v0.3.36 — O(1) by-name lookup
 
-			// v0.3.24 — refresh the Smurfs roster tab so it always reflects
+			// v0.3.24 — refresh the Shroomps roster tab so it always reflects
 			// the current colony. Skipped silently when the panel isn't built
 			// (early frames before BuildUILayer completes) OR isn't visible.
 			// `IsVisibleInTree` (not just `Visible`) catches the case where
@@ -1298,8 +1395,8 @@ public partial class GameController : Node
 				// with name/role/mood + need bars + activity verb + combat
 				// status. The roster panel diffs by name and updates in
 				// place so per-tick refreshes don't flicker.
-				var rows = new System.Collections.Generic.List<SimulationC_Roster_Row>(snap.Smurfs.Count);
-				foreach (var s in snap.Smurfs)
+				var rows = new System.Collections.Generic.List<SimulationC_Roster_Row>(snap.Shroomps.Count);
+				foreach (var s in snap.Shroomps)
 					rows.Add(new SimulationC_Roster_Row(
 						s.Name, s.Role, s.MoodState,
 						s.Nutrition, s.Rest, s.Social, s.MagicResonance, s.Safety,
@@ -1318,17 +1415,17 @@ public partial class GameController : Node
 		}
 	}
 
-	// ── Smurf click ────────────────────────────────────────────────────────────
+	// ── Shroomp click ────────────────────────────────────────────────────────────
 
-	private void OnSmurfClicked(string name)
+	private void OnShroompClicked(string name)
 	{
-		// v0.3.24 — selection state lives in _selectedSmurfs; SelectSingleSmurf
+		// v0.3.24 — selection state lives in _selectedShroomps; SelectSingleShroomp
 		// has already been called by the input dispatcher before this signal.
 		// This handler only opens the unit card.
-		// v0.3.36 — O(1) by-name lookup via SimulationSnapshot.SmurfsByName.
-		// FirstOrDefault was O(N) per call; at 1000 smurfs that's 1000× per
+		// v0.3.36 — O(1) by-name lookup via SimulationSnapshot.ShroompsByName.
+		// FirstOrDefault was O(N) per call; at 1000 shroomps that's 1000× per
 		// click. The struct-based snapshot also dropped 4 dictionary
-		// allocations per smurf per tick.
+		// allocations per shroomp per tick.
 		// v0.4.34 — also close the stationary-inspector card if it was
 		// open from a prior click on a tile; the two cards share screen
 		// space at top-right so they're mutually exclusive.
@@ -1336,13 +1433,13 @@ public partial class GameController : Node
 		_selOverlay?.ClearSelection();
 		var snap = _sim.GetLastSnapshot();
 		if (snap == null) return;
-		if (snap.SmurfsByName.TryGetValue(name, out var smurf))
-			_card.Show(smurf);
+		if (snap.ShroompsByName.TryGetValue(name, out var shroomp))
+			_card.Show(shroomp);
 	}
 
 	// ── Simulation events ──────────────────────────────────────────────────────
 
-	private void OnSmurfDied(string name, int age, string cause)
+	private void OnShroompDied(string name, int age, string cause)
 	{
 		GD.Print($"[Colony] {name} has passed at age {age} ({cause}).");
 		_msgLog.Post($"{name} has died, age {age}. ({cause})", MessageLog.Category.Death, _lastDate);
@@ -1350,7 +1447,7 @@ public partial class GameController : Node
 
 	private void OnBirthOccurred(string name, string sex)
 	{
-		GD.Print($"[Colony] A new smurf was born: {name} ({sex})!");
+		GD.Print($"[Colony] A new shroomp was born: {name} ({sex})!");
 		_msgLog.Post($"{name} has joined the colony.", MessageLog.Category.Birth, _lastDate);
 	}
 
@@ -1376,6 +1473,16 @@ public partial class GameController : Node
 		GD.Print($"[Mood] {name}: {from} → {to}");
 		if (MoodOrdinal(to) < MoodOrdinal(from))
 			_msgLog.Post($"{name}: mood worsened to {to}.", MessageLog.Category.MoodDrop, _lastDate);
+	}
+
+	// v0.5.84t — starvation rising-edge handler. SimulationCore fires one
+	// event per pawn per Nutrition < 20 transition; gets reset only when
+	// Nutrition climbs back above 25 (hysteresis). Single MessageLog entry
+	// per occurrence — won't spam tick-by-tick.
+	private void OnStarvationStarted(string name)
+	{
+		GD.Print($"[Starvation] {name} is starving");
+		_msgLog.Post($"{name} is starving!", MessageLog.Category.Starving, _lastDate);
 	}
 
 	// Compact in-game timestamp: "Hour 6 Day 3, Spring, Year 1 S.D." → "D3 Y1"

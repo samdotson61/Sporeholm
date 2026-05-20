@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using SmurfulationC.Simulation;
+using Sporeholm.Simulation;
 
-namespace SmurfulationC.Simulation.Systems
+namespace Sporeholm.Simulation.Systems
 {
     // v0.3.43 — Thoughts tick-down and rolling mood-contribution recompute.
     //
@@ -14,23 +14,23 @@ namespace SmurfulationC.Simulation.Systems
     //      slot; the ring's "oldest entry has the smallest TTL" invariant
     //      naturally puts new thoughts into emptied slots first.
     //
-    //   2. Recompute Smurf.MoodFromThoughts — the per-smurf cached sum of
+    //   2. Recompute Shroomp.MoodFromThoughts — the per-shroomp cached sum of
     //      live thought MoodOffsets that MoodSystem folds into MoodScore.
     //      The sum is clamped to ±50 so a streak of similar thoughts can't
     //      pin the mood at one extreme indefinitely.
     //
-    // The system only walks smurfs whose ThoughtsDirty flag is set OR whose
+    // The system only walks shroomps whose ThoughtsDirty flag is set OR whose
     // earliest thought is about to expire on this tick. In practice fewer
     // than 1 % of the colony has live thoughts changing on any given tick,
-    // so this stays cheap even at the planned 1000-smurf scale.
+    // so this stays cheap even at the planned 1000-shroomp scale.
     public static class ThoughtSystem
     {
         private const int  TicksPerSystemPass = 60;   // matches SimSystemInterval
         private const float ThoughtMoodClamp  = 50f;
 
-        public static void Tick(IReadOnlyList<Smurf> smurfs)
+        public static void Tick(IReadOnlyList<Shroomp> shroomps)
         {
-            foreach (var s in smurfs)
+            foreach (var s in shroomps)
             {
                 if (!s.IsAlive) continue;
                 if (s.Thoughts == null) continue;
@@ -68,7 +68,7 @@ namespace SmurfulationC.Simulation.Systems
                     // Invalidate MoodSystem's needs-cache so the next
                     // MoodSystem.Tick pass recomputes MoodScore with the
                     // new MoodFromThoughts blended in. Without this, a
-                    // smurf with stable needs but a freshly added thought
+                    // shroomp with stable needs but a freshly added thought
                     // would not see the mood change until a need wiggled
                     // past the v0.3.36 epsilon.
                     if (Math.Abs(s.MoodFromThoughts - sum) > 0.05f)

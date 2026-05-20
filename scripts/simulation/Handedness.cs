@@ -1,11 +1,11 @@
 using System;
 
-namespace SmurfulationC.Simulation
+namespace Sporeholm.Simulation
 {
-    // v0.4.4 — DF-style handedness trait. Rolled per-smurf at creation
+    // v0.4.4 — DF-style handedness trait. Rolled per-shroomp at creation
     // (Birth / scenario / wanderer-in) with a 90 / 10 right / left
     // split — close enough to the human population baseline and to the
-    // Smurfs-canon "Brainy / Hefty / Vanity are all clearly right-
+    // Shroomps-canon "Brainy / Hefty / Vanity are all clearly right-
     // handed in the comics" pattern. The auto-equip pipeline puts
     // tools and weapons in the dominant hand by default; the off-hand
     // stays free for shields + dual-wield (Phase 7 combat).
@@ -22,14 +22,14 @@ namespace SmurfulationC.Simulation
         public static Handedness Roll(Random rng) =>
             rng.NextDouble() < 0.10 ? Handedness.Left : Handedness.Right;
 
-        public static SmurfulationC.Simulation.Items.EquipSlot DominantHand(Handedness h) =>
+        public static Sporeholm.Simulation.Items.EquipSlot DominantHand(Handedness h) =>
             h == Handedness.Left
-                ? SmurfulationC.Simulation.Items.EquipSlot.LeftHand
-                : SmurfulationC.Simulation.Items.EquipSlot.RightHand;
+                ? Sporeholm.Simulation.Items.EquipSlot.LeftHand
+                : Sporeholm.Simulation.Items.EquipSlot.RightHand;
 
-        public static SmurfulationC.Simulation.Items.EquipSlot OffHand(Handedness h) =>
+        public static Sporeholm.Simulation.Items.EquipSlot OffHand(Handedness h) =>
             h == Handedness.Left
-                ? SmurfulationC.Simulation.Items.EquipSlot.RightHand
-                : SmurfulationC.Simulation.Items.EquipSlot.LeftHand;
+                ? Sporeholm.Simulation.Items.EquipSlot.RightHand
+                : Sporeholm.Simulation.Items.EquipSlot.LeftHand;
     }
 }

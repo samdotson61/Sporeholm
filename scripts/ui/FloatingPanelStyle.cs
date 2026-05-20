@@ -1,6 +1,6 @@
 using Godot;
 
-namespace SmurfulationC.UI
+namespace Sporeholm.UI
 {
     // Roadmap §3.x.7 — shared StyleBoxFlat factory for floating panels.
     // Every Phase-3.x UI element calls Make() (and optionally MakeHover() /
@@ -9,7 +9,7 @@ namespace SmurfulationC.UI
     // chasing per-panel theme overrides across the UI tree.
     public static class FloatingPanelStyle
     {
-        // Default floating panel (HUD capsule / message log / smurf card / etc.).
+        // Default floating panel (HUD capsule / message log / shroomp card / etc.).
         public static StyleBoxFlat Make() => Build(
             bg: UITheme.PanelBg,
             border: UITheme.PanelBorderColour);

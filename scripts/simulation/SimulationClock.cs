@@ -1,6 +1,6 @@
 using System;
 
-namespace SmurfulationC.Simulation
+namespace Sporeholm.Simulation
 {
 	// Configurable tick rate controller.
 	// Base rate: 1 tick = 1 in-game day = 60,000 ms real time (1 real minute).

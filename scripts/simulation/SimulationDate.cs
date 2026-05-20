@@ -1,8 +1,8 @@
-namespace SmurfulationC.Simulation
+namespace Sporeholm.Simulation
 {
 	public enum Season { Spring, Summer, Autumn, Winter }
 
-	// Tracks the in-game S.D. (Smurfo Domini) calendar.
+	// Tracks the in-game S.D. (Sporo Domini) calendar.
 	// All sessions begin at Year 0 S.D. regardless of chosen era.
 	public struct SimulationDate
 	{

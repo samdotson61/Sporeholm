@@ -1,6 +1,6 @@
 using Godot;
-using SmurfulationC;
-using SmurfulationC.UI;
+using Sporeholm;
+using Sporeholm.UI;
 
 // Roadmap §3.x.4 — floating capsule at top-centre showing the colony's
 // stored-resource totals. Wired to SimulationManager.GetResourcesSnapshot()

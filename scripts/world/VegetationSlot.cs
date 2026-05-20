@@ -1,9 +1,9 @@
-namespace SmurfulationC.World
+namespace Sporeholm.World
 {
     // Per-tile vegetation state stored in the parallel VegetationSlot[,] array on LocalMap.
     // All types except Underbrush and MossPatch have harvestable yield.
-    // Base yields: SmurfberryBush=4, SmallMushroom=5, LargeMushroom=3, HerbCluster=3, MagicFlower=2, SmallSandshroom=2, LargeSandshroom=1.
-    // Regrowth timers (in-game days): SmurfberryBush=6, SmallMushroom=3, LargeMushroom=18, HerbCluster=10, MagicFlower=20, SmallSandshroom=6, LargeSandshroom=28.
+    // Base yields: CapberryBush=4, SmallMushroom=5, LargeMushroom=3, HerbCluster=3, MagicFlower=2, SmallSandshroom=2, LargeSandshroom=1.
+    // Regrowth timers (in-game days): CapberryBush=6, SmallMushroom=3, LargeMushroom=18, HerbCluster=10, MagicFlower=20, SmallSandshroom=6, LargeSandshroom=28.
     public struct VegetationSlot
     {
         public VegetationType Type;
@@ -28,7 +28,7 @@ namespace SmurfulationC.World
 
         public static byte BaseYield(VegetationType type) => type switch
         {
-            VegetationType.SmurfberryBush  => 4,
+            VegetationType.CapberryBush  => 4,
             VegetationType.SmallMushroom   => 5,
             VegetationType.LargeMushroom   => 3,
             VegetationType.HerbCluster     => 3,
@@ -43,7 +43,7 @@ namespace SmurfulationC.World
         // In-game days until depleted slot regrows.
         public static ushort RegrowthDays(VegetationType type) => type switch
         {
-            VegetationType.SmurfberryBush  => 6,
+            VegetationType.CapberryBush  => 6,
             VegetationType.SmallMushroom   => 3,
             VegetationType.LargeMushroom   => 18,
             VegetationType.HerbCluster     => 10,

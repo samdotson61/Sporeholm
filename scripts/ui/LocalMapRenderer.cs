@@ -2,7 +2,7 @@ using Godot;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using SmurfulationC.World;
+using Sporeholm.World;
 
 // Node2D that draws the local tile map as a single baked full-resolution texture.
 //
@@ -51,13 +51,13 @@ public partial class LocalMapRenderer : Node2D
 	// fires when at least `UploadIntervalMs` have elapsed since the
 	// last upload. Caps Update-call frequency to a fixed rate, which is
 	// the difference between a Vulkan stutter and smooth playback at
-	// 250 smurfs.
+	// 250 shroomps.
 	//
 	// v0.4.56 — bumped 100 → 200 ms (10 Hz → 5 Hz) per Sam's directive
 	// that "terrain and vegetation tile updates can be throttled to 200ms
 	// as they will not be noticed." The CPU repaint into `_image` still
 	// happens on every dirty event, so the in-memory state stays
-	// authoritative; only the GPU re-upload waits. Smurfs read tile
+	// authoritative; only the GPU re-upload waits. Shroomps read tile
 	// state from LocalMap directly (not from the rendered texture), so
 	// path/task re-evaluation isn't affected by render cadence.
 	private const double UploadIntervalMs = 200.0;
@@ -170,7 +170,7 @@ public partial class LocalMapRenderer : Node2D
 
 		// v0.4.22 — throttle GPU upload. The pre-chunking version
 		// re-uploaded the full ~110 MB texture every frame whenever
-		// anything changed; at 250 smurfs that was 6.6 GB/sec and
+		// anything changed; at 250 shroomps that was 6.6 GB/sec and
 		// saturated the GPU pipeline. v0.4.21 chunked it but the
 		// per-chunk `Update` calls each became Vulkan sync points,
 		// landing Sam at 11 FPS on a 5070 Ti with the GPU at 7 %
@@ -229,8 +229,28 @@ public partial class LocalMapRenderer : Node2D
 		if (terrainType == TerrainType.DeadLog)   { PaintDeadLog(ox, oy, tx, ty);   return; }
 		if (terrainType == TerrainType.LivingWood) { PaintLivingWood(ox, oy, tx, ty); return; }
 		if (terrainType == TerrainType.Boulder)    { PaintBoulder(ox, oy, tx, ty);   return; }
+		if (terrainType == TerrainType.Skeleton)   { PaintSkeleton(ox, oy, tx, ty);  return; }
 
 		Color terrain = TileColor(terrainType);
+
+		// v0.5.84t — roofed tile tint. RimWorld parity: any tile that was
+		// inside a solid mass at worldgen carries IsRoofed=true through
+		// mining, producing the "indoor cave" feel after the player digs
+		// a tunnel. Multiply RGB by 0.74 and shift slightly toward blue
+		// for a subtle "under a ceiling" look. Pre-FillRect so the
+		// terrain accents below also pick up the tint.
+		// Sam: "establish roof tiles over enclosed areas... naturally spawn
+		// (cavern roofs like rimworld) over cave formations and when
+		// digging into deadwood or livingwood."
+		bool isRoofed = Map.Get(tx, ty).IsRoofed;
+		if (isRoofed)
+		{
+			terrain = new Color(
+				terrain.R * 0.74f,
+				terrain.G * 0.78f,
+				terrain.B * 0.86f,   // less reduction in blue → cool cast
+				terrain.A);
+		}
 
 		// v0.3.32 — Godot native FillRect replaces a 256-call SetPixel loop.
 		// Per-tile terrain fill goes from O(256) C#→C++ interop calls to
@@ -239,6 +259,17 @@ public partial class LocalMapRenderer : Node2D
 		// shapes), but those are bounded by the vegetation footprint
 		// inside the tile, not the full 16×16.
 		_image!.FillRect(new Rect2I(ox, oy, TS, TS), terrain);
+
+		// v0.5.84e — light terrain texturing. Sam: "Also add light
+		// texturing to terrain tiles." 8 accent pixels per tile (4
+		// slightly lighter, 4 slightly darker) at positions seeded by
+		// (tx, ty) so adjacent tiles use different scatter patterns and
+		// the eye doesn't pick up a grid. Cost: 8 SetPixel calls per
+		// non-special-painter tile — ~32k interop calls for a full bake
+		// on 80×50 maps (~10 ms one-time at load) and 8 calls per dirty-
+		// tile repaint (negligible). The base FillRect still carries the
+		// terrain identity; accents just break up the flat fill.
+		PaintTerrainAccents(ox, oy, tx, ty, terrain);
 
 		var veg = Map.GetVegetation(tx, ty);
 		if (!veg.IsPresent) return;
@@ -271,8 +302,8 @@ public partial class LocalMapRenderer : Node2D
 				case VegetationType.PalmShroom:
 					PaintFungalStumpPalmShroom(ox, oy, cx, terrain);
 					return;
-				case VegetationType.SmurfberryBush:
-					PaintDepletedSmurfberryBush(cx, cy, terrain);
+				case VegetationType.CapberryBush:
+					PaintDepletedCapberryBush(cx, cy, terrain);
 					return;
 				case VegetationType.SmallMushroom:
 					PaintDepletedSmallMushroom(cx, cy, terrain);
@@ -307,7 +338,7 @@ public partial class LocalMapRenderer : Node2D
 				FillCircle(cx + 2, cy - 3, 1.5f, ubL);
 				break;
 			}
-			case VegetationType.SmurfberryBush:
+			case VegetationType.CapberryBush:
 			{
 				// Spreading bush — blobs reach tile edges so adjacent tiles merge into one connected bush.
 				Color sbD = terrain.Lerp(new Color(0.12f, 0.48f, 0.08f), a);
@@ -537,7 +568,7 @@ public partial class LocalMapRenderer : Node2D
 	// underlying passable terrain so the player reads at a glance which
 	// tiles have been picked-over and which still hold yield.
 
-	private void PaintDepletedSmurfberryBush(int cx, int cy, Color terrain)
+	private void PaintDepletedCapberryBush(int cx, int cy, Color terrain)
 	{
 		// Bare bush: the green leafy blobs without the red berry dots.
 		// Dim the foliage roughly 50 % toward terrain so a freshly-
@@ -666,6 +697,32 @@ public partial class LocalMapRenderer : Node2D
 	// MagicCrystal gets a special ore-vein treatment (a separate
 	// PaintMagicCrystal path) because the visual language is veins
 	// running through host rock rather than a uniform stone fill.
+	// v0.5.84e — light terrain texturing helper. Sprinkles 8 single-pixel
+	// accents per tile (mix of slightly-lighter and slightly-darker than
+	// the base terrain colour). Positions are seeded per-(tx, ty) using
+	// an LCG so adjacent tiles get distinct scatter patterns — no visible
+	// repeating grid. Channel adjustments are clamped to [0, 1] for safety
+	// near pure-black or pure-white base colours.
+	private void PaintTerrainAccents(int ox, int oy, int tx, int ty, Color baseCol)
+	{
+		var lighter = new Color(
+			System.Math.Min(1f, baseCol.R + 0.06f),
+			System.Math.Min(1f, baseCol.G + 0.06f),
+			System.Math.Min(1f, baseCol.B + 0.06f), 1f);
+		var darker = new Color(
+			System.Math.Max(0f, baseCol.R - 0.06f),
+			System.Math.Max(0f, baseCol.G - 0.06f),
+			System.Math.Max(0f, baseCol.B - 0.06f), 1f);
+		uint s = (uint)((tx * 73856093) ^ (ty * 19349663));
+		for (int i = 0; i < 8; i++)
+		{
+			s = s * 1664525u + 1013904223u;
+			int dx = (int)((s >> 8)  & 15);
+			int dy = (int)((s >> 16) & 15);
+			_image!.SetPixel(ox + dx, oy + dy, (s & 1u) == 0 ? lighter : darker);
+		}
+	}
+
 	private void PaintBoulder(int ox, int oy, int tx, int ty)
 	{
 		var stone = Map?.GetTileStone(tx, ty);
@@ -736,6 +793,68 @@ public partial class LocalMapRenderer : Node2D
 		"Magicstone" => (new(0.46f, 0.38f, 0.62f), new(0.66f, 0.58f, 0.86f), new(0.28f, 0.22f, 0.42f), new(0.18f, 0.10f, 0.30f)),
 		_            => (new(0.52f, 0.54f, 0.60f), new(0.70f, 0.72f, 0.78f), new(0.38f, 0.40f, 0.46f), new(0.22f, 0.22f, 0.26f)),
 	};
+
+	// v0.5.84t — partial buried skeleton. Bone fragments poking out of an
+	// earthy ground patch — visually reads as "old bones half-buried in dirt"
+	// at Shroomp scale. Three variants seeded by tile position so adjacent
+	// fragments in a cluster don't all look identical:
+	//   0 — rib bone: long horizontal off-white bar with two notch shadows
+	//   1 — skull   : rounded near-circular bone fragment with two dark socket pixels
+	//   2 — pelvis  : asymmetric chunk with a central hole
+	// Excavate-drops-Bone hook lives in BehaviorSystem.cs:3769 (TerrainType.Skeleton
+	// → ItemKind.Material/BoneFragment, yield 3).
+	private void PaintSkeleton(int ox, int oy, int tx, int ty)
+	{
+		Color ground   = new Color(0.36f, 0.28f, 0.18f);   // damp earth
+		Color groundLt = new Color(0.46f, 0.36f, 0.22f);   // disturbed earth highlight
+		Color bone     = new Color(0.92f, 0.88f, 0.76f);   // cream bone
+		Color boneLt   = new Color(1.00f, 0.96f, 0.84f);   // sunlit edge
+		Color boneShad = new Color(0.62f, 0.56f, 0.44f);   // bone shadow / socket
+		Color dirt     = new Color(0.24f, 0.18f, 0.12f);   // deep shadow under bone
+
+		// Base disturbed-earth patch.
+		_image!.FillRect(new Rect2I(ox, oy, TS, TS), ground);
+		// Scattered lighter clods around the edges.
+		FillRect(ox + 1,  oy + 1,  2, 1, groundLt);
+		FillRect(ox + 12, oy + 2,  2, 1, groundLt);
+		FillRect(ox + 2,  oy + 13, 3, 1, groundLt);
+		FillRect(ox + 11, oy + 14, 2, 1, groundLt);
+
+		int variant = (tx * 1499 + ty * 2347) % 3;
+		if (variant == 0)
+		{
+			// Rib bone: 10×3 bone bar with shadow line + two notch cracks.
+			FillRect(ox + 3, oy + 8,  10, 3, bone);
+			FillRect(ox + 3, oy + 11, 10, 1, boneShad);
+			FillRect(ox + 6, oy + 8,   1, 3, dirt);
+			FillRect(ox + 10, oy + 8,  1, 3, dirt);
+			FillRect(ox + 3, oy + 8,  10, 1, boneLt);
+		}
+		else if (variant == 1)
+		{
+			// Skull fragment: rounded bone blob with two eye sockets.
+			FillRect(ox + 4, oy + 4,  8, 7, bone);
+			FillRect(ox + 4, oy + 11, 8, 1, boneShad);
+			FillRect(ox + 5, oy + 3,  6, 1, bone);
+			FillRect(ox + 3, oy + 5,  1, 5, bone);
+			FillRect(ox + 12, oy + 5, 1, 5, bone);
+			// Eye sockets.
+			FillRect(ox + 5,  oy + 6, 2, 2, dirt);
+			FillRect(ox + 9,  oy + 6, 2, 2, dirt);
+			// Sunlit top edge.
+			FillRect(ox + 5, oy + 4,  6, 1, boneLt);
+		}
+		else
+		{
+			// Pelvis chunk: asymmetric bone fragment with central hole.
+			FillRect(ox + 2,  oy + 5,  12, 6, bone);
+			FillRect(ox + 2,  oy + 11, 12, 1, boneShad);
+			FillRect(ox + 6,  oy + 7,   4, 2, dirt);     // central hole
+			FillRect(ox + 1,  oy + 7,   1, 3, bone);     // left wing
+			FillRect(ox + 14, oy + 7,   1, 3, bone);     // right wing
+			FillRect(ox + 2,  oy + 5,  12, 1, boneLt);   // sunlit top
+		}
+	}
 
 	// v0.4.2 — MagicCrystal ore vein. Host rock (granite-grey) with
 	// bright violet-cyan crystal facets running through. Dwarf-Fortress
@@ -863,7 +982,7 @@ public partial class LocalMapRenderer : Node2D
 	// v0.4.16 — scanline-based fill replaces the per-pixel SetPixel loop.
 	// The previous version made up to π·r² SetPixel calls per circle,
 	// and each call crosses the C#↔C++ managed boundary. With ~5
-	// FillCircles per LargeMushroom repaint × 17 smurfs chopping per
+	// FillCircles per LargeMushroom repaint × 17 shroomps chopping per
 	// second the interop transitions dominated PaintTile's runtime and
 	// produced the microstutter on vegetation state changes. One row
 	// of the disk = one FillRect call instead of `2r` SetPixels, so the
@@ -911,6 +1030,11 @@ public partial class LocalMapRenderer : Node2D
 		// player can read "this is wadeable" at a glance. Sits between
 		// Water (0.18, 0.42, 0.72) and Mud, tinted toward cyan.
 		TerrainType.Shallows    => new Color(0.45f, 0.68f, 0.85f),
+		// v0.5.84t — Skeleton: bone-cream over earthy brown ground. The
+		// PaintSkeleton specialty paint draws actual bone fragments on top;
+		// this colour is the fallback for any minimap / preview path that
+		// reads TileColor without going through PaintTile.
+		TerrainType.Skeleton    => new Color(0.86f, 0.82f, 0.70f),
 		_                       => Colors.Black,
 	};
 }

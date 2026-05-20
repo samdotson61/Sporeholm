@@ -1,7 +1,7 @@
 using Godot;
 using System.Collections.Generic;
-using SmurfulationC.Simulation.Items;
-using SmurfulationC.UI;
+using Sporeholm.Simulation.Items;
+using Sporeholm.UI;
 
 // Top-bar HUD: era name, S.D. date, population, mood summary, speed controls.
 // Phase 3.x refactor — was a full-width flush bar with `ColorRect` background;
@@ -59,7 +59,7 @@ public partial class HUDController : Control
 	private bool IsPaused => Sim?.Paused ?? false;
 
 	// Injected by GameController after construction
-	public SmurfulationC.SimulationManager Sim { get; set; } = null!;
+	public Sporeholm.SimulationManager Sim { get; set; } = null!;
 
 	public override void _Ready()
 	{
@@ -150,7 +150,7 @@ public partial class HUDController : Control
 
 		statsRow.AddChild(Divider());
 
-		statsRow.AddChild(SmurfIcon(UITheme.Scaled(18)));
+		statsRow.AddChild(ShroompIcon(UITheme.Scaled(18)));
 		_popLabel = Lbl("Pop: 7", UITheme.Scaled(13), Parchment);
 		statsRow.AddChild(_popLabel);
 
@@ -175,7 +175,7 @@ public partial class HUDController : Control
 		// look them up against the inventory snapshot. The display label
 		// uses the friendly name; the lookup key is the raw sub-type.
 		// v0.4.2 — sub-items aligned with the new taxonomy. Food shows
-		// the four real food sub-types (Smurfberry / SmallMushroom /
+		// the four real food sub-types (Capberry / SmallMushroom /
 		// HerbCluster / MagicBerry); SmallMushroom row counts EVERY
 		// mushroom variant via material aggregation. Stone adds Quartz
 		// + MagicCrystal. Wood reduces to DeadWood / LivingWood / Fungal.
@@ -183,7 +183,7 @@ public partial class HUDController : Control
 			ItemKind.Food, materialFamily: null,
 			new[]
 			{
-				("🫐", "Smurfberry",      "Smurfberry"),
+				("🫐", "Capberry",      "Capberry"),
 				("🍄", "Small Mushroom",  "SmallMushroom"),
 				("🌿", "Herb Cluster",    "HerbCluster"),
 				("🌺", "Magic Berry",     "MagicBerry"),
@@ -283,9 +283,9 @@ public partial class HUDController : Control
 			_dateLabel.MouseFilter = MouseFilterEnum.Pass;
 			_dateLabel.TooltipText = "In-game date: Season, Day, Year S.D.\n120 days per year (4 seasons × 30 days).";
 			_popLabel.MouseFilter  = MouseFilterEnum.Pass;
-			_popLabel.TooltipText  = "Total living smurfs in the colony.";
+			_popLabel.TooltipText  = "Total living shroomps in the colony.";
 			_moodLabel.MouseFilter = MouseFilterEnum.Pass;
-			_moodLabel.TooltipText = "😊 Inspired smurfs (mood ≥ 80)\n😢 Distressed or worse (mood < 40).";
+			_moodLabel.TooltipText = "😊 Inspired shroomps (mood ≥ 80)\n😢 Distressed or worse (mood < 40).";
 		}
 	}
 
@@ -575,13 +575,30 @@ public partial class HUDController : Control
 		return cat;
 	}
 
-	private static AnimatedButton MakeSmallBtn(string text) => new()
+	// v0.5.43 — speed / menu buttons now scale with UI Size. Pre-v0.5.43
+	// these were hardcoded to a 32-px height + AnimatedButton's internal
+	// 13-pt Compact font, neither of which scaled with the v0.5.29 UI Size
+	// slider. Result: the speed/menu capsule stayed at 100 % size while
+	// the rest of the HUD shrank, causing visual overlap on small UI Size.
+	// Sam: "Speed/Menu panel does not currently scale with the rest of the
+	// UI, causing overlap at small UI sizes."
+	private static AnimatedButton MakeSmallBtn(string text)
 	{
-		Text              = text,
-		CustomMinimumSize = new Vector2(0, 32),
-		PlayHoverSound    = false,
-		Compact           = true,
-	};
+		var btn = new AnimatedButton
+		{
+			Text              = text,
+			CustomMinimumSize = new Vector2(0, UITheme.Scaled(32)),
+			PlayHoverSound    = false,
+			Compact           = true,
+		};
+		// Override the AnimatedButton.Compact 13-pt default with a UI-scaled
+		// font size. CallDeferred (snake_case for the engine) so the
+		// override stomps AnimatedButton._Ready → ApplyStyle's internal
+		// 13-pt assignment that would otherwise overwrite us.
+		btn.CallDeferred("add_theme_font_size_override",
+			"font_size", UITheme.Scaled(13));
+		return btn;
+	}
 
 	private static Label Lbl(string text, int size, Color color)
 	{
@@ -594,9 +611,9 @@ public partial class HUDController : Control
 		return l;
 	}
 
-	private static TextureRect SmurfIcon(int size)
+	private static TextureRect ShroompIcon(int size)
 	{
-		const string path = "res://assets/icons/smurf_icon.svg";
+		const string path = "res://assets/icons/shroomp_icon.svg";
 		var rect = new TextureRect
 		{
 			CustomMinimumSize = new Vector2(size, size),

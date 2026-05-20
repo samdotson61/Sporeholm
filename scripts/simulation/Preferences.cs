@@ -1,14 +1,14 @@
 using System;
 using System.Collections.Generic;
 
-namespace SmurfulationC.Simulation
+namespace Sporeholm.Simulation
 {
     // v0.3.43 — Preferences (Dwarf-Fortress-style persistent likes and
     // dislikes).
     //
     // Where Thoughts are *temporal* — a mood reaction that decays — Preferences
-    // are *permanent traits of who the smurf is*. They drive task selection,
-    // social affinity, and the thoughts emitted on completion. Every smurf
+    // are *permanent traits of who the shroomp is*. They drive task selection,
+    // social affinity, and the thoughts emitted on completion. Every shroomp
     // rolls a small set at creation time and carries them for life:
     //
     //   • LikedItems / DislikedItems        — food, materials, future Phase 4
@@ -16,7 +16,7 @@ namespace SmurfulationC.Simulation
     //   • LikedActivities / DislikedActivities — task types they preferentially
     //                                          pick or avoid (Foraging,
     //                                          Excavating, Socializing, …).
-    //   • LikedSmurfs / DislikedSmurfs       — built up at runtime from social
+    //   • LikedShroomps / DislikedShroomps       — built up at runtime from social
     //                                          encounters; not rolled on
     //                                          creation. Bounded to ~8 entries
     //                                          per list to keep lookups cheap.
@@ -35,8 +35,8 @@ namespace SmurfulationC.Simulation
         public List<string> DislikedActivities{ get; set; } = new();
 
         // Runtime-mutable, built from social events.
-        public List<string> LikedSmurfs       { get; set; } = new();
-        public List<string> DislikedSmurfs    { get; set; } = new();
+        public List<string> LikedShroomps       { get; set; } = new();
+        public List<string> DislikedShroomps    { get; set; } = new();
 
         // Cap social lists so they don't grow unbounded over an Elder's lifetime.
         // Older entries fall off when new ones push past this size.
@@ -46,23 +46,23 @@ namespace SmurfulationC.Simulation
         public bool DislikesItem(string item)     => item != null && DislikedItems.Contains(item);
         public bool LikesActivity(string act)     => act  != null && LikedActivities   .Contains(act);
         public bool DislikesActivity(string act)  => act  != null && DislikedActivities.Contains(act);
-        public bool LikesSmurf(string name)       => name != null && LikedSmurfs   .Contains(name);
-        public bool DislikesSmurf(string name)    => name != null && DislikedSmurfs.Contains(name);
+        public bool LikesShroomp(string name)       => name != null && LikedShroomps   .Contains(name);
+        public bool DislikesShroomp(string name)    => name != null && DislikedShroomps.Contains(name);
 
         public void Befriend(string name)
         {
-            if (name == null || LikedSmurfs.Contains(name)) return;
-            DislikedSmurfs.Remove(name);
-            LikedSmurfs.Add(name);
-            while (LikedSmurfs.Count > SocialCap) LikedSmurfs.RemoveAt(0);
+            if (name == null || LikedShroomps.Contains(name)) return;
+            DislikedShroomps.Remove(name);
+            LikedShroomps.Add(name);
+            while (LikedShroomps.Count > SocialCap) LikedShroomps.RemoveAt(0);
         }
 
         public void Sour(string name)
         {
-            if (name == null || DislikedSmurfs.Contains(name)) return;
-            LikedSmurfs.Remove(name);
-            DislikedSmurfs.Add(name);
-            while (DislikedSmurfs.Count > SocialCap) DislikedSmurfs.RemoveAt(0);
+            if (name == null || DislikedShroomps.Contains(name)) return;
+            LikedShroomps.Remove(name);
+            DislikedShroomps.Add(name);
+            while (DislikedShroomps.Count > SocialCap) DislikedShroomps.RemoveAt(0);
         }
     }
 
@@ -70,13 +70,13 @@ namespace SmurfulationC.Simulation
     {
         // Item names that can appear in Liked/Disliked at creation. Mirrors
         // the Phase 4 procedural-item categories plus the existing Phase 3
-        // vegetation yields so the lists are meaningful today (Smurfberry,
+        // vegetation yields so the lists are meaningful today (Capberry,
         // Pineshroom, …) and stay meaningful as Phase 4 introduces material
         // / quality variation. Keep this list small at first — adding more
         // entries here is free, but breaking values that already appear in
         // a savefile would corrupt continuity, so prefer additive edits.
         // v0.4.2 — aligned with the new item taxonomy. Food sub-types
-        // are the four real ones (Smurfberry / SmallMushroom /
+        // are the four real ones (Capberry / SmallMushroom /
         // HerbCluster / MagicBerry); material entries cover the three
         // wood + the seven stone variants that the player actually
         // sees in the HUD. Removed Pineshroom / PalmShroom / Oak / Pine
@@ -84,7 +84,7 @@ namespace SmurfulationC.Simulation
         // registry and would never trigger a preference match.
         public static readonly string[] ItemPool =
         {
-            "Smurfberry", "SmallMushroom", "HerbCluster", "MagicBerry",
+            "Capberry", "SmallMushroom", "HerbCluster", "MagicBerry",
             "DeadWood", "LivingWood", "Fungal",
             "Granite", "Limestone", "Marble", "Obsidian", "Quartz", "Magicstone",
         };
@@ -99,7 +99,7 @@ namespace SmurfulationC.Simulation
         // activities, weighted by personality. Introverts skew toward
         // disliking Socializing; Greedy-Guts skew toward liking foods;
         // Mages and Daydreamers skew toward Meditating / Observing.
-        // Defaults are gentle: most smurfs will roll close to neutral.
+        // Defaults are gentle: most shroomps will roll close to neutral.
         public static Preferences Assign(Random rng, IReadOnlyList<string> personality)
         {
             var p = new Preferences();
@@ -162,13 +162,13 @@ namespace SmurfulationC.Simulation
                     break;
                 case "Greedy Gut":
                     if (!p.LikedActivities.Contains("Foraging"))       p.LikedActivities.Add("Foraging");
-                    if (!p.LikedItems.Contains("Smurfberry"))          p.LikedItems.Add("Smurfberry");
+                    if (!p.LikedItems.Contains("Capberry"))          p.LikedItems.Add("Capberry");
                     break;
                 case "Mushroom Whisperer":
                     // v0.4.2 — SmallMushroom is the only food sub-type
                     // remaining for mushrooms; the Large variant rolls
                     // through the material axis. Liking SmallMushroom
-                    // covers every mushroom the smurf encounters.
+                    // covers every mushroom the shroomp encounters.
                     if (!p.LikedItems.Contains("SmallMushroom"))       p.LikedItems.Add("SmallMushroom");
                     if (!p.LikedItems.Contains("Fungal"))              p.LikedItems.Add("Fungal");
                     break;

@@ -2,50 +2,79 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace SmurfulationC.Simulation
+namespace Sporeholm.Simulation
 {
     public sealed record SkillDef(string Name, string Domain, string Description);
 
     public static class SkillRegistry
     {
+        // v0.5.84r — skill list compacted from 16 → 11 skills per Sam's
+        // playtest-prep restructure. Merges + renames:
+        //   • Foraging + Botany → Botany (all plant/chop work)
+        //   • Arcane + Ritual + Lore → Magic (Attune + future magic system)
+        //   • Empathy + Leadership → Social (Empathy/Leadership covered the
+        //     same conversational ground)
+        //   • Medicine → Healing (the role-driving skill the Healer job uses)
+        //   • Research → Study (aesthetic rename)
+        // Cap budget proportionally reduced 320 → 220 (11 × 20 max).
+        // Legacy saves migrate via SkillNameMigration applied at Shroomp load.
         public static readonly IReadOnlyList<SkillDef> All = new[]
         {
             // Survival
-            new SkillDef("Foraging",     "Survival",  "Locating and harvesting wild food and materials."),
-            new SkillDef("Botany",       "Survival",  "Growing crops and tending plants."),
+            new SkillDef("Botany",       "Survival",  "Foraging, planting, cutting, and chopping — all plant work."),
             new SkillDef("Mining",       "Survival",  "Excavating stone, ore, and earth."),
-            new SkillDef("Athletics",    "Survival",  "Speed, stamina, and physical endurance."),
+            new SkillDef("Athletics",    "Survival",  "Speed, stamina, and physical endurance. Levels via hauling and walking; raises move speed, carry capacity, and disease resistance."),
             // Combat
             new SkillDef("Melee",        "Combat",    "Close-quarters fighting with weapons or fists."),
             new SkillDef("Ranged",       "Combat",    "Attacking at distance with thrown or launched projectiles."),
             // Crafting
-            new SkillDef("Crafting",     "Crafting",  "Making tools, goods, and equipment."),
+            new SkillDef("Crafting",     "Crafting",  "Making tools, goods, meals, and equipment at workbenches."),
             new SkillDef("Construction", "Crafting",  "Building and repairing structures."),
-            // Magic
-            new SkillDef("Arcane",       "Magic",     "Channeling and manipulating magic essence."),
-            new SkillDef("Ritual",       "Magic",     "Performing Smurf ceremonies and enchantments."),
+            // Magic (placeholder — full system in a future phase)
+            new SkillDef("Magic",        "Magic",     "Channeling magic essence, performing rituals, and Shroomp lore. Levels via Attune until the full magic system ships."),
             // Social
-            new SkillDef("Social",       "Social",    "Building community bonds and raising morale."),
-            new SkillDef("Empathy",      "Social",    "Reading and soothing the feelings of others."),
-            new SkillDef("Leadership",   "Social",    "Inspiring and coordinating the colony."),
+            new SkillDef("Social",       "Social",    "Conversation, empathy, leadership, and community influence."),
             // Knowledge
-            new SkillDef("Lore",         "Knowledge", "Understanding of Smurf history and nature."),
-            new SkillDef("Research",     "Knowledge", "Systematic investigation and discovery."),
-            new SkillDef("Medicine",     "Knowledge", "Treating wounds and illness."),
+            new SkillDef("Study",        "Knowledge", "Systematic investigation and discovery (Phase 11)."),
+            new SkillDef("Healing",      "Knowledge", "Treating wounds and illness. Drives the Healer job's tend speed and quality."),
         };
 
-        // Flat bonuses roles grant to their primary skills during role work.
-        // Shown in the Skills tab UI and will feed Phase 3 effective-skill calculations.
+        // v0.5.84r — legacy skill name migration. Applied at Shroomp load
+        // to rename keys in s.Skills / s.SkillsXp / s.SkillsXpToday from
+        // the pre-restructure names. Multiple old skills can merge into
+        // one new skill — values are summed (Skills clamped to 20).
+        public static readonly Dictionary<string, string> SkillNameMigration = new()
+        {
+            { "Foraging",   "Botany" },
+            { "Arcane",     "Magic" },
+            { "Ritual",     "Magic" },
+            { "Lore",       "Magic" },
+            { "Empathy",    "Social" },
+            { "Leadership", "Social" },
+            { "Medicine",   "Healing" },
+            { "Research",   "Study" },
+            { "Cooking",    "Crafting" },
+        };
+
+        // v0.5.84r — role bonuses re-mapped to new skill set.
         // Primary (+3) · Secondary (+2) · Supporting (+1)
+        //
+        // Forager   — Botany (food + plant + chop), Athletics (lots of walking), Mining (occasional excavation)
+        // Crafter   — Crafting (workbench-driven), Construction (build), Mining (resource collection)
+        // Scholar   — Study, Magic (lore consolidated into magic), Healing (medical knowledge overlap)
+        // Mage      — Magic, Study, Social (mystical communication)
+        // Caretaker — Healing, Social (empathy consolidated), Crafting (medicine prep)
+        // Guardian  — Melee, Ranged, Athletics
+        // Elder     — Social (leadership consolidated), Study, Healing
         private static readonly Dictionary<string, Dictionary<string, int>> _roleBonuses = new()
         {
-            ["Forager"]   = new() { ["Foraging"] = 3, ["Athletics"] = 2, ["Botany"]        = 1 },
-            ["Crafter"]   = new() { ["Crafting"] = 3, ["Construction"] = 2, ["Mining"]     = 1 },
-            ["Scholar"]   = new() { ["Research"] = 3, ["Lore"] = 2, ["Botany"]             = 1 },
-            ["Mage"]      = new() { ["Arcane"]   = 3, ["Ritual"] = 2, ["Lore"]             = 1 },
-            ["Caretaker"] = new() { ["Medicine"] = 3, ["Empathy"] = 2, ["Social"]          = 1 },
-            ["Guardian"]  = new() { ["Melee"]    = 3, ["Ranged"] = 2, ["Athletics"]        = 1 },
-            ["Elder"]     = new() { ["Leadership"] = 3, ["Lore"] = 2, ["Social"]           = 1 },
+            ["Forager"]   = new() { ["Botany"]   = 3, ["Athletics"]    = 2, ["Mining"]   = 1 },
+            ["Crafter"]   = new() { ["Crafting"] = 3, ["Construction"] = 2, ["Mining"]   = 1 },
+            ["Scholar"]   = new() { ["Study"]    = 3, ["Magic"]        = 2, ["Healing"]  = 1 },
+            ["Sage"]      = new() { ["Magic"]    = 3, ["Study"]        = 2, ["Social"]   = 1 },
+            ["Caretaker"] = new() { ["Healing"]  = 3, ["Social"]       = 2, ["Crafting"] = 1 },
+            ["Guardian"]  = new() { ["Melee"]    = 3, ["Ranged"]       = 2, ["Athletics"] = 1 },
+            ["Elder"]     = new() { ["Social"]   = 3, ["Study"]        = 2, ["Healing"]  = 1 },
         };
 
         public static int GetRoleBonus(string role, string skill) =>
@@ -78,7 +107,7 @@ namespace SmurfulationC.Simulation
         // and rolls up level transitions. Idempotent against missing dict
         // keys (they default to 0). Caller responsibility: check that
         // `skillName` is a real skill — silent no-op otherwise.
-        public static void GainXp(Smurf s, string skillName, float amount)
+        public static void GainXp(Shroomp s, string skillName, float amount)
         {
             if (s == null || amount <= 0f) return;
             if (!s.Skills.ContainsKey(skillName)) return;   // not a real skill
@@ -126,18 +155,64 @@ namespace SmurfulationC.Simulation
         // patterns: skills 10-20 lose 0.1-12 XP/interval; we'll add
         // when Phase 5 / 6 introduce specialised colonists worth
         // protecting from rust).
-        public static void ResetDailyXp(Smurf s)
+        public static void ResetDailyXp(Shroomp s)
         {
             s.SkillsXpToday.Clear();
         }
 
+        // v0.5.84r — apply the legacy-skill rename map to a loaded
+        // Skills dict (and matching XP dicts). For 1:1 renames the
+        // value moves cleanly; for many-to-one merges (Arcane + Ritual
+        // + Lore → Magic), the highest level wins for s.Skills and the
+        // XP buckets sum. Safe to call on a fresh dict — no-op if no
+        // legacy keys present.
+        public static void MigrateLegacySkillKeys(
+            Dictionary<string, int>   skills,
+            Dictionary<string, float> xp,
+            Dictionary<string, float> xpToday)
+        {
+            foreach (var (oldName, newName) in SkillNameMigration)
+            {
+                if (skills.TryGetValue(oldName, out int lvl))
+                {
+                    if (skills.TryGetValue(newName, out int existing))
+                        skills[newName] = Math.Min(MaxLevel, Math.Max(existing, lvl));
+                    else
+                        skills[newName] = Math.Min(MaxLevel, lvl);
+                    skills.Remove(oldName);
+                }
+                if (xp.TryGetValue(oldName, out float oldXp))
+                {
+                    xp.TryGetValue(newName, out float existingXp);
+                    xp[newName] = existingXp + oldXp;
+                    xp.Remove(oldName);
+                }
+                if (xpToday.TryGetValue(oldName, out float oldToday))
+                {
+                    xpToday.TryGetValue(newName, out float existingToday);
+                    xpToday[newName] = existingToday + oldToday;
+                    xpToday.Remove(oldName);
+                }
+            }
+        }
+
+        // v0.5.84r — total skill point cap. Was 320 (16 skills × 20 max);
+        // now 220 (11 × 20). Sam: "ensure that skill point allocation
+        // weight on shroomp creation is adjusted for the new total skill
+        // point reduction (now 11 skills for 220 total skill points —
+        // reduce allocation by the appropriate percentage)."
+        public const int SkillBudgetCap = 220;
+
         // Distributes random skill points using a right-skewed budget.
         //
         // Budget: u = min(rand, rand, rand) ∈ [0,1] — gives a cubic CDF so ~65% of
-        // Sprouts land below 100 points and 320 (full cap) is exceedingly rare.
-        // Older smurfs receive a guaranteed age floor that raises their minimum.
+        // Sprouts land below SkillBudgetCap×0.31 points and the full cap is exceedingly rare.
+        // Older shroomps receive a guaranteed age floor that raises their minimum.
         // Role-primary skills receive 4× allocation weight over all other skills.
-        public static void Distribute(Smurf s, Random rng)
+        // v0.5.84r — budget reduced 320 → 220 to match the 11-skill set.
+        // Age floors scaled by the same 220/320 = 0.69 ratio to keep
+        // the relative spread.
+        public static void Distribute(Shroomp s, Random rng)
         {
             foreach (var def in All)
                 s.Skills[def.Name] = 0;
@@ -145,13 +220,13 @@ namespace SmurfulationC.Simulation
             double u = Math.Min(Math.Min(rng.NextDouble(), rng.NextDouble()), rng.NextDouble());
             int floor = s.LifeStage switch
             {
-                LifeStage.Juvenile   => 20,
-                LifeStage.Adult      => 50,
-                LifeStage.Elder      => 70,
-                LifeStage.LastSeason => 80,
+                LifeStage.Juvenile   => 14,   // was 20 (20×0.69 ≈ 14)
+                LifeStage.Adult      => 34,   // was 50
+                LifeStage.Elder      => 48,   // was 70
+                LifeStage.LastSeason => 55,   // was 80
                 _                    =>  0,
             };
-            int budget = Math.Min(320, (int)(u * (320 - floor)) + floor);
+            int budget = Math.Min(SkillBudgetCap, (int)(u * (SkillBudgetCap - floor)) + floor);
             if (budget <= 0) return;
 
             // Role-primary skills get 4× weight; all others get 1×.

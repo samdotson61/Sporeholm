@@ -1,4 +1,4 @@
-namespace SmurfulationC.Simulation.Items
+namespace Sporeholm.Simulation.Items
 {
     // v0.3.46 (Phase 4 core) — top-level item categorisation. Mirrors the
     // 9-category taxonomy laid out in §3.x.8 / Phase 4 of the roadmap.
@@ -16,11 +16,11 @@ namespace SmurfulationC.Simulation.Items
         Magic,
         TradeGood,
         Trinket,
-        // v0.4.33 — Corpse item. Spawned on smurf death; carries the
-        // dead smurf's biographical data in Item.CorpseInfo. Decays
+        // v0.4.33 — Corpse item. Spawned on shroomp death; carries the
+        // dead shroomp's biographical data in Item.CorpseInfo. Decays
         // like food but at a roadmap-spec ~7-day timeline before the
         // tile becomes empty again. Non-stackable (each corpse is one
-        // unique smurf).
+        // unique shroomp).
         Corpse,
     }
 

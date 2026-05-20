@@ -1,29 +1,49 @@
-namespace SmurfulationC.World
+namespace Sporeholm.World
 {
     // v0.5.14 (Phase 5C — rimport.md N19) — wildlife spawn-point stub.
     // Full Animal system (creature data + AI + behaviour) lands in Phase 9
-    // per rimport.md N12 ("Animals can ship as a strict subset of Smurf
+    // per rimport.md N12 ("Animals can ship as a strict subset of Shroomp
     // — same BodyParts + Needs + simplified BehaviorSystem"). Until then,
     // generation places `AnimalSpawnPoint` markers per biome's faunal
     // table; the markers are inert (no creature actually spawns yet) but
     // serve as anchored locations the Phase 9 system will read when it
     // populates the map.
     //
-    // Smurf-flavoured fauna roster (rimport.md §21):
-    //   • MushroomGrazer  — passive food source (small herd grazer,
-    //                       comparable to RimWorld's deer/alpaca)
-    //   • ShroombackBeetle — passive hauler post-tame (slow-moving
-    //                       beetle that smurfs can train to carry items)
-    //   • WildRat         — predator (stealth-attacks corpses, harasses
-    //                       small smurfs)
+    // v0.5.15 — species aligned with the Phase 9 roadmap roster
+    // (Roadmap §9.1, lines 2020-2029) instead of v0.5.14's generic
+    // placeholders (MushroomGrazer / ShroombackBeetle / WildRat). Using
+    // the roadmap's specific species names means the spawn points placed
+    // now will be consumed directly by the Phase 9 implementation
+    // without renaming.
     //
-    // Three is enough for the first faunal pass. Phase 9 can extend to
-    // half a dozen per biome with proper spawn weights.
+    // Shroomp-flavoured fauna roster:
+    //
+    //   MushroomGoat    — Tameable, Grazer, Milkable (Fungal Milk),
+    //                     Shearable (Spore Wool), Butcherable, Breeds.
+    //                     The colony's primary husbandry animal.
+    //   BonecrestBeetle — Tameable, Pack (post-tame hauler), Carnivore.
+    //                     Replaces the v0.5.14 ShroombackBeetle stub.
+    //   CaveLizard      — Tameable (hard), Hunt Animal, Carnivore, Breeds.
+    //                     The wild predator role; future hunter
+    //                     companion.
+    //   GlowBunny       — Tameable, Pet, Butcherable (Meat, Glow-Fur),
+    //                     Grazer, Breeds. Light passive prey + cosmetic
+    //                     pet.
+    //   ForestBoar      — Tameable (hard), War Animal, Omnivore,
+    //                     Butcherable, Breeds. Aggressive forest predator
+    //                     that becomes a war mount when tamed.
+    //
+    // Additional Phase 9 species (HoneyBeeSwarm, ShoreFrog, Pegasus,
+    // SkyPony) defer to the full Phase 9 implementation — they need
+    // beekeeper sub-skill, biome-specific spawning rules, or late-game
+    // era unlocks that don't fit the v0.5.x stub layer.
     public enum AnimalKind : byte
     {
-        MushroomGrazer,
-        ShroombackBeetle,
-        WildRat,
+        MushroomGoat,
+        BonecrestBeetle,
+        CaveLizard,
+        GlowBunny,
+        ForestBoar,
     }
 
     // Tile-anchored spawn point. The Phase 9 system will read this list

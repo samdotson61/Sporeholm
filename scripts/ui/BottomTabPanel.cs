@@ -1,5 +1,5 @@
 using Godot;
-using SmurfulationC.UI;
+using Sporeholm.UI;
 
 // v0.3.27 — bottom-right tab shell with per-host panels.
 //
@@ -19,9 +19,9 @@ using SmurfulationC.UI;
 public partial class BottomTabPanel : Control
 {
     // v0.3.41 — Resources and Animals tabs added.
-    // Resources sits between Jobs and Smurfs (granular ledger view).
+    // Resources sits between Jobs and Shroomps (granular ledger view).
     // Animals is a Phase 9 stub anchored at the far right.
-    public enum Tab { None, Orders, Build, Zones, Jobs, Resources, Smurfs, Animals }
+    public enum Tab { None, Orders, Build, Zones, Areas, Jobs, Resources, Shroomps, Animals }
 
     private Tab _active = Tab.None;
 
@@ -31,23 +31,26 @@ public partial class BottomTabPanel : Control
     private PanelContainer _ordersHost    = null!;
     private PanelContainer _buildHost     = null!;
     private PanelContainer _zonesHost     = null!;
+    private PanelContainer _areasHost     = null!;   // v0.5.44
     private PanelContainer _jobsHost      = null!;
     private PanelContainer _resourcesHost = null!;
-    private PanelContainer _smurfsHost    = null!;
+    private PanelContainer _shroompsHost    = null!;
     private PanelContainer _animalsHost   = null!;
 
     private Button _ordersBtn    = null!;
     private Button _buildBtn     = null!;
     private Button _zonesBtn     = null!;
+    private Button _areasBtn     = null!;   // v0.5.44
     private Button _jobsBtn      = null!;
     private Button _resourcesBtn = null!;
-    private Button _smurfsBtn    = null!;
+    private Button _shroompsBtn    = null!;
     private Button _animalsBtn   = null!;
 
     private DesignationToolbar? _orders;
-    private SmurfRosterPanel?   _roster;
+    private ShroompRosterPanel?   _roster;
     private ResourcesPanel?     _resources;
     private JobsPanel?          _jobs;
+    private AreasPanel?         _areas;   // v0.5.44
 
     public override void _Ready()
     {
@@ -74,7 +77,7 @@ public partial class BottomTabPanel : Control
     {
         // Detach embedded panels before nuking the shell so they survive.
         if (_orders    != null) _ordersHost   .RemoveChild(_orders);
-        if (_roster    != null) _smurfsHost   .RemoveChild(_roster);
+        if (_roster    != null) _shroompsHost   .RemoveChild(_roster);
         if (_resources != null) _resourcesHost.RemoveChild(_resources);
         if (_jobs      != null) _jobsHost     .RemoveChild(_jobs);
         // v0.5.4 — also detach _zones across UI-scale rebuilds. Pre-v0.5.4
@@ -82,13 +85,17 @@ public partial class BottomTabPanel : Control
         // wasn't detached) and never re-attached, so any UI-scale change
         // would leave the Zones tab permanently empty.
         if (_zones     != null) _zonesHost    .RemoveChild(_zones);
+        if (_build     != null) _buildHost    .RemoveChild(_build);   // v0.5.19
+        if (_areas     != null) _areasHost    .RemoveChild(_areas);   // v0.5.44
         foreach (Node c in GetChildren()) c.QueueFree();
         BuildShell();
         if (_orders    != null) _ordersHost   .AddChild(_orders);
-        if (_roster    != null) _smurfsHost   .AddChild(_roster);
+        if (_roster    != null) _shroompsHost   .AddChild(_roster);
         if (_resources != null) _resourcesHost.AddChild(_resources);
         if (_jobs      != null) _jobsHost     .AddChild(_jobs);
         if (_zones     != null) _zonesHost    .AddChild(_zones);
+        if (_build     != null) _buildHost    .AddChild(_build);      // v0.5.19
+        if (_areas     != null) _areasHost    .AddChild(_areas);      // v0.5.44
         SetActiveTab(_active);
     }
 
@@ -123,41 +130,41 @@ public partial class BottomTabPanel : Control
         _ordersHost    = MakeHostPanel();
         _buildHost     = MakeHostPanel();
         _zonesHost     = MakeHostPanel();
+        _areasHost     = MakeHostPanel();   // v0.5.44
         _jobsHost      = MakeHostPanel();
         _resourcesHost = MakeHostPanel();
-        _smurfsHost    = MakeHostPanel();
+        _shroompsHost    = MakeHostPanel();
         _animalsHost   = MakeHostPanel();
         contentRow.AddChild(_ordersHost);
         contentRow.AddChild(_buildHost);
         contentRow.AddChild(_zonesHost);
+        contentRow.AddChild(_areasHost);    // v0.5.44
         contentRow.AddChild(_jobsHost);
         contentRow.AddChild(_resourcesHost);
-        contentRow.AddChild(_smurfsHost);
+        contentRow.AddChild(_shroompsHost);
         contentRow.AddChild(_animalsHost);
 
-        // Stub content for the not-yet-built tabs. Orders, Smurfs,
-        // Resources, Jobs, and Zones are filled by Attach() from
-        // GameController.
-        _buildHost  .AddChild(MakeStubContent("🔨 Build",   "Walls, floors, doors — Phase 5 stub"));
+        // Stub content for the not-yet-built tabs. Orders, Shroomps,
+        // Resources, Jobs, Zones, AND Build are filled by Attach() from
+        // GameController. Build became real in v0.5.19 (Phase 5B).
         _animalsHost.AddChild(MakeStubContent("🐾 Animals", "Husbandry / taming / pens — Phase 9 stub"));
 
-        // ── Row 2: tab bar capsule, right-aligned ───────────────────────────
-        var tabRow = new HBoxContainer { MouseFilter = MouseFilterEnum.Ignore };
-        tabRow.AddThemeConstantOverride("separation", 0);
-        _band.AddChild(tabRow);
-
-        tabRow.AddChild(new Control
-        {
-            SizeFlagsHorizontal = SizeFlags.ExpandFill,
-            MouseFilter         = MouseFilterEnum.Ignore,
-        });
-
+        // ── Row 2: tab bar capsule, full-width (v0.5.41) ───────────────────
+        // Pre-v0.5.41 this row had a leading ExpandFill spacer that pushed
+        // the tab capsule to the right edge of the screen, RimWorld-style
+        // but cramped. v0.5.41 stretches the capsule across the entire
+        // screen width and uses ExpandFill on every tab button so the
+        // tabs distribute themselves evenly. Sam: "Reformat our bottom
+        // taskbar to stretch across the screen and be similar to this
+        // rimworld task bar that stretches across the bottom."
         _tabBar = new PanelContainer { MouseFilter = MouseFilterEnum.Stop };
         _tabBar.AddThemeStyleboxOverride("panel", FloatingPanelStyle.Make());
-        tabRow.AddChild(_tabBar);
+        _tabBar.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        _band.AddChild(_tabBar);
 
         var btnRow = new HBoxContainer();
         btnRow.AddThemeConstantOverride("separation", 4);
+        btnRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         _tabBar.AddChild(btnRow);
 
         _ordersBtn = MakeTabButton("📋 Orders");
@@ -172,6 +179,12 @@ public partial class BottomTabPanel : Control
         _zonesBtn.Pressed += () => ToggleTab(Tab.Zones);
         btnRow.AddChild(_zonesBtn);
 
+        // v0.5.44 — Areas tab (RimWorld parity). Per-shroomp assignment +
+        // colony-shared named-area painter.
+        _areasBtn = MakeTabButton("🗺 Areas");
+        _areasBtn.Pressed += () => ToggleTab(Tab.Areas);
+        btnRow.AddChild(_areasBtn);
+
         _jobsBtn = MakeTabButton("⚙ Jobs");
         _jobsBtn.Pressed += () => ToggleTab(Tab.Jobs);
         btnRow.AddChild(_jobsBtn);
@@ -180,9 +193,9 @@ public partial class BottomTabPanel : Control
         _resourcesBtn.Pressed += () => ToggleTab(Tab.Resources);
         btnRow.AddChild(_resourcesBtn);
 
-        _smurfsBtn = MakeTabButton("👥 Smurfs");
-        _smurfsBtn.Pressed += () => ToggleTab(Tab.Smurfs);
-        btnRow.AddChild(_smurfsBtn);
+        _shroompsBtn = MakeTabButton("👥 Shroomps");
+        _shroompsBtn.Pressed += () => ToggleTab(Tab.Shroomps);
+        btnRow.AddChild(_shroompsBtn);
 
         _animalsBtn = MakeTabButton("🐾 Animals");
         _animalsBtn.Pressed += () => ToggleTab(Tab.Animals);
@@ -237,7 +250,12 @@ public partial class BottomTabPanel : Control
             Text              = label,
             ToggleMode        = true,
             FocusMode         = FocusModeEnum.None,
+            // v0.5.41 — minimum width only; ExpandFill makes each tab
+            // share the full screen-width band equally. RimWorld-parity:
+            // tabs distribute across the bottom edge, no right-clustering.
             CustomMinimumSize = new Vector2(UITheme.Scaled(96), UITheme.Scaled(UITheme.ToolbarButtonSize)),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            ClipText          = true,
         };
         btn.AddThemeFontSizeOverride("font_size", UITheme.Scaled(13));
         btn.AddThemeColorOverride("font_color",          UITheme.TextPrimary);
@@ -252,15 +270,16 @@ public partial class BottomTabPanel : Control
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    public void Attach(DesignationToolbar toolbar, SmurfRosterPanel roster,
-        ResourcesPanel resources, JobsPanel jobs)
+    public void Attach(DesignationToolbar toolbar, ShroompRosterPanel roster,
+        ResourcesPanel resources, JobsPanel jobs,
+        Sporeholm.SimulationManager? sim = null)
     {
         _orders    = toolbar;
         _roster    = roster;
         _resources = resources;
         _jobs      = jobs;
         _ordersHost   .AddChild(toolbar);
-        _smurfsHost   .AddChild(roster);
+        _shroompsHost   .AddChild(roster);
         _resourcesHost.AddChild(resources);
         _jobsHost     .AddChild(jobs);
 
@@ -270,14 +289,30 @@ public partial class BottomTabPanel : Control
         _zones = new ZonesPanel { Name = "ZonesPanel" };
         _zonesHost.AddChild(_zones);
         _zones.BindToolbar(toolbar);
+
+        // v0.5.19 (Phase 5B) — Build tab content. Same toolbar-binding
+        // pattern as Zones. Hosts Wall / Floor / Demolish painters; v0.5.20+
+        // will add Door / Furniture / Workbench buttons here.
+        _build = new BuildPanel { Name = "BuildPanel" };
+        _buildHost.AddChild(_build);
+        _build.BindToolbar(toolbar);
+
+        // v0.5.44 — Areas tab content. Per-shroomp area assignment +
+        // colony-shared painter button. Same toolbar-binding pattern.
+        _areas = new AreasPanel { Name = "AreasPanel" };
+        if (sim != null) _areas.Sim = sim;
+        _areasHost.AddChild(_areas);
+        _areas.BindToolbar(toolbar);
     }
 
     private ZonesPanel? _zones;
+    private BuildPanel? _build;
 
     public DesignationToolbar Orders    => _orders!;
-    public SmurfRosterPanel   Roster    => _roster!;
+    public ShroompRosterPanel   Roster    => _roster!;
     public ResourcesPanel     Resources => _resources!;
     public JobsPanel          Jobs      => _jobs!;
+    public AreasPanel         Areas     => _areas!;   // v0.5.53 — exposed so GameController.StartSim can late-bind Sim after the SimulationManager is constructed
 
     public void SetActiveTab(Tab tab)
     {
@@ -285,9 +320,10 @@ public partial class BottomTabPanel : Control
         _ordersHost   .Visible = tab == Tab.Orders;
         _buildHost    .Visible = tab == Tab.Build;
         _zonesHost    .Visible = tab == Tab.Zones;
+        _areasHost    .Visible = tab == Tab.Areas;       // v0.5.44
         _jobsHost     .Visible = tab == Tab.Jobs;
         _resourcesHost.Visible = tab == Tab.Resources;
-        _smurfsHost   .Visible = tab == Tab.Smurfs;
+        _shroompsHost   .Visible = tab == Tab.Shroomps;
         _animalsHost  .Visible = tab == Tab.Animals;
         RefreshTabButtons();
     }
@@ -306,9 +342,10 @@ public partial class BottomTabPanel : Control
         if (_ordersHost   .Visible && _ordersHost   .GetGlobalRect().HasPoint(m)) return true;
         if (_buildHost    .Visible && _buildHost    .GetGlobalRect().HasPoint(m)) return true;
         if (_zonesHost    .Visible && _zonesHost    .GetGlobalRect().HasPoint(m)) return true;
+        if (_areasHost    .Visible && _areasHost    .GetGlobalRect().HasPoint(m)) return true;
         if (_jobsHost     .Visible && _jobsHost     .GetGlobalRect().HasPoint(m)) return true;
         if (_resourcesHost.Visible && _resourcesHost.GetGlobalRect().HasPoint(m)) return true;
-        if (_smurfsHost   .Visible && _smurfsHost   .GetGlobalRect().HasPoint(m)) return true;
+        if (_shroompsHost   .Visible && _shroompsHost   .GetGlobalRect().HasPoint(m)) return true;
         if (_animalsHost  .Visible && _animalsHost  .GetGlobalRect().HasPoint(m)) return true;
         return false;
     }
@@ -318,9 +355,10 @@ public partial class BottomTabPanel : Control
         _ordersBtn   .SetPressedNoSignal(_active == Tab.Orders);
         _buildBtn    .SetPressedNoSignal(_active == Tab.Build);
         _zonesBtn    .SetPressedNoSignal(_active == Tab.Zones);
+        _areasBtn    .SetPressedNoSignal(_active == Tab.Areas);   // v0.5.44
         _jobsBtn     .SetPressedNoSignal(_active == Tab.Jobs);
         _resourcesBtn.SetPressedNoSignal(_active == Tab.Resources);
-        _smurfsBtn   .SetPressedNoSignal(_active == Tab.Smurfs);
+        _shroompsBtn   .SetPressedNoSignal(_active == Tab.Shroomps);
         _animalsBtn  .SetPressedNoSignal(_active == Tab.Animals);
     }
 }

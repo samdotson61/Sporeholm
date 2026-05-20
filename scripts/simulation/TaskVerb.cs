@@ -1,10 +1,10 @@
-namespace SmurfulationC.Simulation
+namespace Sporeholm.Simulation
 {
-    // v0.3.46 — shared "what is this smurf doing?" verb table. Lives next
+    // v0.3.46 — shared "what is this shroomp doing?" verb table. Lives next
     // to BehaviorTask.cs so any new TaskType added here gets a verb added
     // in one place rather than fanning out across the UI. Two existing
-    // consumers as of v0.3.46: SmurfRosterPanel's Activity column and
-    // SmurfCardPanel's "Name — Activity" header.
+    // consumers as of v0.3.46: ShroompRosterPanel's Activity column and
+    // ShroompCardPanel's "Name — Activity" header.
     public static class TaskVerb
     {
         public static string Of(TaskType t) => t switch
@@ -26,7 +26,9 @@ namespace SmurfulationC.Simulation
             // to assign one of these task types early.
             TaskType.Haul           => "Hauling",
             TaskType.Cook           => "Cooking",
+            TaskType.DoBill         => "Crafting",   // v0.5.84s — Phase 5.5 bills
             TaskType.Build          => "Building",
+            TaskType.BuildHaul      => "Hauling materials",   // v0.5.60
             TaskType.Research       => "Researching",
             TaskType.Guard          => "Guarding",
             // Tier 3 — idle (v0.3.43 rewrite)

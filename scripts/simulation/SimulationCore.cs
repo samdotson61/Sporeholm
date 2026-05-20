@@ -3,19 +3,19 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using Godot;
-using SmurfulationC.Simulation.Systems;
-using SmurfulationC.World;
+using Sporeholm.Simulation.Systems;
+using Sporeholm.World;
 
-namespace SmurfulationC.Simulation
+namespace Sporeholm.Simulation
 {
 	// Owns and drives the full simulation loop on a dedicated background thread.
 	//
 	// Threading model:
-	//   - The simulation thread is the sole writer of Smurf state.
+	//   - The simulation thread is the sole writer of Shroomp state.
 	//   - The main (Godot) thread is the sole reader of SimulationSnapshot records.
 	//   - Communication happens only through thread-safe queues (Snapshots and the
 	//     Pending* event queues below).
-	//   - _smurfLock guards the smurf list against concurrent Add/Remove while the
+	//   - _shroompLock guards the shroomp list against concurrent Add/Remove while the
 	//     simulation copies it at the start of each tick.
 	public sealed class SimulationCore : IDisposable
 	{
@@ -24,8 +24,8 @@ namespace SmurfulationC.Simulation
 		private SimulationDate _date = SimulationDate.Zero;
 		public SimulationDate Date => _date; // read from any thread (struct copy = safe)
 
-		private readonly List<Smurf> _smurfs = new();
-		private readonly object _smurfLock = new();
+		private readonly List<Shroomp> _shroomps = new();
+		private readonly object _shroompLock = new();
 
 		// Capped snapshot queue. The main thread drains this each frame and
 		// uses only the latest entry; older entries are discarded automatically.
@@ -42,12 +42,20 @@ namespace SmurfulationC.Simulation
 		// tear on x86/x64 but worst case is one tick of slightly-stale
 		// camera position, which is invisible (LOD bands are 320+ px wide).
 		// Default of Zero means "no camera yet" — until the first write
-		// every smurf stays Hot, which matches initial-load behaviour.
+		// every shroomp stays Hot, which matches initial-load behaviour.
 		public Godot.Vector2 CameraFollow;
 
 		// Global tick counter for LOD phase modulo. Increments inside Tick().
 		// Sim thread is the sole writer; BehaviorSystem reads.
 		public long GlobalTick;
+
+		// v0.5.84 — diagnostic perf counters for the dev-panel perf section.
+		// Sim thread writes, dev panel reads (benign race; deltas-between-polls).
+		// Microseconds, accumulated lifetime, divided per-tick at display time.
+		public long PerfTicksRun;
+		public long PerfTotalTickMicros;
+		public long PerfBehaviorMicros;
+		public long PerfNeedsMicros;
 
 		// (year) — fires once per in-game year
 		public ConcurrentQueue<int> PendingYearEvents { get; } = new();
@@ -55,20 +63,26 @@ namespace SmurfulationC.Simulation
 		// (newSeason, previousSeason) — fires 4 times per in-game year
 		public ConcurrentQueue<(Season NewSeason, Season PrevSeason)> PendingSeasonEvents { get; } = new();
 
-		// Full snapshot of the smurf at the moment of death
-		public ConcurrentQueue<SmurfSnapshot> PendingDeaths { get; } = new();
+		// Full snapshot of the shroomp at the moment of death
+		public ConcurrentQueue<ShroompSnapshot> PendingDeaths { get; } = new();
 
-		// (snapshot, from, to) — fires when a smurf crosses a mood threshold
-		public ConcurrentQueue<(SmurfSnapshot Snap, MoodState From, MoodState To)> PendingMoodCrossings { get; } = new();
+		// (snapshot, from, to) — fires when a shroomp crosses a mood threshold
+		public ConcurrentQueue<(ShroompSnapshot Snap, MoodState From, MoodState To)> PendingMoodCrossings { get; } = new();
 
-		// Full snapshot of the smurf at the moment of birth
-		public ConcurrentQueue<SmurfSnapshot> PendingBirths { get; } = new();
+		// v0.5.84t — one-shot starvation alerts. Enqueued on the rising
+		// edge of WasStarving (Nutrition crossing below 20). SimulationManager
+		// drains + emits StarvationStarted; GameController posts a message
+		// to MessageLog under the new Starving category.
+		public ConcurrentQueue<ShroompSnapshot> PendingStarvationStarts { get; } = new();
+
+		// Full snapshot of the shroomp at the moment of birth
+		public ConcurrentQueue<ShroompSnapshot> PendingBirths { get; } = new();
 
 		// v0.3.47 (Phase 4 sub-B) — wandering-in arrivals. WanderingInSystem
 		// enqueues; SimulationManager drains and re-emits to the AlertsPane
 		// as a "Wanderer joined" notification. For sub-B the prompt
 		// auto-accepts; Phase 8's storyteller will gain Accept/Decline UI.
-		public ConcurrentQueue<SmurfSnapshot> PendingWanderers { get; } = new();
+		public ConcurrentQueue<ShroompSnapshot> PendingWanderers { get; } = new();
 
 		private readonly Random _rng = new();
 
@@ -76,8 +90,8 @@ namespace SmurfulationC.Simulation
 		// Main thread enqueues; sim thread applies at the start of the next tick.
 		private readonly ConcurrentQueue<(string Name, string NewRole)> _pendingRoleChanges = new();
 
-		public void QueueRoleChange(string smurfName, string newRole) =>
-			_pendingRoleChanges.Enqueue((smurfName, newRole));
+		public void QueueRoleChange(string shroompName, string newRole) =>
+			_pendingRoleChanges.Enqueue((shroompName, newRole));
 
 		// ── Phase 3 — Behavior wiring ─────────────────────────────────────────────
 		// Colony resource ledger, owned by SimulationCore. Sim thread mutates;
@@ -86,25 +100,38 @@ namespace SmurfulationC.Simulation
 
 		// LocalMap reference assigned by SimulationManager once the world map is
 		// loaded. Sim thread reads + mutates via LocalMap's existing APIs.
-		public LocalMap? Map { get; set; }
+		// v0.5.61 — setter also wires `ReservationManager.Active` to the
+		// map's Reservations instance so HaulSystem's static API can route
+		// to the unified reservation store. Clearing Map (e.g. on game
+		// load) sets Active back to null.
+		private LocalMap? _map;
+		public LocalMap? Map
+		{
+			get => _map;
+			set
+			{
+				_map = value;
+				ReservationManager.Active = value?.Reservations;
+			}
+		}
 
 		// Player-order queue (Roadmap §3.9). Main thread enqueues right-click
 		// move orders; BehaviorSystem.Tick drains them. ConcurrentQueue → no lock.
 		public ConcurrentQueue<PlayerOrder> PendingPlayerOrders { get; } = new();
 
-		public void QueuePlayerOrder(string smurfName, Vector2 target) =>
-			PendingPlayerOrders.Enqueue(new PlayerOrder(smurfName, target));
+		public void QueuePlayerOrder(string shroompName, Vector2 target) =>
+			PendingPlayerOrders.Enqueue(new PlayerOrder(shroompName, target));
 
-		// v0.4.3 — right-click "pick up this item" orders. The smurf walks
+		// v0.4.3 — right-click "pick up this item" orders. The shroomp walks
 		// to the tile, picks up whatever item is there, then routes to
 		// the colony delivery point — i.e. a Haul cycle anchored by
 		// the player's target instead of the nearest unreserved item.
-		// (SmurfName, ItemTilePixel)
-		public ConcurrentQueue<(string SmurfName, Vector2 ItemTile)> PendingPickUps { get; } = new();
+		// (ShroompName, ItemTilePixel)
+		public ConcurrentQueue<(string ShroompName, Vector2 ItemTile)> PendingPickUps { get; } = new();
 
 		// v0.4.3 — generic sim-thread command queue. Used by the
-		// Inventory tab on the smurf card for equip / unequip / drop
-		// actions that must mutate Smurf.Equipped* + Inventory under
+		// Inventory tab on the shroomp card for equip / unequip / drop
+		// actions that must mutate Shroomp.Equipped* + Inventory under
 		// the sim thread's exclusive write rules.
 		public ConcurrentQueue<System.Action> PendingCommands { get; } = new();
 
@@ -115,12 +142,12 @@ namespace SmurfulationC.Simulation
 
 		// v0.3.24 — combat order queue (Phase 8 stub). Drained from
 		// BehaviorSystem.Tick alongside PendingPlayerOrders: each entry sets
-		// the named smurf's CombatTargetName (null = clear). The behavior
+		// the named shroomp's CombatTargetName (null = clear). The behavior
 		// system does not yet act on this — only the visual layer reads it.
-		public ConcurrentQueue<(string SmurfName, string? TargetName)> PendingCombatOrders { get; } = new();
+		public ConcurrentQueue<(string ShroompName, string? TargetName)> PendingCombatOrders { get; } = new();
 
-		public void QueueCombatOrder(string smurfName, string? targetName) =>
-			PendingCombatOrders.Enqueue((smurfName, targetName));
+		public void QueueCombatOrder(string shroompName, string? targetName) =>
+			PendingCombatOrders.Enqueue((shroompName, targetName));
 
 		// v0.3.39 (O-M.1) — designation write queue. Main thread enqueues
 		// player drag-box edits; sim thread drains at the top of each
@@ -155,6 +182,17 @@ namespace SmurfulationC.Simulation
 		public void Start()
 		{
 			_running = true;
+			// v0.5.82 — push an initial snapshot BEFORE the worker thread
+			// spawns so the main-thread renderer has something to draw on
+			// the very first frame after load. Pre-v0.5.82 the Run loop
+			// only pushed snapshots from inside Tick (or on paused role-
+			// change), so on a paused-on-load scene the renderer waited
+			// until the player first unpaused before any shroomps appeared.
+			// Sam: "Shroomps should appear on loading into the game and
+			// not on the next unpaused tick." Safe to call directly here
+			// — no worker thread exists yet, so no concurrent access to
+			// _shroomps or Snapshots.
+			PushSnapshot();
 			_thread = new Thread(Run)
 			{
 				Name = "SimulationCore",
@@ -169,23 +207,23 @@ namespace SmurfulationC.Simulation
 			_thread?.Join(3000);
 		}
 
-		public void AddSmurf(Smurf smurf)
+		public void AddShroomp(Shroomp shroomp)
 		{
-			lock (_smurfLock) _smurfs.Add(smurf);
+			lock (_shroompLock) _shroomps.Add(shroomp);
 		}
 
-		public void RemoveSmurf(Smurf smurf)
+		public void RemoveShroomp(Shroomp shroomp)
 		{
-			lock (_smurfLock) _smurfs.Remove(smurf);
+			lock (_shroompLock) _shroomps.Remove(shroomp);
 		}
 
-		// Thread-safe snapshot of all smurfs (alive + dead). Used by
+		// Thread-safe snapshot of all shroomps (alive + dead). Used by
 		// SimulationManager to seed sim positions before the sim thread starts
 		// and after the LocalMap is rebound. Returns a copy so callers can
 		// safely iterate without holding the lock.
-		public IReadOnlyList<Smurf> AllSmurfs()
+		public IReadOnlyList<Shroomp> AllShroomps()
 		{
-			lock (_smurfLock) return new List<Smurf>(_smurfs);
+			lock (_shroompLock) return new List<Shroomp>(_shroomps);
 		}
 
 		// ── Background thread ─────────────────────────────────────────────────────
@@ -204,9 +242,9 @@ namespace SmurfulationC.Simulation
 					bool anyChanges = false;
 					while (_pendingRoleChanges.TryDequeue(out var rc))
 					{
-						lock (_smurfLock)
+						lock (_shroompLock)
 						{
-							var target = _smurfs.Find(s => s.Name == rc.Name);
+							var target = _shroomps.Find(s => s.Name == rc.Name);
 							if (target != null) { target.Role = rc.NewRole; anyChanges = true; }
 						}
 					}
@@ -233,20 +271,20 @@ namespace SmurfulationC.Simulation
 						// the most recent snapshot anyway, so 10 ticks of
 						// catch-up don't need 10 snapshot allocations + 10
 						// list copies — the first 9 would just be dropped
-						// from the queue (or never read). At 1000 smurfs with
+						// from the queue (or never read). At 1000 shroomps with
 						// the struct-snapshot from v0.3.36 each push is much
 						// cheaper, but skipping the intermediate ones still
 						// saves the per-snapshot dict allocation and the
-						// list copy under the smurf-lock.
+						// list copy under the shroomp-lock.
 						bool isLast = (ran + 1 >= maxBatch)
 							|| (sw.Elapsed.TotalMilliseconds < nextTickMs + intervalMs);
 						// v0.4.18 — catch-all exception barrier. The
-						// player reported "smurfs stop and do not move
+						// player reported "shroomps stop and do not move
 						// again after a few minutes"; the most likely
 						// cause is an unhandled exception inside Tick
 						// killing the sim thread silently (Run exits the
 						// while loop, `_running` stays true, but the OS
-						// thread is dead). Smurf state freezes, the
+						// thread is dead). Shroomp state freezes, the
 						// snapshot queue stops draining. Logging the
 						// exception and continuing lets the world keep
 						// ticking; the underlying bug surfaces in the
@@ -288,8 +326,14 @@ namespace SmurfulationC.Simulation
 
 		private void Tick(bool pushSnapshot = true)
 		{
+			// v0.5.84 — wall-clock measurement for the dev-panel perf section.
+			// Stopwatch.GetTimestamp is allocation-free and ns-resolution. Two
+			// phase brackets (needs + behavior) and one outer bracket let the
+			// panel show where tick time actually goes.
+			long tTickStart = System.Diagnostics.Stopwatch.GetTimestamp();
+
 			// v0.4.3 — drain UI-thread commands (equip / unequip / drop)
-			// before anything reads Smurf or Inventory state so the
+			// before anything reads Shroomp or Inventory state so the
 			// edits land atomically inside one tick.
 			while (PendingCommands.TryDequeue(out var cmd))
 			{
@@ -303,14 +347,14 @@ namespace SmurfulationC.Simulation
 			// position; BehaviorSystem detects an item at that tile and
 			// converts to a Haul-pickup task on arrival).
 			while (PendingPickUps.TryDequeue(out var pu))
-				PendingPlayerOrders.Enqueue(new PlayerOrder(pu.SmurfName, pu.ItemTile));
+				PendingPlayerOrders.Enqueue(new PlayerOrder(pu.ShroompName, pu.ItemTile));
 
 			// 1. Apply queued role changes before snapshotting.
 			while (_pendingRoleChanges.TryDequeue(out var rc))
 			{
-				lock (_smurfLock)
+				lock (_shroompLock)
 				{
-					var target = _smurfs.Find(s => s.Name == rc.Name);
+					var target = _shroomps.Find(s => s.Name == rc.Name);
 					if (target != null) target.Role = rc.NewRole;
 				}
 			}
@@ -331,12 +375,12 @@ namespace SmurfulationC.Simulation
 				}
 			}
 
-			// 2. Remove smurfs that died in a previous tick.
-			lock (_smurfLock) _smurfs.RemoveAll(s => !s.IsAlive);
+			// 2. Remove shroomps that died in a previous tick.
+			lock (_shroompLock) _shroomps.RemoveAll(s => !s.IsAlive);
 
-			// 3. Snapshot the living smurf list (holds lock as briefly as possible).
-			List<Smurf> working;
-			lock (_smurfLock) working = new List<Smurf>(_smurfs);
+			// 3. Snapshot the living shroomp list (holds lock as briefly as possible).
+			List<Shroomp> working;
+			lock (_shroompLock) working = new List<Shroomp>(_shroomps);
 
 			// 4. Advance the clock and detect boundary crossings.
 			var prevDate   = _date;
@@ -369,10 +413,10 @@ namespace SmurfulationC.Simulation
 				{
 					if (!s.IsAlive) continue;
 					// v0.4.62 (G3) — reset the daily XP cap window for
-					// every living smurf at day boundary. Independent of
-					// the per-smurf birthday check below; XP saturation
+					// every living shroomp at day boundary. Independent of
+					// the per-shroomp birthday check below; XP saturation
 					// resets for all colonists regardless of birthday.
-					SmurfulationC.Simulation.SkillRegistry.ResetDailyXp(s);
+					Sporeholm.Simulation.SkillRegistry.ResetDailyXp(s);
 
 					if (s.BirthdayDayOfYear != newDayOfYear) continue;
 
@@ -381,7 +425,7 @@ namespace SmurfulationC.Simulation
 					if (AgingSystem.HasExpired(s))
 					{
 						// v0.4.60 — single canonical kill path.
-						KillSmurf(s, CauseOfDeath.Natural);
+						KillShroomp(s, CauseOfDeath.Natural);
 					}
 				}
 
@@ -394,17 +438,17 @@ namespace SmurfulationC.Simulation
 				{
 					PendingSeasonEvents.Enqueue((_date.Season, prevDate.Season));
 
-					// Birth attempt once per season — adds new smurf if conditions allow.
+					// Birth attempt once per season — adds new shroomp if conditions allow.
 					// v0.3.47 — pass the current colony food total so the
 					// Phase 4 food-stockpile gate can suspend births when
 					// reserves are too low.
 					int foodTotal = Resources.Inventory.TotalByKind(
-						SmurfulationC.Simulation.Items.ItemKind.Food);
+						Sporeholm.Simulation.Items.ItemKind.Food);
 					var newborn = BirthSystem.TryBirth(working, _rng, foodTotal);
 					if (newborn != null)
 					{
-						lock (_smurfLock) _smurfs.Add(newborn);
-						PendingBirths.Enqueue(new SmurfSnapshot(newborn));
+						lock (_shroompLock) _shroomps.Add(newborn);
+						PendingBirths.Enqueue(new ShroompSnapshot(newborn));
 					}
 
 					// v0.3.47 — wandering-in event. Tapered incidence by
@@ -413,13 +457,14 @@ namespace SmurfulationC.Simulation
 					var wanderer = WanderingInSystem.TryWanderer(working, _rng, foodTotal, GlobalTick);
 					if (wanderer != null)
 					{
-						lock (_smurfLock) _smurfs.Add(wanderer);
-						PendingWanderers.Enqueue(new SmurfSnapshot(wanderer));
+						lock (_shroompLock) _shroomps.Add(wanderer);
+						PendingWanderers.Enqueue(new ShroompSnapshot(wanderer));
 					}
 				}
 			}
 
 			// 6. Run simulation systems once per real second (every 60 ticks at 1×).
+			long tNeedsStart = System.Diagnostics.Stopwatch.GetTimestamp();
 			if (++_ticksSinceSimUpdate >= SimSystemInterval)
 			{
 				_ticksSinceSimUpdate = 0;
@@ -427,12 +472,12 @@ namespace SmurfulationC.Simulation
 				NeedsSystem.Tick(working, foodCap);   // need decay + starvation damage
 				// v0.3.43 — thoughts tick down before MoodSystem reads the
 				// resulting MoodFromThoughts. Order matters: ThoughtSystem
-				// updates the per-smurf thought-mood sum, then MoodSystem
+				// updates the per-shroomp thought-mood sum, then MoodSystem
 				// folds it into the final MoodScore.
 				ThoughtSystem.Tick(working);
 				MoodSystem.Tick(working);
 
-				// Vital organ failure: any vital body part at 0% kills the smurf.
+				// Vital organ failure: any vital body part at 0% kills the shroomp.
 				// Runs before NeedsSystem.HealTick so a Caretaker cannot mask a fatal organ.
 				foreach (var s in working)
 				{
@@ -446,9 +491,42 @@ namespace SmurfulationC.Simulation
 							var cause = s.Nutrition <= 0f
 								? CauseOfDeath.Starvation
 								: CauseOfDeath.Natural;
-							KillSmurf(s, cause);
+							KillShroomp(s, cause);
 							break;
 						}
+					}
+				}
+
+				// v0.5.81 — Bleeding tick. Phase 7 prep: damaged body parts
+				// produce a BleedRate; BloodLoss accumulates each tick and
+				// kills the shroomp at 100. When no parts are bleeding, the
+				// reservoir slowly regenerates so a tended-up shroomp
+				// recovers within a few in-game minutes.
+				// Block runs once per SimSystemInterval (60 ticks @ 1× =
+				// one in-game second), same cadence as NeedsSystem.Tick.
+				// Per-second rates calibrated so a single untreated severe
+				// wound (cond=20, severity=30) on a non-vital part produces
+				// ~0.018 / sec accumulation = ~93 minutes to bleed out —
+				// slow but visible.
+				const float bleedDt = 1f;
+				foreach (var s in working)
+				{
+					if (!s.IsAlive) continue;
+					s.RecomputeBleedRate();
+					if (s.BleedRate > 0f)
+					{
+						s.BloodLoss = System.Math.Min(100f, s.BloodLoss + s.BleedRate * bleedDt);
+						if (s.BloodLoss >= 100f)
+						{
+							KillShroomp(s, CauseOfDeath.BloodLoss);
+							continue;
+						}
+					}
+					else if (s.BloodLoss > 0f)
+					{
+						// No active wounds → slow blood-volume regen.
+						// 0.05 / sec ≈ ~33 minutes for a full reservoir.
+						s.BloodLoss = System.Math.Max(0f, s.BloodLoss - 0.05f * bleedDt);
 					}
 				}
 
@@ -460,58 +538,89 @@ namespace SmurfulationC.Simulation
 					if (newMood == s.PreviousMoodState) continue;
 					var prev = s.PreviousMoodState;
 					s.PreviousMoodState = newMood;
-					PendingMoodCrossings.Enqueue((new SmurfSnapshot(s), prev, newMood));
+					PendingMoodCrossings.Enqueue((new ShroompSnapshot(s), prev, newMood));
 				}
 
-				// Healing phase runs last — dead smurfs are already marked so HealTick
+				// v0.5.84t — detect rising-edge starvation. Threshold 20
+				// matches the BehaviorSystem MakeEat fallback (line ~2421
+				// "if Nutrition < 20 then MakeEat"). One enqueue per
+				// transition; the WasStarving flag holds until Nutrition
+				// recovers above 25 (a 5-unit hysteresis so a recovering
+				// pawn doesn't ping-pong on every tick around the threshold).
+				const float StarvingEnter = 20f;
+				const float StarvingExit  = 25f;
+				foreach (var s in working)
+				{
+					if (!s.IsAlive) continue;
+					if (s.Nutrition < StarvingEnter && !s.WasStarving)
+					{
+						s.WasStarving = true;
+						PendingStarvationStarts.Enqueue(new ShroompSnapshot(s));
+					}
+					else if (s.Nutrition >= StarvingExit && s.WasStarving)
+					{
+						s.WasStarving = false;
+					}
+				}
+
+				// Healing phase runs last — dead shroomps are already marked so HealTick
 				// skips them, and vital organs that just hit 0 are not healed back above zero.
 				NeedsSystem.HealTick(working);
 			}
+			PerfNeedsMicros += (System.Diagnostics.Stopwatch.GetTimestamp() - tNeedsStart)
+				* 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
 
 			// 7. Phase 3 — Behavior. Movement + task evaluation every tick at fixed
 			//    dt = base interval. Player orders, critical needs, and role tasks
-			//    drive the smurfs' SimPos / SimTarget across the local map.
+			//    drive the shroomps' SimPos / SimTarget across the local map.
 			//    Mutating CurrentTask / SimPos here is safe because the sim thread
 			//    is the sole writer; the next PushSnapshot() captures the result.
 			var queue = new Queue<PlayerOrder>();
 			while (PendingPlayerOrders.TryDequeue(out var po)) queue.Enqueue(po);
 
 			// v0.3.24 — drain combat-order queue, set the flag on each named
-			// smurf. No behavior plumbing yet — this is just so the visual
+			// shroomp. No behavior plumbing yet — this is just so the visual
 			// sword icon turns on/off in response to right-click on an enemy.
 			while (PendingCombatOrders.TryDequeue(out var co))
 			{
 				foreach (var s in working)
 				{
-					if (s.Name == co.SmurfName) { s.CombatTargetName = co.TargetName; break; }
+					if (s.Name == co.ShroompName) { s.CombatTargetName = co.TargetName; break; }
 				}
 			}
 
 			float dt = SimulationClock.BaseTickIntervalMs / 1000f;
 			// v0.3.39 (O-H.2) — increment the global tick counter and pass
-			// to BehaviorSystem so its per-smurf LOD skip can compare
+			// to BehaviorSystem so its per-shroomp LOD skip can compare
 			// (s.TickPhase, s.TickSlot) against the current tick modulo.
 			// Also reassigns phases periodically based on camera distance.
 			GlobalTick++;
 			// v0.3.40 — reassignment cadence 32 → 16 ticks (≈ 0.27 sec at 1×).
 			// Faster reassign means the camera can scroll over the colony
-			// without leaving cold-banded smurfs visible for long (smurfs
+			// without leaving cold-banded shroomps visible for long (shroomps
 			// entering frame are reclassified to Hot within a quarter
 			// second). Phase assignment is a single distance check per
-			// smurf — cheap even at 1000 smurfs.
+			// shroomp — cheap even at 1000 shroomps.
 			if ((GlobalTick & 15) == 0)
 				BehaviorSystem.AssignTickPhases(working, CameraFollow);
-			BehaviorSystem.Tick(working, Map, Resources, queue, _rng, dt, GlobalTick);
+			long tBehaviorStart = System.Diagnostics.Stopwatch.GetTimestamp();
+			BehaviorSystem.Tick(working, Map, Resources, queue, _rng, dt, GlobalTick, _date.Hour);
+			PerfBehaviorMicros += (System.Diagnostics.Stopwatch.GetTimestamp() - tBehaviorStart)
+				* 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
 
-			// 8. Push snapshot — only alive smurfs are included (filtered in constructor).
+			// 8. Push snapshot — only alive shroomps are included (filtered in constructor).
 			// v0.3.36 — skip during catch-up batch's intermediate ticks.
 			if (pushSnapshot) PushSnapshot();
+
+			PerfTotalTickMicros += (System.Diagnostics.Stopwatch.GetTimestamp() - tTickStart)
+				* 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
+			PerfTicksRun++;
 		}
 
 		private void PushSnapshot()
 		{
-			List<Smurf> snap;
-			lock (_smurfLock) snap = new List<Smurf>(_smurfs);
+			List<Shroomp> snap;
+			lock (_shroompLock) snap = new List<Shroomp>(_shroomps);
 			Snapshots.Enqueue(new SimulationSnapshot(_date, snap));
 			while (Snapshots.Count > MaxQueueDepth)
 				Snapshots.TryDequeue(out _);
@@ -523,23 +632,23 @@ namespace SmurfulationC.Simulation
 		// pattern: a single entry point that flips the Dead flag, drops
 		// loose gear at the death tile, spawns the corpse Item, and
 		// enqueues the PendingDeaths event. Call from sim thread only —
-		// reads/writes Smurf state and Map state under the same lock
+		// reads/writes Shroomp state and Map state under the same lock
 		// regime as the rest of Tick(). DevPanel routes through
 		// PostMainThreadCommand to land on the sim thread.
 		//
-		// Idempotent: a second call on an already-dead smurf no-ops, so
+		// Idempotent: a second call on an already-dead shroomp no-ops, so
 		// natural-death paths and Dev kill can race without double-spawning
 		// the corpse.
 		//
 		// Order matches the RimWorld decompile (Verse.Pawn.Kill ~L2197):
-		//   1. Capture position (implicit — Smurf.SimPos is read inside
+		//   1. Capture position (implicit — Shroomp.SimPos is read inside
 		//      DropCorpseGear before any state mutation could move it)
 		//   2. Set CauseOfDeath
 		//   3. DropCorpseGear: inventory drop → equipment drop → corpse
 		//      spawn → witness-thought broadcast (Map.DropItem reads
 		//      live SimPos)
 		//   4. Set IsAlive = false (the dead-flag transition that
-		//      _smurfs.RemoveAll picks up at the next tick boundary)
+		//      _shroomps.RemoveAll picks up at the next tick boundary)
 		//   5. Enqueue PendingDeaths so the SimulationManager death
 		//      signal fires for UI updates (message log, achievement
 		//      hooks, mood broadcasts).
@@ -547,24 +656,30 @@ namespace SmurfulationC.Simulation
 		// The flag flip happens AFTER DropCorpseGear so any code path
 		// inside DropCorpseGear that filters on IsAlive (e.g. the
 		// witness-thought loop's `other.IsAlive` check) doesn't accidentally
-		// skip the dying smurf — though that smurf is `other == s` filtered
+		// skip the dying shroomp — though that shroomp is `other == s` filtered
 		// anyway, the ordering keeps the invariant simple.
-		public void KillSmurf(Smurf s, CauseOfDeath cause)
+		public void KillShroomp(Shroomp s, CauseOfDeath cause)
 		{
 			if (s == null || !s.IsAlive) return;
 			s.CauseOfDeath = cause;
 			DropCorpseGear(s);
 			s.IsAlive = false;
-			PendingDeaths.Enqueue(new SmurfSnapshot(s));
+			// v0.5.61 — release any reservations held by the dying shroomp.
+			// Without this their claims on blueprints / items / beds /
+			// medical slots would persist indefinitely and block other
+			// shroomps from picking up the work. The unified ReservationManager
+			// makes this a single sweep across all layers.
+			ReservationManager.Active?.ClearStaleForClaimant(s.Id);
+			PendingDeaths.Enqueue(new ShroompSnapshot(s));
 		}
 
-		// v0.4.7 (bugreport B-2) — DF / RimWorld convention: when a smurf
+		// v0.4.7 (bugreport B-2) — DF / RimWorld convention: when a shroomp
 		// dies, every carried + equipped item drops on the death tile.
 		// Previously these items were silently GC'd along with the dead
-		// Smurf object — a Guardian carrying a Masterwork Spear would
+		// Shroomp object — a Guardian carrying a Masterwork Spear would
 		// lose the spear entirely on death. Now the player can recover
 		// the gear from the corpse's tile.
-		private void DropCorpseGear(Smurf s)
+		private void DropCorpseGear(Shroomp s)
 		{
 			if (Map == null) return;
 			var dropPos = s.SimPos;
@@ -578,7 +693,7 @@ namespace SmurfulationC.Simulation
 				for (int i = 0; i < s.Inventory.Count; i++)
 				{
 					var it = s.Inventory[i];
-					it.OwnerSmurfId = null;
+					it.OwnerShroompId = null;
 					it.TilePos = dropPos;
 					Map.DropItem(it);
 				}
@@ -588,37 +703,37 @@ namespace SmurfulationC.Simulation
 			{
 				foreach (var (_, item) in s.Equipment)
 				{
-					item.OwnerSmurfId = null;
+					item.OwnerShroompId = null;
 					item.TilePos = dropPos;
 					Map.DropItem(item);
 				}
 				s.Equipment.Clear();
 			}
 
-			// v0.4.33 — also spawn a Corpse item carrying the dead smurf's
+			// v0.4.33 — also spawn a Corpse item carrying the dead shroomp's
 			// biographical sidecar (CorpseData). The standard
 			// AvgCondition-decay path handles rot over ~7 in-game days
 			// (LocalMap.TickCorpseDecay walks dropped items daily and
 			// removes Corpse entries that hit 0). Personality list is
-			// copied (not shared) because Smurf.Personality may be
+			// copied (not shared) because Shroomp.Personality may be
 			// mutated by future personality-evolution work — the corpse's
 			// is a fixed snapshot at time of death.
 			var personalityCopy = s.Personality != null
 				? new System.Collections.Generic.List<string>(s.Personality)
 				: new System.Collections.Generic.List<string>(0);
-			var corpse = new SmurfulationC.Simulation.Items.Item
+			var corpse = new Sporeholm.Simulation.Items.Item
 			{
-				Kind          = SmurfulationC.Simulation.Items.ItemKind.Corpse,
-				SubType       = "SmurfBody",
-				Material      = new SmurfulationC.Simulation.Items.MaterialKey("Flesh", "Smurf"),
-				Quality       = SmurfulationC.Simulation.Items.Quality.Normal,
-				State         = SmurfulationC.Simulation.Items.ItemState.Fresh,
+				Kind          = Sporeholm.Simulation.Items.ItemKind.Corpse,
+				SubType       = "ShroompBody",
+				Material      = new Sporeholm.Simulation.Items.MaterialKey("Flesh", "Shroomp"),
+				Quality       = Sporeholm.Simulation.Items.Quality.Normal,
+				State         = Sporeholm.Simulation.Items.ItemState.Fresh,
 				Quantity      = 1,
 				AvgCondition  = 100f,
 				DurabilityCap = 100f,
 				AvgBirthTick  = GlobalTick,
 				TilePos       = dropPos,
-				CorpseInfo    = new SmurfulationC.Simulation.Items.CorpseData(
+				CorpseInfo    = new Sporeholm.Simulation.Items.CorpseData(
 					Name:        s.Name,
 					AgeYears:    s.AgeInYears,
 					Sex:         s.Sex,
@@ -631,13 +746,13 @@ namespace SmurfulationC.Simulation
 			Map.DropItem(corpse);
 
 			// v0.4.35 — broadcast WitnessedDeath thoughts to every living
-			// smurf within ~10 tiles of the body. The thought def has
+			// shroomp within ~10 tiles of the body. The thought def has
 			// been live since v0.3.43 but nothing was triggering it.
-			// Distance is squared-px (no sqrt). AllSmurfs() takes a
-			// snapshot under _smurfLock so the iteration is safe.
-			const float WitnessRadiusPx = 10f * SmurfulationC.World.LocalMap.TileSize;
+			// Distance is squared-px (no sqrt). AllShroomps() takes a
+			// snapshot under _shroompLock so the iteration is safe.
+			const float WitnessRadiusPx = 10f * Sporeholm.World.LocalMap.TileSize;
 			float wr2 = WitnessRadiusPx * WitnessRadiusPx;
-			var living = AllSmurfs();
+			var living = AllShroomps();
 			for (int i = 0; i < living.Count; i++)
 			{
 				var other = living[i];

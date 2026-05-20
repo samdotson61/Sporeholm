@@ -1,6 +1,6 @@
 using Godot;
 
-namespace SmurfulationC.UI
+namespace Sporeholm.UI
 {
     // v0.5.1 (Phase 5A) — Zones tab content. Hosts zone-painting tools that
     // share `DesignationTool` enum with the Orders tab's tools but live in
@@ -22,13 +22,33 @@ namespace SmurfulationC.UI
     public partial class ZonesPanel : Control
     {
         private DesignationToolbar? _toolbar;
-        private Button              _stockpileBtn = null!;
+        private Button              _stockpileBtn   = null!;
+        private Button              _allowedAreaBtn = null!;   // v0.5.25
 
         public override void _Ready()
         {
             SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
             MouseFilter = MouseFilterEnum.Pass;
             BuildContent();
+            UITheme.UIScaleChanged += OnUIScaleChanged;   // v0.5.44
+        }
+
+        public override void _ExitTree()
+        {
+            UITheme.UIScaleChanged -= OnUIScaleChanged;
+            if (_toolbar != null) _toolbar.ToolChanged -= OnToolbarChanged;
+        }
+
+        // v0.5.44 — rebuild on UI Size change so the panel's UITheme.Scaled
+        // sizes pick up the new slider value. Same idiom as BuildPanel
+        // (v0.5.43) and DesignationToolbar. Preserves the toolbar binding.
+        private void OnUIScaleChanged()
+        {
+            var preservedToolbar = _toolbar;
+            _toolbar = null;
+            foreach (Node c in GetChildren()) c.QueueFree();
+            BuildContent();
+            if (preservedToolbar != null) BindToolbar(preservedToolbar);
         }
 
         // Called by GameController after both ZonesPanel and DesignationToolbar
@@ -73,19 +93,16 @@ namespace SmurfulationC.UI
             };
             row.AddChild(_stockpileBtn);
 
-            // Phase 5C placeholder — Allowed Area bitmap painter (rimport N6).
-            var allowedBtn = new Button
-            {
-                Text              = "▥ Allowed Area  (stub)",
-                Disabled          = true,
-                CustomMinimumSize = new Vector2(UITheme.Scaled(180), UITheme.Scaled(UITheme.ToolbarButtonSize)),
-                FocusMode         = FocusModeEnum.None,
-                TooltipText       = tips ? "Per-smurf allowed-area painter — Phase 5C." : "",
-            };
-            allowedBtn.AddThemeFontSizeOverride("font_size", UITheme.Scaled(14));
-            allowedBtn.AddThemeColorOverride("font_color_disabled", UITheme.TextMuted);
-            allowedBtn.AddThemeStyleboxOverride("disabled", FloatingPanelStyle.MakeToolbarButton(false));
-            row.AddChild(allowedBtn);
+            // v0.5.25 (Phase 5C — rimport N6) — Allowed Area painter live.
+            // Per-shroomp bitmap. Paint with this tool active applies to the
+            // currently-selected shroomp via GameController. If no shroomp is
+            // selected, the paint is a no-op. Right-click while the tool
+            // is active erases (clears the painted tile from the bitmap).
+            _allowedAreaBtn = MakeButton(
+                "▥ Allowed Area",
+                tips ? "Per-shroomp allowed-area painter. Select one shroomp, then drag to paint where they're allowed to work. Erase the bitmap to remove all restrictions (shroomp can work anywhere)." : "");
+            _allowedAreaBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.AllowedArea);
+            row.AddChild(_allowedAreaBtn);
         }
 
         private Button MakeButton(string text, string tooltip)
@@ -113,14 +130,14 @@ namespace SmurfulationC.UI
         private void Refresh()
         {
             if (_toolbar == null) return;
-            _stockpileBtn.SetPressedNoSignal(
+            _stockpileBtn  .SetPressedNoSignal(
                 _toolbar.ActiveTool == DesignationToolbar.Tool.Stockpile);
+            _allowedAreaBtn.SetPressedNoSignal(
+                _toolbar.ActiveTool == DesignationToolbar.Tool.AllowedArea);
         }
 
-        public override void _ExitTree()
-        {
-            if (_toolbar != null) _toolbar.ToolChanged -= OnToolbarChanged;
-        }
+        // (v0.5.44 — _ExitTree merged with the UIScaleChanged-aware
+        // override above so we don't double-define the method.)
 
         // v0.5.4 — propagate the inner MarginContainer's minimum size up
         // to the hosting PanelContainer in BottomTabPanel. Without this,

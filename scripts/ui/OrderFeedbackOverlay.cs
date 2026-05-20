@@ -1,6 +1,6 @@
 using Godot;
 using System.Collections.Generic;
-using SmurfulationC.World;
+using Sporeholm.World;
 
 // v0.3.24 — short-lived visual confirmation that every player order was
 // received. Three feedback types:
@@ -46,7 +46,7 @@ public partial class OrderFeedbackOverlay : Node2D
 
     // Public API used by GameController on each kind of order ──────────────────
 
-    public void FlashDesignationRect(SmurfulationC.UI.DesignationTool tool,
+    public void FlashDesignationRect(Sporeholm.UI.DesignationTool tool,
         int x0, int y0, int x1, int y1)
     {
         int ts = LocalMap.TileSize;
@@ -56,13 +56,13 @@ public partial class OrderFeedbackOverlay : Node2D
                              (xMax - xMin + 1) * ts, (yMax - yMin + 1) * ts);
         var kind = tool switch
         {
-            SmurfulationC.UI.DesignationTool.Gather    => Kind.TileFlashGather,
-            SmurfulationC.UI.DesignationTool.Excavate  => Kind.TileFlashExcavate,
-            SmurfulationC.UI.DesignationTool.ChopWood  => Kind.TileFlashChop,
-            SmurfulationC.UI.DesignationTool.Cut       => Kind.TileFlashCut,
-            SmurfulationC.UI.DesignationTool.Haul      => Kind.TileFlashHaul,
-            SmurfulationC.UI.DesignationTool.Stockpile => Kind.TileFlashStockpile,   // v0.5.1
-            SmurfulationC.UI.DesignationTool.Remove    => Kind.TileFlashRemove,
+            Sporeholm.UI.DesignationTool.Gather    => Kind.TileFlashGather,
+            Sporeholm.UI.DesignationTool.Excavate  => Kind.TileFlashExcavate,
+            Sporeholm.UI.DesignationTool.ChopWood  => Kind.TileFlashChop,
+            Sporeholm.UI.DesignationTool.Cut       => Kind.TileFlashCut,
+            Sporeholm.UI.DesignationTool.Haul      => Kind.TileFlashHaul,
+            Sporeholm.UI.DesignationTool.Stockpile => Kind.TileFlashStockpile,   // v0.5.1
+            Sporeholm.UI.DesignationTool.Remove    => Kind.TileFlashRemove,
             _                                          => Kind.TileFlashGather,
         };
         _pulses.Add(new Pulse { Kind = kind, Rect = rect, Age = 0f, Lifetime = 0.50f });

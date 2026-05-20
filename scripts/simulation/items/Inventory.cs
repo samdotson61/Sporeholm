@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace SmurfulationC.Simulation.Items
+namespace Sporeholm.Simulation.Items
 {
     // v0.3.46 (Phase 4 core) — read-only snapshot row used by UI consumers
     // on the main thread. Built under the inventory lock so values are
@@ -132,12 +132,14 @@ namespace SmurfulationC.Simulation.Items
 
         // Find the best food stack to eat. Preference order:
         //   1. Fresh items with the highest nutrition × quality score.
-        //   2. Stale items (only if no Fresh).
-        //   3. Spoiled items skipped — caller should starve before eating
-        //      something Spoiled, which would emit an AteDisliked thought.
-        // The Smurf's per-smurf food preferences (Preferences.LikedItems)
+        //   2. Stale items (×0.6 score).
+        //   3. Spoiled items (×0.3 score) — only when `allowSpoiled` (starving).
+        // The Shroomp's per-shroomp food preferences (Preferences.LikedItems)
         // bump the score by +50 % so liked foods win the tiebreak.
-        public Item? FindBestFood(Smurf eater)
+        // v0.5.68 — `allowSpoiled` widens the eligible set for starving pawns.
+        // RimWorld parity: FoodUtility.TryFindBestFoodSourceFor falls back to
+        // rotten food when the pawn's hunger crosses the Urgent threshold.
+        public Item? FindBestFood(Shroomp eater, bool allowSpoiled = false)
         {
             lock (_lock)
             {
@@ -147,12 +149,14 @@ namespace SmurfulationC.Simulation.Items
                 {
                     var it = _items[i];
                     if (it.Kind != ItemKind.Food) continue;
-                    if (it.State == ItemState.Spoiled) continue;
                     if (it.Quantity <= 0) continue;
+                    if (it.State == ItemState.Spoiled && !allowSpoiled) continue;
+                    if (it.IsForbidden) continue;
                     var def = ItemRegistry.Get(it.Kind, it.SubType);
                     if (def == null) continue;
                     float score = def.BaseNutrition * QualityMeta.NutritionMul(it.Quality);
                     if (it.State == ItemState.Stale) score *= 0.6f;
+                    else if (it.State == ItemState.Spoiled) score *= 0.3f;
                     if (eater?.Preferences != null && eater.Preferences.LikesItem(it.SubType))
                         score *= 1.5f;
                     if (eater?.Preferences != null && eater.Preferences.DislikesItem(it.SubType))
@@ -161,6 +165,112 @@ namespace SmurfulationC.Simulation.Items
                 }
                 return best;
             }
+        }
+
+        // v0.5.22 (Phase 5E) — find the first non-empty Item stack matching
+        // (Kind, SubType-exclusion-list). Used by CookSystem.Apply to
+        // pluck a raw Food stack while excluding already-prepared meals.
+        // Returns null if no matching stack exists. Caller can then use
+        // Consume(stack, n) to deduct.
+        public Item? FindFirst(ItemKind kind, params string[] excludeSubTypes)
+        {
+            lock (_lock)
+            {
+                for (int i = 0; i < _items.Count; i++)
+                {
+                    var it = _items[i];
+                    if (it.Kind != kind) continue;
+                    if (it.Quantity <= 0) continue;
+                    if (System.Array.IndexOf(excludeSubTypes, it.SubType) >= 0) continue;
+                    return it;
+                }
+                return null;
+            }
+        }
+
+        // v0.5.19 (Phase 5B) — bulk consume across all stacks of a given
+        // (Kind, MaterialFamily). Walks every stack, takes from the
+        // smallest-Quantity stacks first (so stacks empty cleanly without
+        // leaving a single residual unit behind), and stops once `amount`
+        // units have been removed. Returns the actual amount removed —
+        // less than `amount` when the inventory ran out.
+        //
+        // Used by BehaviorSystem.ApplyTaskEffect's TaskType.Build case to
+        // consume Stone or Wood materials when a Crafter completes a
+        // structure. The "smallest-stacks-first" ordering matches the
+        // Phase-5 stockpile model where stacks live on tiles — emptying
+        // small stacks first keeps the on-map item count visually clean.
+        public int ConsumeByFamily(ItemKind kind, string materialFamily, int amount)
+            => ConsumeByMaterial(kind, materialFamily, subType: null, amount);
+
+        // v0.5.84t — any-family consume: matches every stack of the given
+        // ItemKind regardless of MaterialFamily. Used by recipes that accept
+        // "any X kind" inputs (e.g. CookMeal takes any Food — Plant, Magic,
+        // future Meat, etc.). Same smallest-stack-first ordering as the
+        // family-strict variant. Returns the actual units removed.
+        public int ConsumeByKind(ItemKind kind, int amount)
+        {
+            if (amount <= 0) return 0;
+            int taken = 0;
+            lock (_lock)
+            {
+                var matches = new System.Collections.Generic.List<Item>();
+                for (int i = 0; i < _items.Count; i++)
+                {
+                    var it = _items[i];
+                    if (it.Kind != kind) continue;
+                    if (it.Quantity > 0) matches.Add(it);
+                }
+                matches.Sort((a, b) => a.Quantity.CompareTo(b.Quantity));
+                foreach (var stack in matches)
+                {
+                    if (taken >= amount) break;
+                    int take = System.Math.Min(amount - taken, stack.Quantity);
+                    stack.Quantity -= take;
+                    taken += take;
+                }
+                _items.RemoveAll(it => it.Quantity <= 0);
+            }
+            return taken;
+        }
+
+        // v0.5.43 — material-strict consume. When `subType` is non-null, only
+        // stacks whose `Material.SubType` matches are eligible — so a
+        // "FungalWood Wall" blueprint will consume FungalWood logs
+        // specifically rather than any wood. Pre-v0.5.43 build cost
+        // resolved through ConsumeByFamily (Wood-family broad-match), so
+        // the player's material picker only affected the rendered tint,
+        // not the consumed material — Sam: "nothing using the correct
+        // materials can be built." Now: blueprint Material → subType-
+        // strict consume → if the colony has no logs of that exact
+        // material, the build stalls (caller falls back per existing
+        // material-shortfall behaviour in BehaviorSystem.Build apply).
+        public int ConsumeByMaterial(ItemKind kind, string materialFamily, string? subType, int amount)
+        {
+            if (amount <= 0) return 0;
+            int taken = 0;
+            lock (_lock)
+            {
+                var matches = new System.Collections.Generic.List<Item>();
+                for (int i = 0; i < _items.Count; i++)
+                {
+                    var it = _items[i];
+                    if (it.Kind != kind) continue;
+                    if (it.Material.Family != materialFamily) continue;
+                    if (subType != null && it.Material.SubType != subType) continue;
+                    if (it.Quantity > 0) matches.Add(it);
+                }
+                matches.Sort((a, b) => a.Quantity.CompareTo(b.Quantity));
+                foreach (var stack in matches)
+                {
+                    if (taken >= amount) break;
+                    int take = System.Math.Min(amount - taken, stack.Quantity);
+                    stack.Quantity -= take;
+                    taken += take;
+                }
+                _items.RemoveAll(it => it.Quantity <= 0);
+            }
+            return taken;
         }
 
         // Consume one unit (or more) from a specific stack. Returns the

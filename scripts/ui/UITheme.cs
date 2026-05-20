@@ -1,6 +1,6 @@
 using Godot;
 
-namespace SmurfulationC.UI
+namespace Sporeholm.UI
 {
     // v0.3.21 — shared tool identifier used by DesignationToolbar (UI input
     // mode), GameController (drag-box dispatch), SimulationManager.DesignateRect
@@ -37,11 +37,67 @@ namespace SmurfulationC.UI
         // is idempotent. Right-click via the Remove tool clears stockpile
         // membership from a cell.
         Stockpile,
+        // v0.5.19 (Phase 5B — rimport N3) — Construction blueprints.
+        // Player drags a rectangle to plant Wall / Floor blueprints on
+        // every passable tile in the box. Blueprints sit as ghost-state
+        // StructureSlots until the Crafter task picks them up, delivers
+        // materials (Stone or Wood from colony inventory), and advances
+        // BuildProgress to 100. Wall blueprints become impassable at
+        // completion; Floor blueprints stay passable but get a distinct
+        // visual + cosmetic boost.
+        BuildWall,
+        BuildFloor,
+        // v0.5.20 (Phase 5C) — Door painter. Same Build pipeline as
+        // Wall / Floor but the built result is passable (cosmetic for
+        // v0.5.20; future Phase 7 combat will use it for line-of-sight).
+        BuildDoor,
+        // v0.5.21 (Phase 5D) — Shelf painter. First storage-furniture
+        // structure; built shelf adds +1 stack capacity to its tile via
+        // the IHaulDestination interface.
+        BuildShelf,
+        // v0.5.22 (Phase 5E) — Workbench painter. Crafters use workbenches
+        // to run Cook recipes (raw food → prepared meal).
+        BuildWorkbench,
+        // v0.5.24 (Phase 5G) — Hearth painter. Heat source for room
+        // temperature simulation; cooking-quality bonus when adjacent
+        // to a workbench.
+        BuildHearth,
+        // v0.5.35 (Phase 5 arc) — Bed painter. Shroomps sleep on built beds
+        // for full rest effectiveness (1.0×) + a positive "WellRested"
+        // mood thought. Without a bed, shroomps sleep on the ground (0.8×
+        // effectiveness + "SleptOnGround" mood penalty).
+        BuildBed,
+        // v0.5.36 (Phase 5 arc) — Joy furniture. Three starter recreation
+        // structures: MeditationShrine (Solitary), ShroomBoard (Cerebral),
+        // GossipBench (Social). Shroomps route to these during idle to
+        // restore Joy faster than the default 6-activity table.
+        BuildMeditationShrine,
+        BuildShroomBoard,
+        BuildGossipBench,
+        // v0.5.37 (Phase 5 arc) — Table painter. Shroomps prefer to eat at
+        // tables; eating without a table triggers the AteWithoutTable
+        // mood penalty (RimWorld pattern).
+        BuildTable,
+        // v0.5.84t — Torch painter. Cheap floor-tile light source +
+        // small room temperature offset (+2°C per torch).
+        BuildTorch,
+        // Demolish removes built structures (Wall / Floor / Door / Shelf
+        // / Workbench / Hearth / Bed / Joy furniture / Table) AND cancels
+        // pending blueprints. v0.5.20 added partial material refund (50%
+        // of original cost) for completed structures.
+        Demolish,
+        // v0.5.25 (Phase 5C polish — rimport.md N6) — Allowed-area
+        // painter. Per-shroomp bitmap that restricts where work tasks can
+        // be assigned. Paint = mark tile as ALLOWED for the currently
+        // selected shroomp; right-click / use a future "ForbidArea"
+        // erase mode to flip to disallowed. Operates on the currently
+        // selected single shroomp via GameController.SelectedShroompNames.
+        AllowedArea,
     }
 
     // Roadmap §3.x.7 — single source of truth for floating-panel theme constants.
     // Every new Phase-3.x UI element references these so the visual identity stays
-    // consistent across HUD / designation toolbar / alerts pane / smurf card /
+    // consistent across HUD / designation toolbar / alerts pane / shroomp card /
     // tile tooltip / message log without each component re-deriving its own.
     public static class UITheme
     {

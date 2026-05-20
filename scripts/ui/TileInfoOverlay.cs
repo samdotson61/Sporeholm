@@ -1,7 +1,7 @@
 using Godot;
-using SmurfulationC.Simulation.Items;
-using SmurfulationC.UI;
-using SmurfulationC.World;
+using Sporeholm.Simulation.Items;
+using Sporeholm.UI;
+using Sporeholm.World;
 
 // Top-right tile-hover info: terrain + temperature/classification + vegetation
 // for the tile currently under the cursor. Updated every frame by
@@ -24,13 +24,21 @@ public partial class TileInfoOverlay : Control
 
         OffsetLeft   = -360f;
         OffsetRight  = -UITheme.EdgeInset;
-        // v0.3.32 → v0.4.11 — clearance below the HUD speed capsule
-        // pulled in from 80 → 50 px so the hover text sits noticeably
-        // closer to the Menu / speed buttons. Capsule rendered height
-        // is ~75 px at 100 % UI Size; 50 px puts the hover line about
-        // 4 px below the capsule base — visually adjacent without
-        // overlap.
-        OffsetTop    = UITheme.EdgeInset + UITheme.Scaled(50);
+        // v0.5.81 — derive vertical clearance from the actual HUD-capsule
+        // height at the current UI scale instead of a hard-coded
+        // Scaled(50). The v0.4.11 constant assumed scale 1.0 dimensions
+        // and overlapped the speed/menu capsule at the 33–66 % scales the
+        // Settings UI Size slider can reach. Sam: "Fix UI scaling so
+        // settings slider does not cause overlap in top right no matter
+        // what setting it's set to."
+        //
+        // HUD capsule height = Scaled(ToolbarButtonSize) (scales with UI)
+        //                    + 2 × ContentPadY (fixed-px stylebox margins
+        //                      — FloatingPanelStyle's ContentMarginTop/Bottom
+        //                      doesn't multiply through Scaled, so these
+        //                      stay constant across slider settings).
+        // Total top offset = EdgeInset above + capsule height + 8 px gap.
+        OffsetTop    = ComputeOffsetTop();
         OffsetBottom = OffsetTop + UITheme.Scaled(55);   // room for three 13-pt lines
 
         MouseFilter = MouseFilterEnum.Ignore;
@@ -50,12 +58,23 @@ public partial class TileInfoOverlay : Control
     // and offset re-apply. Label state is rewritten by the next ShowTile.
     private void OnUIScaleChanged()
     {
-        OffsetTop    = UITheme.EdgeInset + UITheme.Scaled(50);
+        OffsetTop    = ComputeOffsetTop();           // v0.5.81 — derived from current HUD-capsule height
         OffsetBottom = OffsetTop + UITheme.Scaled(55);
         foreach (Node c in GetChildren()) c.QueueFree();
         BuildLabel();
         Visible = false;
     }
+
+    // v0.5.81 — single source for the "below the HUD speed capsule"
+    // vertical placement. EdgeInset above the band + Scaled toolbar
+    // button height + the FloatingPanelStyle's fixed top+bottom content
+    // margins + an 8 px breathing gap. Stays clear of the HUD capsule
+    // at every UI-scale slider position (33 → 100 %).
+    private static float ComputeOffsetTop() =>
+        UITheme.EdgeInset
+        + UITheme.Scaled(UITheme.ToolbarButtonSize)
+        + 2 * UITheme.ContentPadY
+        + 8;
 
     private void BuildLabel()
     {
@@ -172,10 +191,10 @@ public partial class TileInfoOverlay : Control
     //   "{Name} — {age-stage} {sex} {role}, died of {cause}; body {state}"
     // e.g. "Sloppy — Adult Male Forager, died of Starvation; body Stale"
     // Falls back gracefully when older saves provide a corpse Item with
-    // a missing CorpseInfo sidecar (treated as a generic "Smurf corpse").
+    // a missing CorpseInfo sidecar (treated as a generic "Shroomp corpse").
     private static string FormatCorpseLine(Item it)
     {
-        if (it.CorpseInfo == null) return "Smurf corpse";
+        if (it.CorpseInfo == null) return "Shroomp corpse";
         var c = it.CorpseInfo;
         string stage = c.AgeYears switch
         {
@@ -217,6 +236,7 @@ public partial class TileInfoOverlay : Control
         TerrainType.Boulder    => "Sheltered (rock)",
         TerrainType.DeadLog    => "Sheltered (timber)",
         TerrainType.LivingWood => "Sheltered (timber)",
+        TerrainType.Skeleton   => "Sheltered (bone)",
         TerrainType.Water      => "Surface water",
         TerrainType.Shallows   => "Wadeable water",
         _                      => "Outdoors",
@@ -238,6 +258,7 @@ public partial class TileInfoOverlay : Control
         TerrainType.DeadLog     => "Dead Log",
         TerrainType.LivingWood  => "Living Wood",
         TerrainType.Shallows    => "Shallows",
+        TerrainType.Skeleton    => "Skeleton",
         _                       => "Unknown",
     };
 
@@ -265,6 +286,7 @@ public partial class TileInfoOverlay : Control
         TerrainType.ForestFloor => $"Fertility {tile.Fertility:P0}",
         TerrainType.MagicGrove  => "✦ Resonant",
         TerrainType.Shallows    => "Wadeable  ·  0.30× movement",
+        TerrainType.Skeleton    => "Impassable  ·  Yields Bone (×3)",
         _                       => "",
     };
 
@@ -279,8 +301,8 @@ public partial class TileInfoOverlay : Control
 
     private static string VegetationName(VegetationType v) => v switch
     {
-        VegetationType.Underbrush      => "Underbrush",
-        VegetationType.SmurfberryBush  => "Smurfberry Bush",
+        VegetationType.Underbrush      => "Grass Tuft",
+        VegetationType.CapberryBush  => "Capberry Bush",
         VegetationType.SmallMushroom   => "Small Mushroom",
         VegetationType.LargeMushroom   => "Large Mushroom",
         VegetationType.HerbCluster     => "Herb Cluster",
@@ -295,7 +317,7 @@ public partial class TileInfoOverlay : Control
 
     private static string VegetationYield(VegetationType v) => v switch
     {
-        VegetationType.SmurfberryBush  => "Food",
+        VegetationType.CapberryBush  => "Food",
         VegetationType.SmallMushroom   => "Food",
         VegetationType.LargeMushroom   => "Fungal Wood",
         VegetationType.HerbCluster     => "Food + Magic Essence",

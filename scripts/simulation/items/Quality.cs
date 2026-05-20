@@ -1,4 +1,4 @@
-namespace SmurfulationC.Simulation.Items
+namespace Sporeholm.Simulation.Items
 {
     // v0.3.46 (Phase 4 core) — DF-style item quality tier. Multiplies item
     // value and (for tools) effectiveness. Crafted items roll quality from
@@ -47,11 +47,11 @@ namespace SmurfulationC.Simulation.Items
         };
 
         // Mood thought emitted on eating an item of this quality.
-        // v0.4.61 (E2) — `isCooked` distinguishes raw (smurfberry, mushroom)
+        // v0.4.61 (E2) — `isCooked` distinguishes raw (capberry, mushroom)
         // from prepared meals. Raw eating produces AteSimple at default
         // quality; only Cook-task output (Phase 5) passes isCooked=true
         // and unlocks the TastyMeal/AteFavorite tier. Without this gate,
-        // raw smurfberries fired the same "Had a tasty meal" thought as
+        // raw capberries fired the same "Had a tasty meal" thought as
         // a Cook would, which left no aspirational delta for the kitchen.
         public static string MealThoughtKey(Quality q, bool isCooked = false)
         {

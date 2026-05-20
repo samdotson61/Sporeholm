@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using Godot;
 
-namespace SmurfulationC.World
+namespace Sporeholm.World
 {
     // Generates a sparse world map from four independent noise layers.
     // Grid size is variable (8–128); bias params nudge each noise channel ±35%.

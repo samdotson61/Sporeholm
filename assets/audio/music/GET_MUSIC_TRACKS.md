@@ -1,52 +1,97 @@
-# Music Tracks — Setup
+# Music Tracks
 
-All tracks must be placed in this folder as `.ogg` files.
-The game runs without them (just silent) — add them when ready.
-
-All Kevin MacLeod tracks below are **CC BY 3.0** (free with attribution).
-Download OGG versions from https://incompetech.com/music/royalty-free/music.html
+All tracks live in this folder as `.mp3`, `.ogg`, `.wav`, or `.flac` files.
+The game runs fine without any of them — missing tracks are silently skipped.
 
 ---
 
-## Tracks Needed
+## Architecture (v0.5.74+)
 
-| Filename | Track Title | Artist | Context |
-|---|---|---|---|
-| `menu_theme.ogg` | **Fluffing a Duck** | Kevin MacLeod | Main menu — playful, whimsical |
-| `village_peace.ogg` | **Country Kitchen** | Kevin MacLeod | Peaceful village — warm, acoustic-guitar western feel |
-| `era_ancient.ogg` | **Ossuary 6 - Bones** | Kevin MacLeod | Dawn/Shrinking Era — sparse, primitive |
-| `era_classical.ogg` | **Scheming Weasel (faster)** | Kevin MacLeod | Classical/Mushroom Era — upbeat, orchestral |
-| `era_modern.ogg` | **Carefree** | Kevin MacLeod | Modern Era — bright, resolved |
-| `combat.ogg` | **Volatile Reaction** | Kevin MacLeod | Combat events — tense but not grim |
-| `crisis.ogg` | **Darkest Child** | Kevin MacLeod | Bottleneck/crisis events — somber |
+`MusicManager` keeps a **`Playlist`** per `Context` (Menu / Peace / Combat / Crisis / Ancient / Classical / Modern).
 
----
+Each playlist has:
+- A list of `Track` entries (path + title + artist + license + source URL)
+- A `PlayMode`: `Loop` / `Sequential` / `Shuffle`
 
-## Quick Download Steps
+When the active stream finishes naturally (Sequential / Shuffle modes), `MusicManager` auto-advances with a 1.2 s crossfade. Loop-mode tracks set the underlying stream's `Loop=true` so `Finished` never fires.
 
-1. Visit https://incompetech.filmmusic.io/
-2. Search each track by name
-3. On each track page: **Download** → choose **OGG**
-4. Rename file to match the `Filename` column above
-5. Drop it in this folder
-
-## Attribution (add to your credits)
-
-> Music by Kevin MacLeod (incompetech.com)
-> Licensed under Creative Commons: By Attribution 4.0 License
-> http://creativecommons.org/licenses/by/4.0/
+License/attribution metadata on each `Track` is surfaced by `MusicManager.GetCredits()` and rendered in the `CreditsPanel` overlay reachable from the main menu — no separate credits list to maintain.
 
 ---
 
-## Button Sound Effects
+## Currently wired tracks (v0.5.74)
 
-Place the following in `assets/audio/sfx/`:
+### Menu (Shuffle, 4 tracks)
 
-| Filename | Description | Source |
+| File | Track | Artist | License | Source |
+|---|---|---|---|---|
+| `menu_theme.mp3`     | Fluffing a Duck   | Kevin MacLeod              | CC-BY 3.0 | [Incompetech](https://incompetech.com/music/royalty-free/music.html) |
+| `magic_forest.mp3`   | Magic Forest      | Kevin MacLeod              | CC-BY 3.0 | [Incompetech](https://incompetech.com/music/royalty-free/music.html) |
+| `fairytale_waltz.mp3`| Fairytale Waltz   | Kevin MacLeod              | CC-BY 3.0 | [Incompetech](https://incompetech.com/music/royalty-free/music.html) |
+| `peaceful_forest.wav`| Peaceful Forest   | Good CC0 Music collection  | CC0       | [OpenGameArt](https://opengameart.org/content/good-cc0-music) |
+
+### Peace (Shuffle, 4 tracks)
+
+| File | Track | Artist | License | Source |
+|---|---|---|---|---|
+| `village_peace.mp3`       | Country Kitchen      | Kevin MacLeod                | CC-BY 3.0           | [Incompetech](https://incompetech.com/music/royalty-free/music.html) |
+| `forest_exploration.flac` | Forest Exploration   | OpenGameArt community        | CC-BY 4.0           | [OpenGameArt](https://opengameart.org/content/forest-exploration) |
+| `audionautix_acoustic.mp3`| River Meditation     | Jason Shaw (Audionautix)     | CC-BY 3.0           | [archive.org](https://archive.org/details/Audionautix_Acoustic-9870) |
+| `strijp_reimagined.mp3`   | Strijp (Reimagined)  | Amarent                      | CC-BY 4.0 (AI-Generated) | [FMA](https://freemusicarchive.org/music/amarent/anew/strijp-reimagined/) |
+
+> ⚠️ **AI-generated note**: `Strijp (Reimagined)` is tagged by FMA as partially or fully AI-generated. The credits screen surfaces this in the License field. Remove the entry from `MusicManager.Playlists[Context.Peace]` if you don't want it shipped.
+
+### Combat (Shuffle, 2 tracks)
+
+| File | Track | Artist | License | Source |
+|---|---|---|---|---|
+| `combat.mp3`         | Volatile Reaction | Kevin MacLeod | CC-BY 3.0 | [Incompetech](https://incompetech.com/music/royalty-free/music.html) |
+| `mushroom_candy.mp3` | Mushroom Candy    | BUZZPSY       | Pixabay (free, commercial OK, no attribution required) | [Pixabay](https://pixabay.com/music/search/mushrooms/) |
+
+### Crisis / Ancient / Classical / Modern (Loop, 1 track each)
+
+| File | Track | Artist | License | Context |
+|---|---|---|---|---|
+| `crisis.mp3`        | Darkest Child            | Kevin MacLeod | CC-BY 3.0 | Crisis |
+| `era_ancient.mp3`   | Ossuary 6 - Bones        | Kevin MacLeod | CC-BY 3.0 | Ancient |
+| `era_classical.ogg` | Scheming Weasel (faster) | Kevin MacLeod | CC-BY 3.0 | Classical |
+| `era_modern.ogg`    | Carefree                 | Kevin MacLeod | CC-BY 3.0 | Modern |
+
+---
+
+## Skipped from the original research list
+
+- **Killer Drones** (DsonanT, FMA) — actual licence is **CC BY-NC-SA**, not plain CC-BY. The NC clause makes it unsafe for any commercial release. FMA's download endpoint also now redirects to login. No replacement queued; the Crisis playlist runs single-track for now.
+
+---
+
+## Adding a new track
+
+1. Drop the audio file in this folder (any of `.mp3`, `.ogg`, `.wav`, `.flac`).
+2. Open `scripts/audio/MusicManager.cs`, find the `Playlists` dictionary, add a `new Track { … }` entry to the relevant context.
+3. Restart Godot.
+
+If you add a 2nd track to a `Loop` playlist, consider switching `Mode = PlayMode.Shuffle` so the player hears variety.
+
+---
+
+## Attribution
+
+`CreditsPanel` (reachable from the main menu Credits button) calls `MusicManager.Instance.GetCredits()` and renders each track via `MusicManager.DefaultAttributionLine`:
+
+> Magic Forest — Kevin MacLeod — CC-BY 3.0
+
+That format covers CC-BY's "attribute the work" obligation. CC0 / Pixabay tracks don't require attribution but the same line surfaces them for transparency.
+
+---
+
+## Sound effects
+
+Lives in `assets/audio/sfx/`. Not managed by MusicManager — loaded ad-hoc by whatever script needs them.
+
+| Filename | Description | Suggested source |
 |---|---|---|
-| `button_click.wav` | Woody thud / clunk (western feel) | https://freesound.org — search "wood thud" |
-| `button_hover.wav` | Soft rustle or tick | https://freesound.org — search "soft click" |
-| `era_transition.wav` | Fanfare sting | https://freesound.org — search "fanfare short" |
-| `alert.wav` | Alert chime | https://freesound.org — search "bell chime" |
-
-Freesound.org has many CC0 options — filter by "CC0" license to use freely with no attribution needed.
+| `button_click.ogg`   | Woody thud / clunk | https://freesound.org — search "wood thud" (CC0 filter) |
+| `button_hover.ogg`   | Soft rustle or tick | https://freesound.org — search "soft click" |
+| `era_transition.ogg` | Fanfare sting | https://freesound.org — search "fanfare short" |
+| `alert.ogg`          | Alert chime | https://freesound.org — search "bell chime" |

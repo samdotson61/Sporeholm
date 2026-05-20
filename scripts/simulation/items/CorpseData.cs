@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 
-namespace SmurfulationC.Simulation.Items
+namespace Sporeholm.Simulation.Items
 {
     // v0.4.33 — biographical sidecar carried by `Item` instances of kind
-    // `Corpse`. When a smurf dies, `SimulationCore.DropCorpseGear` builds
-    // one of these from a `SmurfSnapshot` and attaches it via
+    // `Corpse`. When a shroomp dies, `SimulationCore.DropCorpseGear` builds
+    // one of these from a `ShroompSnapshot` and attaches it via
     // `Item.CorpseInfo`. The Item itself handles decay (AvgCondition fall
     // → eventual removal) and on-ground rendering through the standard
     // dropped-item pipeline; this record carries the static attributes

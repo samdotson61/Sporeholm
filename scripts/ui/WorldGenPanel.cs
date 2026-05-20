@@ -1,7 +1,7 @@
 using Godot;
 using System;
 using System.Collections.Generic;
-using SmurfulationC.World;
+using Sporeholm.World;
 
 // Full-screen overlay shown when the player clicks New Game.
 // Settings phase: name, seed, world size, level size, generation bias sliders, saved worlds.
@@ -47,10 +47,12 @@ public partial class WorldGenPanel : Control
     private HSlider      _rainSlider     = null!;
     private HSlider      _tempSlider     = null!;
     private HSlider      _magicSlider    = null!;
+    private HSlider      _scarcitySlider = null!;   // v0.5.84t
     private Label        _elevVal        = null!;
     private Label        _rainVal        = null!;
     private Label        _tempVal        = null!;
     private Label        _magicVal       = null!;
+    private Label        _scarcityVal    = null!;   // v0.5.84t
     private VBoxContainer _savedWorldsList = null!;
 
     // Map-phase state
@@ -275,6 +277,53 @@ public partial class WorldGenPanel : Control
         (_rainSlider,  _rainVal)  = AddBiasRow(parent, "Rainfall");
         (_tempSlider,  _tempVal)  = AddBiasRow(parent, "Temperature");
         (_magicSlider, _magicVal) = AddBiasRow(parent, "Magic Density");
+        // v0.5.84t — resource scarcity (vegetation density + ore vein chance +
+        // min-mushroom/magic-flora guarantees). 1.00 = Abundant (default,
+        // pre-v0.5.84t generation), 0.25 = Scarce (¼ scatter density).
+        (_scarcitySlider, _scarcityVal) = AddScarcityRow(parent, "Resources");
+    }
+
+    // v0.5.84t — separate row factory because the scarcity slider has a different
+    // range (0.25 → 1.0, no negative) + Abundant/Scarce labelling instead of ±.
+    private (HSlider slider, Label val) AddScarcityRow(VBoxContainer parent, string name)
+    {
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 6);
+
+        var lbl = Lbl(name + ":", 13, Parchment);
+        lbl.CustomMinimumSize = new Vector2(110, 0);
+        lbl.TooltipText = "Resource scarcity. Abundant (1.00) keeps the default vegetation + ore-vein density. Scarce (0.25) reduces both to one-quarter, for a more challenging survival start.";
+        lbl.MouseFilter = MouseFilterEnum.Pass;
+        row.AddChild(lbl);
+
+        var slider = new HSlider
+        {
+            MinValue = 0.25, MaxValue = 1.0, Step = 0.05,
+            Value    = 1.0,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            CustomMinimumSize   = new Vector2(0, 20),
+            TooltipText = "Drag to set how much vegetation + ore vein scatter the local map generates. Abundant (right) = full density; Scarce (left) = ¼ density.",
+        };
+        row.AddChild(slider);
+
+        var val = Lbl("Abundant", 13, Muted);
+        val.CustomMinimumSize = new Vector2(64, 0);
+        val.HorizontalAlignment = HorizontalAlignment.Right;
+        row.AddChild(val);
+
+        slider.ValueChanged += v =>
+        {
+            string label;
+            if      (v >= 0.95) label = "Abundant";
+            else if (v >= 0.70) label = "Plentiful";
+            else if (v >= 0.50) label = "Modest";
+            else if (v >= 0.35) label = "Sparse";
+            else                label = "Scarce";
+            val.Text = $"{label} ({v:F2})";
+        };
+
+        parent.AddChild(row);
+        return (slider, val);
     }
 
     private (HSlider slider, Label val) AddBiasRow(VBoxContainer parent, string name)
@@ -458,11 +507,12 @@ public partial class WorldGenPanel : Control
         float rain  = (float)_rainSlider.Value;
         float temp  = (float)_tempSlider.Value;
         float magic = (float)_magicSlider.Value;
+        float scar  = (float)_scarcitySlider.Value;
         string name = _nameEdit.Text.Trim();
         if (name.Length == 0) name = $"world-{seed}";
         _nameEdit.Text = name;
 
-        _worldMap = WorldState.Instance?.GenerateWorld(seed, gridSize, elev, rain, temp, magic, name, lw, lh)
+        _worldMap = WorldState.Instance?.GenerateWorld(seed, gridSize, elev, rain, temp, magic, name, lw, lh, scar)
                  ?? WorldMapGenerator.Generate(seed, gridSize, elev, rain, temp, magic);
 
         WorldState.Instance?.SaveWorldFile();
@@ -529,7 +579,10 @@ public partial class WorldGenPanel : Control
 
     private void GeneratePreviewDeferred()
     {
-        var map = LocalMapGenerator.Generate(_pendingPreviewTile, _pendingPreviewW, _pendingPreviewH);
+        // v0.5.84t — preview honours the current resource-scarcity slider so the
+        // Resource Breakdown the player sees matches what they'll get on Begin Colony.
+        float prevScar = (float)(_scarcitySlider?.Value ?? 1.0);
+        var map = LocalMapGenerator.Generate(_pendingPreviewTile, _pendingPreviewW, _pendingPreviewH, prevScar);
         _preview.ShowMap(map);
         _resourceInfoLabel.Text = SummariseResources(map);
         HideLoading();
@@ -545,7 +598,7 @@ public partial class WorldGenPanel : Control
     //   • Food  — count of food-bearing vegetation slots
     //   • Magic — MagicFlower vegetation + MagicGrove terrain
     //   • Water — Water + Shallows (fishing / wading footprint)
-    private static string SummariseResources(SmurfulationC.World.LocalMap map)
+    private static string SummariseResources(Sporeholm.World.LocalMap map)
     {
         int stone = 0, magicCrystal = 0;
         int deadLog = 0, livingWood = 0;
@@ -559,34 +612,34 @@ public partial class WorldGenPanel : Control
             var t = map.Get(x, y);
             switch (t.Terrain)
             {
-                case SmurfulationC.World.TerrainType.Boulder:
+                case Sporeholm.World.TerrainType.Boulder:
                     stone++;
                     var stoneKey = map.GetTileStone(x, y);
                     if (stoneKey.HasValue && stoneKey.Value.SubType == "MagicCrystal") magicCrystal++;
                     break;
-                case SmurfulationC.World.TerrainType.DeadLog:    deadLog++; break;
-                case SmurfulationC.World.TerrainType.LivingWood: livingWood++; break;
-                case SmurfulationC.World.TerrainType.Water:      water++; break;
-                case SmurfulationC.World.TerrainType.Shallows:   shallows++; break;
-                case SmurfulationC.World.TerrainType.MagicGrove: magicGroveTiles++; break;
+                case Sporeholm.World.TerrainType.DeadLog:    deadLog++; break;
+                case Sporeholm.World.TerrainType.LivingWood: livingWood++; break;
+                case Sporeholm.World.TerrainType.Water:      water++; break;
+                case Sporeholm.World.TerrainType.Shallows:   shallows++; break;
+                case Sporeholm.World.TerrainType.MagicGrove: magicGroveTiles++; break;
             }
             var veg = map.GetVegetation(x, y);
             if (!veg.IsPresent) continue;
             switch (veg.Type)
             {
-                case SmurfulationC.World.VegetationType.LargeMushroom:
-                case SmurfulationC.World.VegetationType.LargeSandshroom:
-                case SmurfulationC.World.VegetationType.PalmShroom:
+                case Sporeholm.World.VegetationType.LargeMushroom:
+                case Sporeholm.World.VegetationType.LargeSandshroom:
+                case Sporeholm.World.VegetationType.PalmShroom:
                     largeMushroom++;
                     break;
-                case SmurfulationC.World.VegetationType.SmurfberryBush:
-                case SmurfulationC.World.VegetationType.SmallMushroom:
-                case SmurfulationC.World.VegetationType.HerbCluster:
-                case SmurfulationC.World.VegetationType.SmallSandshroom:
-                case SmurfulationC.World.VegetationType.PineShroom:
+                case Sporeholm.World.VegetationType.CapberryBush:
+                case Sporeholm.World.VegetationType.SmallMushroom:
+                case Sporeholm.World.VegetationType.HerbCluster:
+                case Sporeholm.World.VegetationType.SmallSandshroom:
+                case Sporeholm.World.VegetationType.PineShroom:
                     food++;
                     break;
-                case SmurfulationC.World.VegetationType.MagicFlower:
+                case Sporeholm.World.VegetationType.MagicFlower:
                     magicVeg++;
                     food++;   // magic flower also yields food
                     break;
@@ -729,10 +782,14 @@ public partial class WorldGenPanel : Control
         for (int i = 0; i < LevelSizeOptions.Length; i++)
             if (LevelSizeOptions[i] == (info.LocalMapWidth, info.LocalMapHeight)) { _levelSizeDrop.Select(i); break; }
 
-        _elevSlider.Value  = info.ElevBias;
-        _rainSlider.Value  = info.RainBias;
-        _tempSlider.Value  = info.TempBias;
-        _magicSlider.Value = info.MagicBias;
+        _elevSlider.Value     = info.ElevBias;
+        _rainSlider.Value     = info.RainBias;
+        _tempSlider.Value     = info.TempBias;
+        _magicSlider.Value    = info.MagicBias;
+        // v0.5.84t — older world files predating ResourceScarcity will have the
+        // default 1.0 from WorldFileInfo's init-only property, which is the
+        // pre-scarcity behaviour (Abundant).
+        _scarcitySlider.Value = Mathf.Clamp(info.ResourceScarcity, 0.25f, 1.0f);
     }
 
     // ── Layout helpers ────────────────────────────────────────────────────────
@@ -904,7 +961,7 @@ public partial class WorldGenPanel : Control
         private static Color VegColor(VegetationType v) => v switch
         {
             VegetationType.LargeMushroom  => new Color(0.85f, 0.12f, 0.08f),
-            VegetationType.SmurfberryBush => new Color(0.20f, 0.65f, 0.15f),
+            VegetationType.CapberryBush => new Color(0.20f, 0.65f, 0.15f),
             VegetationType.Underbrush     => new Color(0.10f, 0.38f, 0.10f),
             VegetationType.SmallMushroom  => new Color(0.80f, 0.68f, 0.40f),
             VegetationType.HerbCluster    => new Color(0.24f, 0.72f, 0.18f),

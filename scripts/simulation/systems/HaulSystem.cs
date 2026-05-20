@@ -1,20 +1,20 @@
 using System;
 using System.Collections.Generic;
 using Godot;
-using SmurfulationC.Simulation.Items;
-using SmurfulationC.World;
+using Sporeholm.Simulation.Items;
+using Sporeholm.World;
 
-namespace SmurfulationC.Simulation.Systems
+namespace Sporeholm.Simulation.Systems
 {
     // v0.4.2 — Haul task implementation (replaces the v0.4.0 stub).
     //
     // Without Phase 5 stockpile zones, items are dropped on the tile
-    // where they were gathered / excavated / chopped / cut. A smurf with
+    // where they were gathered / excavated / chopped / cut. A shroomp with
     // any Haul priority > 0 in their Jobs grid will:
     //   1. Scan for the nearest on-tile item that isn't already
     //      reserved by another hauler.
-    //   2. Walk to it, mark the smurf as the haul target.
-    //   3. On arrival, pick the item up into `Smurf.CarriedItem`
+    //   2. Walk to it, mark the shroomp as the haul target.
+    //   3. On arrival, pick the item up into `Shroomp.CarriedItem`
     //      (RimWorld single-carry-slot model).
     //   4. Walk to the colony delivery point (defaults to the spawn
     //      cluster centre; Phase 5 will replace this with the nearest
@@ -23,17 +23,23 @@ namespace SmurfulationC.Simulation.Systems
     //      `ColonyResources.Inventory` so the player's HUD totals
     //      reflect the new supply.
     //
-    // The two-step path (pickup → deliver) is tracked via the smurf's
+    // The two-step path (pickup → deliver) is tracked via the shroomp's
     // CurrentTask.TargetTileX/Y (pickup target) and a second-stage
     // toggle: when `CarriedItem != null` the task target is the
     // delivery point, not the original tile.
     public static class HaulSystem
     {
-        // Reservation set so multiple haulers don't converge on the same
-        // pickup. Items are reserved by the smurf's Guid when the task
-        // is created, released on completion or task abandonment.
+        // v0.5.61 — haul reservations migrated to the unified
+        // ReservationManager (accessed via Sporeholm.Simulation.
+        // ReservationManager.Active, layer LayerHaul). The legacy static
+        // `_reservations` dict is gone — Reserve / Release / IsReservedByOther
+        // are now thin wrappers that delegate to the active map's manager.
+        // Priority hauls stay as a separate static HashSet because they're
+        // a different concept ("this item wants to be hauled with priority,
+        // by whoever takes the job") — not a reservation in the (claimer,
+        // target) sense.
+
         private static readonly object _reserveLock = new();
-        private static readonly Dictionary<Guid, Guid> _reservations = new();
 
         // v0.4.12 — priority set populated by the Haul order. Items in
         // this set bypass `SelectHaulTarget`'s 32-tile radius cap and
@@ -90,46 +96,45 @@ namespace SmurfulationC.Simulation.Systems
             lock (_reserveLock) return new HashSet<Guid>(_priorityHauls);
         }
 
+        // v0.5.61 — Reserve / Release / IsReservedByOther delegate to the
+        // unified ReservationManager (Active map's instance). Public API
+        // signatures preserved for all existing call sites.
         public static void Reserve(Item item, Guid haulerId)
-        {
-            lock (_reserveLock) _reservations[item.Id] = haulerId;
-        }
+            => ReservationManager.Active?.ReserveItem(item.Id,
+                ReservationManager.LayerHaul, haulerId);
 
         public static void Release(Item item)
-        {
-            lock (_reserveLock) _reservations.Remove(item.Id);
-        }
+            => ReservationManager.Active?.ForceReleaseItem(item.Id,
+                ReservationManager.LayerHaul);
 
         // v0.4.7 (bugreport B-3) — release by Guid string. Used by
         // BehaviorSystem.ReleaseTaskClaim to clear haul reservations when
         // a Haul task is interrupted before pickup (critical need fires,
         // stuck-detector gives up, player issues a new order). Without
-        // this, reservations leaked into the dict and accumulated until
-        // every dropped item was "reserved" by long-departed haulers
-        // and the colony stopped hauling entirely.
+        // this, reservations leaked and the colony stopped hauling
+        // entirely. v0.5.61 — routes through ReservationManager.
         public static void ReleaseByIdString(string? guidString)
         {
             if (string.IsNullOrEmpty(guidString)) return;
             if (!System.Guid.TryParse(guidString, out var id)) return;
-            lock (_reserveLock) _reservations.Remove(id);
+            ReservationManager.Active?.ForceReleaseItem(id,
+                ReservationManager.LayerHaul);
         }
 
         public static bool IsReservedByOther(Item item, Guid askingId)
         {
-            lock (_reserveLock)
-            {
-                if (!_reservations.TryGetValue(item.Id, out var owner)) return false;
-                return owner != askingId;
-            }
+            var mgr = ReservationManager.Active;
+            return mgr != null && mgr.IsItemReservedByOther(item.Id,
+                ReservationManager.LayerHaul, askingId);
         }
 
-        // Selects the nearest on-tile item not reserved by another smurf
-        // and not already in this smurf's carry slot. Returns a Haul
+        // Selects the nearest on-tile item not reserved by another shroomp
+        // and not already in this shroomp's carry slot. Returns a Haul
         // task targeting the pickup tile.
         //
         // v0.4.6 — bounded search radius. The previous version
         // iterated *every* dropped-items tile on the map. At 1000
-        // smurfs with say 200 dropped piles that's 200k iterations
+        // shroomps with say 200 dropped piles that's 200k iterations
         // per sim tick just to find a haul target. Cap at 32 tiles
         // (squared = 1024) which is half the visible viewport at 1×
         // zoom — far enough that haulers don't fixate on the nearest
@@ -137,19 +142,32 @@ namespace SmurfulationC.Simulation.Systems
         // we don't pay the full-map walk every tick.
         private const int HaulSearchRadiusSq = 32 * 32;
 
-        public static BehaviorTask? SelectHaulTarget(Smurf s, LocalMap? map, ColonyResources r)
+        public static BehaviorTask? SelectHaulTarget(Shroomp s, LocalMap? map, ColonyResources r)
         {
-            // v0.4.30 — only fires for fully-empty smurfs. Mid-haul retargeting
+            // v0.4.30 — only fires for fully-empty shroomps. Mid-haul retargeting
             // (capacity not yet full → grab another nearby item) is now handled
-            // INSIDE Apply Phase 1, so a smurf carrying anything is already
+            // INSIDE Apply Phase 1, so a shroomp carrying anything is already
             // committed to either continuing the trip or delivering.
             if (s.Inventory.Count > 0) return null;
             if (map == null) return null;
-            // Capacity gate: if a smurf is so weak (e.g. Sprout w/ Miniaturization)
+            // Capacity gate: if a shroomp is so weak (e.g. Sprout w/ Miniaturization)
             // that their cap is at the floor of 5, that's still ≥ 1 — but we
             // skip if somehow zero (defensive; shouldn't happen with the
             // [5,75] clamp).
             if (s.CarryingCapacity <= 0) return null;
+
+            // v0.5.39 — RimWorld parity: no storage = no haul work. The pre-
+            // v0.5.39 fallback in PickDeliveryTileFor dropped items at the
+            // spawn cluster regardless of player intent, which made shroomps
+            // truck every dropped item back to the colony origin — exactly
+            // what Sam called "spawn area as default stockpile." Now: if
+            // the player hasn't painted any stockpile AND built no shelves,
+            // skip the entire haul scan. Force-haul (player-flagged
+            // priority items) still runs below — it's the explicit "I
+            // want this moved" override and falls back to drop-in-place
+            // when there's nowhere to deliver to.
+            bool hasStorage = map.HasAnyStockpile() || map.HasAnyShelf();
+            if (!hasStorage && !HasAnyPriorityHaul()) return null;
 
             (int X, int Y)? bestTile = null;
             Item?           bestItem = null;
@@ -170,9 +188,9 @@ namespace SmurfulationC.Simulation.Systems
             // 99 % of the time in a colony where the player hasn't
             // Force-Hauled anything). Each call allocated a fresh
             // `(int,int,Item[])[]` snapshot of the whole dropped-items
-            // dict — 50 smurfs × 2 EnumerateDroppedItems calls per
+            // dict — 50 shroomps × 2 EnumerateDroppedItems calls per
             // task selection (priority pass + standard pass) became a
-            // measurable sim-thread cost under 50-smurf gather/excavate
+            // measurable sim-thread cost under 50-shroomp gather/excavate
             // loads. PriorityHaulCount is an O(1) read under the
             // reservation lock.
             (int X, int Y)? priTile = null;
@@ -212,15 +230,15 @@ namespace SmurfulationC.Simulation.Systems
             }
 
             // v0.4.51 — radius-filtered, non-allocating walk. Was a full
-            // EnumerateDroppedItems snapshot per call; with 50 smurfs
+            // EnumerateDroppedItems snapshot per call; with 50 shroomps
             // and ~500 dropped tiles under heavy gather/excavate that
             // was the dominant sim-thread allocation source.
             // v0.5.6 — items already sitting in a stockpile that accepts
             // them are NOT haulable. Pre-fix the auto-haul scan would
             // re-flag every just-delivered item as a haul source on the
-            // very next tick — smurf drops at cell A, SelectTask runs,
+            // very next tick — shroomp drops at cell A, SelectTask runs,
             // finds the item still on cell A, picks it up, FindStockpileCellFor
-            // returns cell A or B, smurf re-delivers, repeat. Sam's
+            // returns cell A or B, shroomp re-delivers, repeat. Sam's
             // "stand jittering trying to haul forever after dropping off
             // items, almost as if they're in a loop of trying to haul
             // things that are already in a stockpile zone." The
@@ -263,7 +281,7 @@ namespace SmurfulationC.Simulation.Systems
         }
 
         // v0.4.30 — multi-trip haul (RimWorld-style). One Haul task can now
-        // chain through several pickups before delivering, up to the smurf's
+        // chain through several pickups before delivering, up to the shroomp's
         // CarryingCapacity. Phase discrimination: a non-null TargetId means
         // we're targeting a specific item to pick up; null means we're
         // walking to the delivery tile to drop the lot.
@@ -276,7 +294,7 @@ namespace SmurfulationC.Simulation.Systems
         // Acceptable for v0.4.30 because the visible-stockpile feature is
         // the headline ask and the HUD divergence stays bounded by the
         // consumption rate (~tens of items per minute, not per tick).
-        public static void Apply(Smurf s, BehaviorTask t, LocalMap? map, ColonyResources r)
+        public static void Apply(Shroomp s, BehaviorTask t, LocalMap? map, ColonyResources r)
         {
             if (map == null) { s.CurrentTask = null; return; }
 
@@ -293,14 +311,14 @@ namespace SmurfulationC.Simulation.Systems
                 Release(pickup);
                 ClearPriority(pickup.Id);
                 pickup.TilePos = null;
-                pickup.OwnerSmurfId = s.Id;
+                pickup.OwnerShroompId = s.Id;
                 s.Inventory.Add(pickup);
                 s.TaskDidWork = true;
 
                 // v0.4.30 — chain to the next nearby pickup if there's still
                 // capacity remaining. Skips items that wouldn't fit. The
                 // 32-tile radius from SelectHaulTarget applies here too:
-                // a smurf chasing one last unreserved berry across the map
+                // a shroomp chasing one last unreserved berry across the map
                 // would tank perf and look pathological.
                 if (s.CurrentCarriedCount < s.CarryingCapacity)
                 {
@@ -328,7 +346,7 @@ namespace SmurfulationC.Simulation.Systems
             // ── Phase 2: deliver all carried items at the stockpile tile ─
             // v0.4.36 — drop ONLY on the map. The v0.4.30 dual-write
             // (also calling r.Inventory.Add(item)) caused a compounding
-            // overflow: smurfs would re-pick up their own deliveries
+            // overflow: shroomps would re-pick up their own deliveries
             // from the stockpile tile in their next multi-trip cycle,
             // and every re-deposit added the item's Quantity to the
             // colony pool again without consuming the on-map stack.
@@ -342,22 +360,36 @@ namespace SmurfulationC.Simulation.Systems
             for (int i = 0; i < s.Inventory.Count; i++)
             {
                 var item = s.Inventory[i];
-                item.OwnerSmurfId = null;
+                item.OwnerShroompId = null;
                 item.TilePos = dropPos;
                 map.DropItem(item);   // visible stockpile drop — cap/type rules in DropItem
             }
             s.Inventory.Clear();
             s.TaskDidWork = true;
+            // v0.5.82 — release the destination-cell claim made in
+            // PickDeliveryTileFor now that the drop is complete. Mirrors
+            // RimWorld's `ReleaseAllClaimedBy(pawn)` on job end.
+            // ReleaseTaskClaim does the same release on abandon paths,
+            // but it never fires on natural completion (this clause sets
+            // s.CurrentTask = null directly without going through the
+            // helper), so the release has to happen here too.
+            Sporeholm.Simulation.ReservationManager.Active?.ReleaseTile(
+                dx, dy, Sporeholm.Simulation.ReservationManager.LayerHaul, s.Id);
+            // v0.5.84r — Athletics XP on haul completion. Sam: "Athletics
+            // should be wired into hauling. XP for hauling..." ~40 XP per
+            // successful drop (matches GatherFood's per-completion grant,
+            // since the trip cost is similar — walk + carry + walk + drop).
+            Sporeholm.Simulation.SkillRegistry.GainXp(s, "Athletics", 40f);
             s.CurrentTask = null;
         }
 
         // v0.4.30 — multi-trip helper. After a pickup, scan the same
         // 32-tile radius for the next nearest unreserved haulable that
         // would still fit. Skips items whose Quantity would push us over
-        // the capacity (so a smurf with 5 slots remaining doesn't try to
+        // the capacity (so a shroomp with 5 slots remaining doesn't try to
         // grab a 50-stack of berries — they'd rather walk home empty than
         // claim something they can't take).
-        private static (Item Item, int X, int Y, Vector2 Pixel)? FindNextHaulNearby(Smurf s, LocalMap map)
+        private static (Item Item, int X, int Y, Vector2 Pixel)? FindNextHaulNearby(Shroomp s, LocalMap map)
         {
             int sx = (int)(s.SimPos.X / LocalMap.TileSize);
             int sy = (int)(s.SimPos.Y / LocalMap.TileSize);
@@ -412,7 +444,7 @@ namespace SmurfulationC.Simulation.Systems
         // AND accepts items of this Kind. Today every zone with empty
         // AcceptedKinds accepts everything; once Phase 5C adds the per-zone
         // filter UI, items in a zone that doesn't accept their Kind will
-        // remain haul-source-eligible (the smurf will move them to a zone
+        // remain haul-source-eligible (the shroomp will move them to a zone
         // that does accept them). RimWorld's "store at higher priority"
         // pattern can layer on top of this without changing the call site.
         private static bool StockpileAcceptsHere(LocalMap map, int tx, int ty, Item item)
@@ -430,7 +462,7 @@ namespace SmurfulationC.Simulation.Systems
         // gen-0 storm + a small BFS-per-second hammer on the sim
         // thread. The cluster only shifts on map regeneration, so we
         // cache it (keyed by map reference) and just look up the
-        // smurf's stable index modulo cluster size.
+        // shroomp's stable index modulo cluster size.
         private static LocalMap?         _cachedMap;
         private static (int X, int Y)[]? _cachedCluster;
 
@@ -460,7 +492,7 @@ namespace SmurfulationC.Simulation.Systems
         // accepts the carried item AND has spare capacity, deliver to the
         // closest such cell. Walks zones in StoragePriority-descending
         // order via `LocalMap.FindStockpileCellFor`. Picks the FIRST item
-        // in the smurf's inventory as the routing key — multi-type
+        // in the shroomp's inventory as the routing key — multi-type
         // inventories will route to whichever zone matches that one item;
         // mismatched items in the same haul fall back to the spawn-cluster
         // delivery point (gracefully, since v0.4.30 stockpile rules will
@@ -470,7 +502,7 @@ namespace SmurfulationC.Simulation.Systems
         // item (no stockpile painted yet, or the player's painted zones
         // don't include this item kind). Keeps the v0.4.19 spawn-cluster
         // hash-spread for the fallback.
-        private static Vector2 PickDeliveryTileFor(Smurf s, LocalMap map)
+        private static Vector2 PickDeliveryTileFor(Shroomp s, LocalMap map)
         {
             // v0.5.0 — try stockpile first.
             if (s.Inventory != null && s.Inventory.Count > 0)
@@ -478,21 +510,48 @@ namespace SmurfulationC.Simulation.Systems
                 var first = s.Inventory[0];
                 int sx = (int)(s.SimPos.X / LocalMap.TileSize);
                 int sy = (int)(s.SimPos.Y / LocalMap.TileSize);
-                var dest = map.FindStockpileCellFor(first, sx, sy);
+                // v0.5.82 — pass the shroomp Id so the picker can skip
+                // cells already reserved by other haulers (mirrors
+                // RimWorld's JobDriver_HaulToCell.TryMakePreToilReservations
+                // pattern where TargetIndex.B = storage cell is reserved
+                // before TargetIndex.A = the item, so two haulers never
+                // converge on the same destination).
+                var dest = map.FindStockpileCellFor(first, sx, sy, s.Id);
                 if (dest.HasValue)
                 {
+                    // Claim the destination cell so concurrent haulers
+                    // route to a different one. Release happens in
+                    // BehaviorSystem.ReleaseTaskClaim on task abandon, or
+                    // in the Haul Phase 2 drop-completion clause.
+                    Sporeholm.Simulation.ReservationManager.Active?.ReserveTile(
+                        dest.Value.X, dest.Value.Y,
+                        Sporeholm.Simulation.ReservationManager.LayerHaul, s.Id);
                     return new Vector2(
                         dest.Value.X * LocalMap.TileSize + LocalMap.TileSize * 0.5f,
                         dest.Value.Y * LocalMap.TileSize + LocalMap.TileSize * 0.5f);
                 }
+                // v0.5.21 (Phase 5D) — Shelf storage furniture as a haul
+                // destination. Prefer Shelf tiles over the spawn-cluster
+                // fallback so the player's deliberately-placed shelves
+                // collect items even before a stockpile zone is painted.
+                var shelfDest = map.FindNearestShelf(sx, sy);
+                if (shelfDest.HasValue)
+                {
+                    return new Vector2(
+                        shelfDest.Value.X * LocalMap.TileSize + LocalMap.TileSize * 0.5f,
+                        shelfDest.Value.Y * LocalMap.TileSize + LocalMap.TileSize * 0.5f);
+                }
             }
 
-            // Fallback: spawn-cluster (pre-v0.5.0 behaviour).
-            var cluster = GetCluster(map);
-            int idx = (s.Id.GetHashCode() & 0x7FFFFFFF) % cluster.Length;
-            var (tx, ty) = cluster[idx];
-            return new Vector2(tx * LocalMap.TileSize + LocalMap.TileSize * 0.5f,
-                               ty * LocalMap.TileSize + LocalMap.TileSize * 0.5f);
+            // v0.5.39 — RimWorld parity: with no stockpile/shelf available,
+            // drop the carried item in place rather than trucking it to
+            // the spawn cluster (the pre-v0.5.39 "default stockpile"
+            // behaviour Sam asked to remove). SelectHaulTarget refuses to
+            // create new haul tasks when no storage exists, so this branch
+            // only fires when storage was demolished mid-haul or a force-
+            // haul (priority) item has no matching zone — both edge cases
+            // where drop-in-place is the right graceful failure.
+            return s.SimPos;
         }
     }
 }

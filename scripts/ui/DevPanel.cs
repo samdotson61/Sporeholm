@@ -1,10 +1,10 @@
 using Godot;
 using System.Collections.Generic;
-using SmurfulationC.Simulation.Items;
-using SmurfulationC.UI;
-using SmurfulationC.World;
+using Sporeholm.Simulation.Items;
+using Sporeholm.UI;
+using Sporeholm.World;
 
-namespace SmurfulationC.UI
+namespace Sporeholm.UI
 {
     // v0.4.32 — RimWorld-style Developer Mode panel. Floating right-side
     // panel rendered above the HUD when DevMode.IsEnabled. F12 toggles
@@ -14,9 +14,9 @@ namespace SmurfulationC.UI
     //
     // Categories:
     //   • Simulation   — pause / tick-once / speed bursts
-    //   • Selected     — manipulate currently-selected smurf (fill, drain,
+    //   • Selected     — manipulate currently-selected shroomp (fill, drain,
     //                    kill, mood spawns, yield)
-    //   • Spawn        — drop items / spawn smurfs at the cursor
+    //   • Spawn        — drop items / spawn shroomps at the cursor
     //   • Map          — region rebuild + stubs for future overlays
     //   • Visualize    — disabled placeholder toggles (pathing, regions,
     //                    occupancy, claims)
@@ -25,10 +25,10 @@ namespace SmurfulationC.UI
     public partial class DevPanel : Control
     {
         // GameController plugs both refs in after construction; the panel
-        // pulls cursor pos + selected smurf names through them as needed.
+        // pulls cursor pos + selected shroomp names through them as needed.
         public SimulationManager?   Sim   { get; set; }
         public Godot.Node2D?        MapNode { get; set; }   // for cursor → tile
-        public System.Func<IReadOnlyCollection<string>>? GetSelectedSmurfs { get; set; }
+        public System.Func<IReadOnlyCollection<string>>? GetSelectedShroomps { get; set; }
 
         // Live status row at the top — "Dev Mode active · F12 to hide".
         private Label _statusLabel = null!;
@@ -45,17 +45,17 @@ namespace SmurfulationC.UI
         {
             // v0.4.52b — LEFT edge, top → bottom. Width fixed at 240 px.
             // Was right-anchored (v0.4.32 → v0.4.52); Sam reported the
-            // dev panel obscured the SmurfCardPanel + TileInfoOverlay +
+            // dev panel obscured the ShroompCardPanel + TileInfoOverlay +
             // TilePropertiesPanel (all top-right) so when he clicked
             // dev-mode actions like "Fill needs" or "+Mood" he couldn't
-            // see the smurf-card values changing in real time — hence
+            // see the shroomp-card values changing in real time — hence
             // the "buttons don't do anything" impression. The buttons
             // were working; the visual feedback was hidden under this
             // panel. Moving to the left puts the dev panel below the
             // top-left HUD capsule and well clear of the bottom-left
             // MessageLog (which starts ~170 px from viewport bottom;
             // dev panel ends at ~268 px from viewport bottom). The
-            // SmurfCardPanel + the rest of the right-side UI now stay
+            // ShroompCardPanel + the rest of the right-side UI now stay
             // fully visible while dev actions fire.
             AnchorLeft   = 0f; AnchorRight  = 0f;
             AnchorTop    = 0f; AnchorBottom = 1f;
@@ -105,7 +105,7 @@ namespace SmurfulationC.UI
             // beneath the Map / Visualize / Future stub sections. Pinning
             // the log directly under the header makes every action's
             // outcome immediately visible without scrolling, and surfaces
-            // the "No smurf selected" / "Cursor not on map" guards so
+            // the "No shroomp selected" / "Cursor not on map" guards so
             // the player understands the action was a no-op.
             _logLabel = MakeText("(idle)", 10, BtnFg);
             _logLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
@@ -113,6 +113,8 @@ namespace SmurfulationC.UI
             _content.AddChild(MakeRule());
 
             BuildSimSection();
+            _content.AddChild(MakeRule());
+            BuildPerfSection();
             _content.AddChild(MakeRule());
             BuildSelectedSection();
             _content.AddChild(MakeRule());
@@ -172,9 +174,89 @@ namespace SmurfulationC.UI
             _content.AddChild(row2);
         }
 
+        // v0.5.84 — Perf section. Polls SimulationManager.GetPerfCounters
+        // every UI frame and computes deltas between polls so a number that
+        // grows over a polling window is shown as an instantaneous rate (e.g.
+        // "A* calls/tick" = calls-since-last-poll / ticks-since-last-poll).
+        // Sam: "There is also noticeable pawn movement/sim slowdown with 50
+        // pawns attempting to move around the screen at once." Diagnostic
+        // first — surface where tick time actually goes before guessing.
+        private Label? _perfTickLabel;
+        private Label? _perfBehaviorLabel;
+        private Label? _perfNeedsLabel;
+        private Label? _perfPathLabel;
+        private Label? _perfPathRateLabel;
+        private SimulationManager.PerfCounters _perfLast;
+        private bool _perfLastValid;
+        private double _perfPollAccumSec;
+
+        private void BuildPerfSection()
+        {
+            _content.AddChild(MakeText("Performance", 11, HeaderCol));
+            _perfTickLabel     = MakeText("(no data)", 10, BtnFg);
+            _perfBehaviorLabel = MakeText("(no data)", 10, BtnFg);
+            _perfNeedsLabel    = MakeText("(no data)", 10, BtnFg);
+            _perfPathLabel     = MakeText("(no data)", 10, BtnFg);
+            _perfPathRateLabel = MakeText("(no data)", 10, BtnFg);
+            _content.AddChild(_perfTickLabel);
+            _content.AddChild(_perfBehaviorLabel);
+            _content.AddChild(_perfNeedsLabel);
+            _content.AddChild(_perfPathLabel);
+            _content.AddChild(_perfPathRateLabel);
+        }
+
+        public override void _Process(double delta)
+        {
+            if (!Visible || Sim == null) return;
+            _perfPollAccumSec += delta;
+            if (_perfPollAccumSec < 0.25) return;   // poll 4× per second
+            _perfPollAccumSec = 0;
+
+            var cur = Sim.GetPerfCounters();
+            if (!_perfLastValid)
+            {
+                _perfLast = cur;
+                _perfLastValid = true;
+                return;
+            }
+            long dTicks  = cur.TicksRun     - _perfLast.TicksRun;
+            long dTotal  = cur.TotalTickMicros - _perfLast.TotalTickMicros;
+            long dBeh    = cur.BehaviorMicros  - _perfLast.BehaviorMicros;
+            long dNeeds  = cur.NeedsMicros     - _perfLast.NeedsMicros;
+            long dCalls  = cur.PfCalls      - _perfLast.PfCalls;
+            long dExp    = cur.PfExpansions - _perfLast.PfExpansions;
+            long dSucc   = cur.PfSuccesses  - _perfLast.PfSuccesses;
+            long dFail   = cur.PfFailures   - _perfLast.PfFailures;
+            _perfLast = cur;
+
+            if (dTicks <= 0)
+            {
+                _perfTickLabel!.Text     = "Tick:  (paused)";
+                _perfBehaviorLabel!.Text = "  Behavior:  —";
+                _perfNeedsLabel!.Text    = "  Needs:     —";
+                _perfPathLabel!.Text     = $"A*:  {cur.PfCalls} total";
+                _perfPathRateLabel!.Text = "  rate: (paused)";
+                return;
+            }
+            double tickMs = (dTotal / 1000.0) / dTicks;
+            double behMs  = (dBeh   / 1000.0) / dTicks;
+            double needMs = (dNeeds / 1000.0) / dTicks;
+            double pCalls = (double)dCalls / dTicks;
+            double pExpPerCall = dCalls > 0 ? (double)dExp / dCalls : 0;
+            double succPct = (dSucc + dFail) > 0 ? 100.0 * dSucc / (dSucc + dFail) : 0;
+            int live = cur.LiveShroomps;
+            double behPerShroomp = live > 0 ? behMs / live : 0;
+
+            _perfTickLabel!.Text     = $"Tick:  {tickMs:F2} ms  · {live} alive";
+            _perfBehaviorLabel!.Text = $"  Behavior:  {behMs:F2} ms  ({behPerShroomp:F3} /shr)";
+            _perfNeedsLabel!.Text    = $"  Needs:     {needMs:F2} ms";
+            _perfPathLabel!.Text     = $"A*:  {pCalls:F1}/tick  ·  {pExpPerCall:F0} exp/call";
+            _perfPathRateLabel!.Text = $"  success {succPct:F0}%  ·  {cur.PfCalls} lifetime";
+        }
+
         private void BuildSelectedSection()
         {
-            _content.AddChild(MakeText("Selected Smurf", 11, HeaderCol));
+            _content.AddChild(MakeText("Selected Shroomp", 11, HeaderCol));
             var row1 = MakeRow();
             row1.AddChild(MakeBtn("Fill needs",  () => ForEachSelected(n => Sim?.DevFillNeeds(n),  "Filled needs")));
             row1.AddChild(MakeBtn("Drain needs", () => ForEachSelected(n => Sim?.DevDrainNeeds(n), "Drained needs")));
@@ -191,8 +273,20 @@ namespace SmurfulationC.UI
             row3.AddChild(MakeBtn("Force yield (60t)",
                 () => ForEachSelected(n => Sim?.DevForceYield(n, 60), "Yielding for 60 ticks")));
             row3.AddChild(MakeBtn("Kill",
-                () => ForEachSelected(n => Sim?.DevKillSmurf(n), "Killed selected")));
+                () => ForEachSelected(n => Sim?.DevKillShroomp(n), "Killed selected")));
             _content.AddChild(row3);
+
+            // v0.5.80 — Damage-to-Down button. Sam: "Dev panel should have
+            // a button, not a slider, that damages the shroomp until they
+            // are down. The thresholds should only be affected by traits
+            // and code changes." Replaces the v0.5.79 SpinBox slider — the
+            // threshold is now a private const in BehaviorSystem with
+            // per-shroomp trait modifiers (Brawny / Stoic / Accident-Prone)
+            // via DownThresholdFor.
+            var row4 = MakeRow();
+            row4.AddChild(MakeBtn("Damage to Down",
+                () => ForEachSelected(n => Sim?.DevDamageToDown(n), "Damaged to Down")));
+            _content.AddChild(row4);
         }
 
         private void BuildSpawnSection()
@@ -200,8 +294,8 @@ namespace SmurfulationC.UI
             _content.AddChild(MakeText("Spawn at Cursor", 11, HeaderCol));
 
             var row1 = MakeRow();
-            row1.AddChild(MakeBtn("50 Smurfberries", () =>
-                SpawnAtCursor(ItemKind.Food, "Smurfberry", "Plant", "Smurfberry", 50)));
+            row1.AddChild(MakeBtn("50 Capberries", () =>
+                SpawnAtCursor(ItemKind.Food, "Capberry", "Plant", "Capberry", 50)));
             row1.AddChild(MakeBtn("50 Granite", () =>
                 SpawnAtCursor(ItemKind.Material, "StoneBlock", "Stone", "Granite", 50)));
             _content.AddChild(row1);
@@ -214,7 +308,7 @@ namespace SmurfulationC.UI
             _content.AddChild(row2);
 
             var row3 = MakeRow();
-            row3.AddChild(MakeBtn("Spawn smurf",  SpawnSmurfAtCursor));
+            row3.AddChild(MakeBtn("Spawn shroomp",  SpawnShroompAtCursor));
             row3.AddChild(MakeBtn("Reveal map",   () => Log("Reveal map: no fog system yet (stub)")));
             _content.AddChild(row3);
         }
@@ -235,6 +329,7 @@ namespace SmurfulationC.UI
                 Log("Force redraw — call site stub");
             }));
             _content.AddChild(row);
+
         }
 
         private void BuildVisualizeSection()
@@ -261,9 +356,9 @@ namespace SmurfulationC.UI
 
         private void ForEachSelected(System.Action<string> act, string okMsg)
         {
-            if (GetSelectedSmurfs == null) { Log("No selection callback"); return; }
-            var sel = GetSelectedSmurfs();
-            if (sel == null || sel.Count == 0) { Log("No smurf selected"); return; }
+            if (GetSelectedShroomps == null) { Log("No selection callback"); return; }
+            var sel = GetSelectedShroomps();
+            if (sel == null || sel.Count == 0) { Log("No shroomp selected"); return; }
             int n = 0;
             foreach (var name in sel) { act(name); n++; }
             Log($"{okMsg}  ×{n}");
@@ -292,7 +387,7 @@ namespace SmurfulationC.UI
                 Log("Spawn rejected");
         }
 
-        private void SpawnSmurfAtCursor()
+        private void SpawnShroompAtCursor()
         {
             if (Sim == null) { Log("No sim"); return; }
             var tile = CursorTile();
@@ -300,8 +395,8 @@ namespace SmurfulationC.UI
             var pos = new Vector2(
                 tile.Value.tx * LocalMap.TileSize + LocalMap.TileSize * 0.5f,
                 tile.Value.ty * LocalMap.TileSize + LocalMap.TileSize * 0.5f);
-            Sim.DevSpawnSmurf(pos);
-            Log($"Spawned smurf at ({tile.Value.tx},{tile.Value.ty})");
+            Sim.DevSpawnShroomp(pos);
+            Log($"Spawned shroomp at ({tile.Value.tx},{tile.Value.ty})");
         }
 
         private void Log(string msg)

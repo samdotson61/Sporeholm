@@ -2,7 +2,7 @@ using Godot;
 using System;
 using System.Collections.Generic;
 
-namespace SmurfulationC.World
+namespace Sporeholm.World
 {
 	// Generates the dense local map from a world tile's seed using noise passes,
 	// followed by guarantee passes for essential vegetation.
@@ -66,10 +66,16 @@ namespace SmurfulationC.World
 			};
 		}
 
+		// v0.5.84t — resourceScarcity (0.25 → 1.0) reduces vegetation placement
+		// density, ore-vein spawn chance, and the min-mushroom / min-magic
+		// guarantee floors. 1.0 = Abundant (default; pre-v0.5.84t behaviour).
+		// 0.25 = Scarce (¼ of each — much harder bootstrap).
 		public static LocalMap Generate(WorldTile worldTile,
 			int width  = LocalMap.DefaultWidth,
-			int height = LocalMap.DefaultHeight)
+			int height = LocalMap.DefaultHeight,
+			float resourceScarcity = 1.0f)
 		{
+			resourceScarcity = Math.Clamp(resourceScarcity, 0.25f, 1.0f);
 			var map = new LocalMap(width, height) { Seed = worldTile.LocalSeed };
 
 			// ── Passes 1 & 2: terrain ──────────────────────────────────────────────
@@ -288,7 +294,7 @@ namespace SmurfulationC.World
 			//
 			// Note: interior wood tiles end up surrounded by wood. The post-scatter
 			// sweep skips DeadLog/LivingWood (v0.2.40), so those interior tiles persist
-			// — smurfs walk around solid wood, not through it.
+			// — shroomps walk around solid wood, not through it.
 
 			// Stage 1a: mask force-convert — DeadLog
 			if (logThreshold < 1.0f)
@@ -1024,7 +1030,7 @@ namespace SmurfulationC.World
 			// ── Pass 4e: desert oasis scatter ─────────────────────────────────────
 			// Desert biome only. Places 2–5 small oases (1 water tile + grass ring)
 			// deterministically from the map seed. Oasis grass tiles attract LargeSandshroom
-			// clusters in the vegetation pass and act as natural waypoints for smurfs.
+			// clusters in the vegetation pass and act as natural waypoints for shroomps.
 
 			if (worldTile.Biome == BiomeType.Desert)
 			{
@@ -1163,84 +1169,117 @@ namespace SmurfulationC.World
 			if (worldTile.IsCoastal && worldTile.Biome != BiomeType.Island)
 			{
 				var coastRng = new Random(worldTile.LocalSeed ^ 0xB4C8D2);
-				int  side    = coastRng.Next(0, 4);               // 0=top 1=bottom 2=left 3=right
-				bool isHoriz = side < 2;
-				int  sideLen = isHoriz ? map.Width : map.Height;
 
-				// Beach spans the full chosen side — no partial segment.
-				int segLen   = sideLen;
-				int segStart = 0;
+				// v0.5.18 — RimWorld-parity coast overhaul, matching the
+				// Mountain Face (v0.5.12) + Rivers (v0.5.13) pattern:
+				//   • continuous orientation angle (was 4 cardinals)
+				//   • 4-octave FBm shoreline (was single-octave Simplex)
+				//   • map-size-scaled frequency (was hardcoded 0.20f)
+				//   • projection-based shoreline (was per-column edge band)
+				//   • wider boundary jitter for cove + headland variety
+				// Reference: rockchasing-style natural shorelines + RimWorld
+				// "Coast / Cove / Fjord" landform variety. The continuous
+				// angle gives diagonal coastlines (NE/SW etc.) instead of
+				// "always perpendicular to a map edge."
+				float coastAngle = (float)(coastRng.NextDouble() * Math.PI * 2.0);
+				float dirX = (float)Math.Cos(coastAngle);
+				float dirY = (float)Math.Sin(coastAngle);
 
-				// v0.4.37 — deeper coastline so water reads as a meaningful
-				// feature on Coastal maps instead of a 2-4-tile lip on one
-				// edge. Was 2-4 water + 3-5 sand (5-9 total depth); now
-				// 4-7 water + 3-5 sand (7-12 total depth). Combined with
-				// the v0.4.37 inlet-carving pass below, Coastal levels
-				// finally feel like coasts.
-				int waterBase = coastRng.Next(4, 8);   // 4–7 tiles of water at the edge
-				int sandBase  = coastRng.Next(3, 6);   // 3–5 sand tiles behind the water
+				// Snap to dominant cardinal for the inlet pass below — inlet
+				// drilling math is axis-aligned, so a diagonal coast still
+				// gets sensible inlets pointing inland from the dominant
+				// shore direction.
+				int side;
+				if (Math.Abs(dirX) > Math.Abs(dirY))
+					side = dirX > 0 ? 2 : 3;   // dirX>0 → water on left (was side=2)
+				else
+					side = dirY > 0 ? 0 : 1;
+				int sideLen = (side < 2) ? map.Width : map.Height;
+				int waterBase = coastRng.Next(4, 8);   // kept for inlet startDepth
+				int sandBase  = coastRng.Next(3, 6);
 
-				// Per-column depth noise → organic curved shoreline.
+				// Fraction of map covered by water on the "low projection"
+				// side. 12-18% water + 6-9% sand ≈ 18-27% sea/beach total.
+				// Calibrated so the land mass remains the dominant feature
+				// while the coastline is unmistakably a real coastline.
+				float waterFrac = 0.12f + (float)coastRng.NextDouble() * 0.06f;
+				float sandFrac  = 0.06f + (float)coastRng.NextDouble() * 0.03f;
+
+				int maxDim = Math.Max(map.Width, map.Height);
+				float coastFreq = 4.0f / maxDim;
 				var beachNoise = new FastNoiseLite
 				{
-					NoiseType = FastNoiseLite.NoiseTypeEnum.Simplex,
-					Seed      = worldTile.LocalSeed ^ 0xC3D4E5,
-					Frequency = 0.20f,
+					NoiseType         = FastNoiseLite.NoiseTypeEnum.Simplex,
+					Seed              = worldTile.LocalSeed ^ 0xC3D4E5,
+					Frequency         = coastFreq,
+					FractalType       = FastNoiseLite.FractalTypeEnum.Fbm,
+					FractalOctaves    = 4,
+					FractalLacunarity = 2.0f,
+					FractalGain       = 0.5f,
 				};
 
-				for (int pos = segStart; pos < segStart + segLen; pos++)
+				// Projection-based shoreline (parallel to Mountain Face
+				// v0.5.12). pos = 0 is deep on the water side; pos = 1 is
+				// far inland. Threshold the projected position against the
+				// noisy waterFrac/sandFrac bands.
+				float ccx = map.Width  * 0.5f;
+				float ccy = map.Height * 0.5f;
+				float maxProj = (map.Width * 0.5f) * Math.Abs(dirX)
+							 + (map.Height * 0.5f) * Math.Abs(dirY);
+
+				for (int y = 0; y < map.Height; y++)
+				for (int x = 0; x < map.Width;  x++)
 				{
-					float nv   = (beachNoise.GetNoise2D(pos, 0) + 1f) * 0.5f;
-					int waterD = Math.Clamp(waterBase + (int)(nv * 2f) - 1, 1, waterBase + 2);
-					int sandD  = Math.Clamp(sandBase  + (int)(nv * 1.5f) - 1, 2, sandBase + 2);
-					int totalD = waterD + sandD;
-
-					for (int d = 0; d < totalD; d++)
+					var t = map.Get(x, y);
+					if (!t.Passable) continue;
+					if (t.Terrain == TerrainType.Water) continue;   // never overwrite existing
+					float rawProj = (x - ccx) * dirX + (y - ccy) * dirY;
+					float pos = (rawProj + maxProj) / (2f * maxProj);
+					float bn = (beachNoise.GetNoise2D(x, y) + 1f) * 0.5f;
+					// ±25% jitter on the water threshold + ±10% on the sand
+					// edge produces visible coves + peninsulas at the shore
+					// instead of a clean line. Multi-octave FBm gives the
+					// smaller wiggle on top of the large bay shape.
+					float waterT = waterFrac + (bn - 0.5f) * 0.25f;
+					float sandT  = waterT + sandFrac + (bn - 0.5f) * 0.10f;
+					if (pos < waterT)
 					{
-						int bx, by;
-						switch (side)
-						{
-							case 0:  bx = pos;               by = d;                    break; // top
-							case 1:  bx = pos;               by = map.Height - 1 - d;   break; // bottom
-							case 2:  bx = d;                 by = pos;                  break; // left
-							default: bx = map.Width - 1 - d; by = pos;                  break; // right
-						}
-						if (!map.InBounds(bx, by)) continue;
-						var bt = map.Get(bx, by);
-						if (!bt.Passable) continue; // never overwrite existing impassable
-
-						if (d < waterD)
-						{
-							bt.Terrain  = TerrainType.Water;
-							bt.Passable = false;
-						}
-						else
-						{
-							bt.Terrain  = TerrainType.Sand; // explicit sand band behind waterline
-							bt.Passable = true;
-						}
-						map.Set(bx, by, bt);
+						t.Terrain  = TerrainType.Water;
+						t.Passable = false;
+						map.Set(x, y, t);
 					}
-
-					// Rocky outcrop: ~15% chance per column at or just inside the waterline.
-					if (coastRng.NextDouble() < 0.15)
+					else if (pos < sandT)
 					{
-						int rd = coastRng.Next(0, waterD + 2);
-						int rbx, rby;
-						switch (side)
-						{
-							case 0:  rbx = pos;               rby = rd;                    break;
-							case 1:  rbx = pos;               rby = map.Height - 1 - rd;   break;
-							case 2:  rbx = rd;                rby = pos;                   break;
-							default: rbx = map.Width - 1 - rd; rby = pos;                  break;
-						}
-						if (map.InBounds(rbx, rby))
-						{
-							var rt      = map.Get(rbx, rby);
-							rt.Terrain  = TerrainType.Boulder;
-							rt.Passable = false;
-							map.Set(rbx, rby, rt);
-						}
+						t.Terrain  = TerrainType.Sand;
+						t.Passable = true;
+						map.Set(x, y, t);
+					}
+					// else: land unchanged (terrain stays whatever Pass 1 set)
+				}
+
+				// Rocky outcrops in the surf — kept as ~15% per column-
+				// equivalent. Sample shoreline tiles (proj near waterT) and
+				// flip a small fraction to Boulder for "rocks at the tide
+				// line." Approximated by walking the map with a low-
+				// probability roll against a near-shore mask.
+				for (int y = 0; y < map.Height; y++)
+				for (int x = 0; x < map.Width;  x++)
+				{
+					var t = map.Get(x, y);
+					if (t.Terrain != TerrainType.Water) continue;
+					float rawProj = (x - ccx) * dirX + (y - ccy) * dirY;
+					float pos = (rawProj + maxProj) / (2f * maxProj);
+					float bn = (beachNoise.GetNoise2D(x, y) + 1f) * 0.5f;
+					float waterT = waterFrac + (bn - 0.5f) * 0.25f;
+					// Only apply outcrop chance to tiles near the shore band
+					// (within 20% of the threshold) so the surf zone has
+					// rocks; deep water stays clear.
+					if (pos < waterT - 0.04f) continue;
+					if (coastRng.NextDouble() < 0.05)
+					{
+						t.Terrain  = TerrainType.Boulder;
+						t.Passable = false;
+						map.Set(x, y, t);
 					}
 				}
 
@@ -1293,63 +1332,110 @@ namespace SmurfulationC.World
 							jitter += (coastRng.Next(2) == 0 ? -1 : 1);
 					}
 				}
+
+				// v0.5.39 — coastal rocky crags. Replaces the noisy scatter
+				// (which v0.5.39 dropped from 0.91 → 0.98 threshold) with
+				// 1-3 concentrated rock outcrops on the land. Each crag is
+				// a noise-shaped blob of 6-14 Boulder tiles — gives the
+				// "rocky crag" feel Sam asked for without the salt-and-
+				// pepper noise across every sand tile.
+				ScatterCoastalCrags(map, worldTile.LocalSeed ^ 0xC4A6B8, coastRng);
 			}
 
 			if (worldTile.Biome == BiomeType.Island)
 			{
-				// Water ring: tiles 0–3 from each edge.
+				var islandRng = new Random(worldTile.LocalSeed ^ 0xF3C8A1);
+
+				// v0.5.18 — RimWorld-parity Island overhaul. Pre-v0.5.18 was
+				// a rectangular concentric ring (water 0-3 from each edge,
+				// sand 4-7) with corner-arc rounding — looked geometric +
+				// repetitive. New: noise-driven blob defined by distance-
+				// from-center modulated by FBm. Produces lobed / peninsular
+				// / sometimes-archipelago-like island shapes — closer to
+				// RimWorld's "Geological Landforms" Coastal Island /
+				// Atoll variants. Same multi-octave + scaled-frequency
+				// pattern as Mountain Face (v0.5.12) / Rivers (v0.5.13) /
+				// Coast (v0.5.18 above).
+
+				// Island center near map center with small jitter so seed
+				// variations move the island around rather than always
+				// being dead-centre.
+				float ccx = map.Width  * 0.5f + (float)(islandRng.NextDouble() - 0.5) * map.Width  * 0.10f;
+				float ccy = map.Height * 0.5f + (float)(islandRng.NextDouble() - 0.5) * map.Height * 0.10f;
+
+				// Base radius — large enough to feel like land, small enough
+				// to leave a clear water margin. Min map dim × ~32-40 %.
+				float baseR = Math.Min(map.Width, map.Height) * (0.32f + (float)islandRng.NextDouble() * 0.08f);
+				float sandWidth = 3.0f;
+
+				int maxDim = Math.Max(map.Width, map.Height);
+				float islandFreq = 4.0f / maxDim;
+				var islandNoise = new FastNoiseLite
+				{
+					NoiseType         = FastNoiseLite.NoiseTypeEnum.Simplex,
+					Seed              = worldTile.LocalSeed ^ 0xC3D4E5,
+					Frequency         = islandFreq,
+					FractalType       = FastNoiseLite.FractalTypeEnum.Fbm,
+					FractalOctaves    = 4,
+					FractalLacunarity = 2.0f,
+					FractalGain       = 0.5f,
+				};
+
+				// Pass 1 — noise-driven coastline. Each tile's distance to
+				// island centre is modulated by FBm so the shoreline is
+				// organic (lobes, bays, peninsulas) instead of a square
+				// with rounded corners.
 				for (int y = 0; y < map.Height; y++)
-					for (int x = 0; x < map.Width; x++)
+				for (int x = 0; x < map.Width;  x++)
+				{
+					float dx = x - ccx;
+					float dy = y - ccy;
+					float dist = (float)Math.Sqrt(dx * dx + dy * dy);
+					float bn = (islandNoise.GetNoise2D(x, y) + 1f) * 0.5f;
+					// ±20 % radius jitter — multi-octave produces small
+					// wiggles on top of large bays, the natural-coastline
+					// feel.
+					float effectiveR = baseR + (bn - 0.5f) * baseR * 0.40f;
+					var t = map.Get(x, y);
+					if (dist > effectiveR + sandWidth)
 					{
-						if (x >= 4 && x < map.Width - 4 && y >= 4 && y < map.Height - 4) continue;
-						var t      = map.Get(x, y);
 						t.Terrain  = TerrainType.Water;
 						t.Passable = false;
 						map.Set(x, y, t);
 					}
-
-				// Sand ring: tiles 4–7 from each edge (visible beach band).
-				// Corner rounding: sand-ring tiles inside a radius-3 arc from each inner
-				// water-ring corner are converted to water so corners look circular.
-				for (int y = 4; y < map.Height - 4; y++)
-					for (int x = 4; x < map.Width - 4; x++)
+					else if (dist > effectiveR && t.Passable)
 					{
-						if (x >= 8 && x < map.Width - 8 && y >= 8 && y < map.Height - 8) continue;
-						int rcx = Math.Min(x, map.Width  - 1 - x) - 4;
-						int rcy = Math.Min(y, map.Height - 1 - y) - 4;
-						if (rcx >= 0 && rcy >= 0 && rcx * rcx + rcy * rcy < 9)
-						{
-							var wt      = map.Get(x, y);
-							wt.Terrain  = TerrainType.Water;
-							wt.Passable = false;
-							map.Set(x, y, wt);
-							continue;
-						}
-						var t = map.Get(x, y);
-						if (!t.Passable) continue;
 						t.Terrain  = TerrainType.Sand;
 						t.Passable = true;
 						map.Set(x, y, t);
 					}
+					// else: land — keep whatever Pass 1/2 painted (Grass /
+					// Forest / etc.) so the interior carries the biome look.
+				}
 
-				// Rocky outcrops in the water ring — denser near the sand edge (reef fringe).
-				var islandRockRng = new Random(worldTile.LocalSeed ^ 0xF3C8A1);
+				// Pass 2 — rocky outcrops in the surf zone. Walk water tiles
+				// near the shore (within sandWidth+1 tiles of effectiveR)
+				// and roll for Boulder placement. ~5 % chance — gives reef
+				// fringe character without clogging the channel.
 				for (int y = 0; y < map.Height; y++)
-					for (int x = 0; x < map.Width; x++)
+				for (int x = 0; x < map.Width;  x++)
+				{
+					var t = map.Get(x, y);
+					if (t.Terrain != TerrainType.Water) continue;
+					float dx = x - ccx;
+					float dy = y - ccy;
+					float dist = (float)Math.Sqrt(dx * dx + dy * dy);
+					float bn = (islandNoise.GetNoise2D(x, y) + 1f) * 0.5f;
+					float effectiveR = baseR + (bn - 0.5f) * baseR * 0.40f;
+					// Surf zone: within 3 tiles past the shore.
+					if (dist > effectiveR + sandWidth + 3f) continue;
+					if (islandRng.NextDouble() < 0.05)
 					{
-						bool inWaterRing = !(x >= 4 && x < map.Width - 4 && y >= 4 && y < map.Height - 4);
-						if (!inWaterRing) continue;
-						// edgeDist: 0 at outermost pixel, 3 adjacent to the sand ring.
-						int edgeDist = Math.Min(Math.Min(x, map.Width - 1 - x), Math.Min(y, map.Height - 1 - y));
-						float rockChance = 0.22f * (edgeDist / 3f + 0.15f);
-						if (islandRockRng.NextDouble() < rockChance)
-						{
-							var t      = map.Get(x, y);
-							t.Terrain  = TerrainType.Boulder;
-							t.Passable = false;
-							map.Set(x, y, t);
-						}
+						t.Terrain  = TerrainType.Boulder;
+						t.Passable = false;
+						map.Set(x, y, t);
 					}
+				}
 
 				// v0.4.38 — Island inlets. Mirror of the Coastal inlet pass:
 				// drill 3-5 finger-shaped water intrusions inward from the
@@ -1402,6 +1488,11 @@ namespace SmurfulationC.World
 							jitter += (islandInletRng.Next(2) == 0 ? -1 : 1);
 					}
 				}
+
+				// v0.5.39 — same crag cluster pass for Islands. Reuses the
+				// coastal noise-blob shape so islands get 1-3 rocky outcrops
+				// on their interior land instead of evenly-scattered noise.
+				ScatterCoastalCrags(map, worldTile.LocalSeed ^ 0xC4A6B9, islandRng);
 			}
 
 			// ── Pass 4h: River carving (Phase 2.6 / v0.4.37 subtypes) ──────────────
@@ -1624,8 +1715,9 @@ namespace SmurfulationC.World
 
 			CarveUniversalCaves(map, worldTile);
 			ScatterRuins(map, worldTile);
-			ScatterResourceVeins(map, worldTile);
+			ScatterResourceVeins(map, worldTile, resourceScarcity);
 			ScatterBuriedTreasure(map, worldTile);
+			ScatterSkeletons(map, worldTile);          // v0.5.16
 			ScatterAnimalSpawnPoints(map, worldTile);
 
 			// ── Pass 3: vegetation placement ───────────────────────────────────────
@@ -1636,6 +1728,10 @@ namespace SmurfulationC.World
 				Seed      = worldTile.LocalSeed + 13,
 				Frequency = 0.11f,
 			};
+			// v0.5.84t — scarcity gate rng. Seeded off the local seed with a
+			// dedicated XOR mask so the scarcity roll is deterministic per
+			// (seed, scarcity) — same map regenerates identically.
+			var scarcityRng = new Random(worldTile.LocalSeed ^ 0x5CA76C17);
 
 			for (int y = 0; y < map.Height; y++)
 			{
@@ -1658,6 +1754,8 @@ namespace SmurfulationC.World
 							: SelectSandVegetation(effectiveN);
 						if (sandVeg != VegetationType.None)
 						{
+							// v0.5.84t — scarcity gate.
+							if (scarcityRng.NextDouble() > resourceScarcity) continue;
 							map.SetVegetation(x, y, VegetationSlot.Create(sandVeg));
 							if (sandVeg == VegetationType.LargeSandshroom)
 							{
@@ -1685,6 +1783,11 @@ namespace SmurfulationC.World
 						vegType = SelectVegetation(effectiveN, worldTile.Biome);
 					if (vegType == VegetationType.None) continue;
 
+					// v0.5.84t — scarcity gate. Roll AFTER eligible vegetation is
+					// chosen so the biome distribution stays the same — scarcity
+					// just thins the placement count, doesn't reshape the mix.
+					if (scarcityRng.NextDouble() > resourceScarcity) continue;
+
 					map.SetVegetation(x, y, VegetationSlot.Create(vegType));
 
 					// Impassable large vegetation fills the tile.
@@ -1702,7 +1805,11 @@ namespace SmurfulationC.World
 			// Every map needs enough Fungal Wood for the colony to build structures.
 			// Biome tables skew low on non-forest biomes, so we top up if needed.
 
-			int minMush = MinLargeMushrooms(width, height);
+			// v0.5.84t — scale the LargeMushroom floor by scarcity. At Scarce
+			// (0.25) the colony bootstrap is genuinely tight; at Abundant (1.0)
+			// the floor is unchanged. Math.Max(1, ...) so even Scarce maps still
+			// guarantee at least one LargeMushroom for the first Fungal Wood.
+			int minMush = Math.Max(1, (int)Math.Round(MinLargeMushrooms(width, height) * resourceScarcity));
 			int current = CountVegetation(map, VegetationType.LargeMushroom);
 
 			if (current < minMush)
@@ -1741,7 +1848,8 @@ namespace SmurfulationC.World
 			// Non-MagicGrove biomes may have very few magic sources from the biome table,
 			// so we top up with HerbCluster (the universally appropriate fallback).
 
-			int minMagic   = MinMagicVegetation(width, height);
+			// v0.5.84t — also scale the magic-vegetation floor by scarcity.
+			int minMagic   = Math.Max(1, (int)Math.Round(MinMagicVegetation(width, height) * resourceScarcity));
 			int magicCount = CountVegetationAny(map, VegetationType.MagicFlower, VegetationType.HerbCluster);
 
 			if (magicCount < minMagic)
@@ -1779,7 +1887,56 @@ namespace SmurfulationC.World
 			// MagicCrystal as a rare ore-vein cluster.
 			AssignStoneVariation(map, worldTile);
 
+			// ── Pass 8: roof paint (v0.5.84t — RimWorld parity) ───────────────────
+			// RimWorld's RoofGrid pre-paints roofs on solid-rock tiles during
+			// mountain worldgen so when the player mines into a mountain the
+			// carved-out tile retains "cavern roof" status. We mirror that:
+			//   - Solid terrain (Boulder / DeadLog / LivingWood / Skeleton)
+			//     gets IsRoofed=true so when mined the tile stays roofed.
+			//   - Passable cave-interior tiles (≥3 impassable cardinal
+			//     neighbours) also get roofed — CarveUniversalCaves digs
+			//     through solid rock leaving open tiles that should still
+			//     have ceilings above. Sam: "cavern roofs like rimworld
+			//     over cave formations."
+			// Persists through mining via the existing tile-mutate path
+			// (MutateTerrain replaces Terrain only; IsRoofed stays).
+			PaintInitialRoofs(map);
+
 			return map;
+		}
+
+		// v0.5.84t — paint IsRoofed=true on every solid tile + every
+		// passable cave-interior tile (≥3 impassable cardinal neighbours).
+		// Called once at end of Generate so all terrain passes are settled.
+		private static void PaintInitialRoofs(LocalMap map)
+		{
+			int w = map.Width, h = map.Height;
+			for (int y = 0; y < h; y++)
+			for (int x = 0; x < w; x++)
+			{
+				var tile = map.Get(x, y);
+				bool solid = !tile.Passable;
+				// Solid terrain auto-roofs (DeadLog / LivingWood / Boulder /
+				// Skeleton). The roof survives mining.
+				if (solid)
+				{
+					tile.IsRoofed = true;
+					map.Set(x, y, tile);
+					continue;
+				}
+				// Passable tile: count impassable cardinal neighbours. If
+				// ≥3 are walls, we're in a cave interior — roof.
+				int wallNeighbours = 0;
+				if (x > 0     && !map.IsPassable(x - 1, y)) wallNeighbours++;
+				if (x < w - 1 && !map.IsPassable(x + 1, y)) wallNeighbours++;
+				if (y > 0     && !map.IsPassable(x, y - 1)) wallNeighbours++;
+				if (y < h - 1 && !map.IsPassable(x, y + 1)) wallNeighbours++;
+				if (wallNeighbours >= 3)
+				{
+					tile.IsRoofed = true;
+					map.Set(x, y, tile);
+				}
+			}
 		}
 
 		// v0.4.2 — biome-biased stone subtype assignment with rare
@@ -1842,7 +1999,7 @@ namespace SmurfulationC.World
 				if (map.Get(x, y).Terrain != TerrainType.Boulder) continue;
 				float t = Normalize(regionNoise.GetNoise2D(x, y));
 				string pick = PickFromCumulative(table, t);
-				map.SetTileStone(x, y, new SmurfulationC.Simulation.Items.MaterialKey("Stone", pick));
+				map.SetTileStone(x, y, new Sporeholm.Simulation.Items.MaterialKey("Stone", pick));
 			}
 
 			// Pass B: ore-vein clusters — MagicGrove gets 1.2 % crystal
@@ -1863,7 +2020,7 @@ namespace SmurfulationC.World
 				{
 					if (!map.InBounds(cx, cy)) break;
 					if (map.Get(cx, cy).Terrain != TerrainType.Boulder) break;
-					map.SetTileStone(cx, cy, new SmurfulationC.Simulation.Items.MaterialKey("Stone","MagicCrystal"));
+					map.SetTileStone(cx, cy, new Sporeholm.Simulation.Items.MaterialKey("Stone","MagicCrystal"));
 					// Walk one step in a cardinal direction.
 					int dir = rng.Next(4);
 					cx += dir switch { 0 => 1, 1 => -1, _ => 0 };
@@ -2221,6 +2378,472 @@ namespace SmurfulationC.World
 			}
 		}
 
+		// ════════════════════════════════════════════════════════════════════
+		// v0.5.14 (Phase 5C — "Discoveries") — gen-time encounter passes
+		// (rimport.md §22 + N15-N19). Each pass is small + self-contained.
+		// All five run between CarveShallowsRing and Pass 3 vegetation, in
+		// the order: caves → ruins → resource-veins → buried-treasure →
+		// animal-spawn-points. Caves first so ruins / resources / spawns
+		// can land in newly-opened cavities; vegetation runs after so it
+		// can colonise around new features naturally.
+		// ════════════════════════════════════════════════════════════════════
+
+		// N17 — Universal cave-carving pass. Pre-v0.5.14 the Caves mountain
+		// subtype was the only place caves appeared. This pass runs after
+		// EVERY rock subtype + boulder scatter, subtracting cave tiles
+		// from any Boulder cluster that meets the noise threshold. Result:
+		// Solid Mountain + caves = network of tunnels through bedrock;
+		// Mountain Face + caves = small chambers in the rock face. Cave
+		// floor uses Mud (matches the existing Caves subtype convention).
+		// Frequency scales with map dim so feature scale stays consistent
+		// (RimWorld parity — see v0.5.12 / v0.5.13 noise pattern).
+		private static void CarveUniversalCaves(LocalMap map, WorldTile worldTile)
+		{
+			int maxDim = System.Math.Max(map.Width, map.Height);
+			// Target ~3 noise periods across the map's longest axis. Lower
+			// = larger caves; higher = more, smaller cavities.
+			float caveFreq = 3.0f / maxDim;
+
+			var caveNoise = new FastNoiseLite
+			{
+				NoiseType         = FastNoiseLite.NoiseTypeEnum.Simplex,
+				Seed              = worldTile.LocalSeed + 8801,
+				Frequency         = caveFreq,
+				FractalType       = FastNoiseLite.FractalTypeEnum.Fbm,
+				FractalOctaves    = 3,
+				FractalLacunarity = 2.0f,
+				FractalGain       = 0.5f,
+			};
+
+			// Threshold tuned so ~5-10% of Boulder tiles convert to cave on
+			// average. Mountain biomes get a small boost (more interior cave
+			// space, matching real-world cave system density vs lowlands).
+			float caveThres = (worldTile.Biome == BiomeType.Mountains
+				|| worldTile.Biome == BiomeType.Peaks) ? 0.62f : 0.72f;
+
+			for (int y = 0; y < map.Height; y++)
+			for (int x = 0; x < map.Width; x++)
+			{
+				var t = map.Get(x, y);
+				if (t.Terrain != TerrainType.Boulder) continue;
+				float n = Normalize(caveNoise.GetNoise2D(x, y));
+				if (n < caveThres) continue;
+				t.Terrain  = TerrainType.Mud;
+				t.Passable = true;
+				map.Set(x, y, t);
+			}
+		}
+
+		// N15 — Pre-existing ruined structures. 0-3 small rectangular
+		// structures per map, placed on flat passable terrain. Variants:
+		//   • Stone ruin (Boulder walls, hollow interior, doorway gap)
+		//   • Wood ruin (DeadLog walls)
+		//   • Mushroom shrine (LargeMushroom ring, empty centre — placeholder
+		//     until Phase 7 mood system can hook a buff effect)
+		// Adds the "what's that?" hook to every map. Sam: "ancient mushroom
+		// shrines (renewable mood boost), abandoned predecessor shroomp
+		// villages, magical glyph circles."
+
+		// v0.5.39 — coastal rocky crags. Replaces the noisy 9 %-per-tile
+		// boulder scatter (which the v0.5.39 threshold raise dropped to
+		// ~2 %) with 1-3 concentrated rock outcrops on the land. Each crag
+		// is a noise-shaped blob centred on a randomly-chosen land tile;
+		// every tile within the noise iso-line flips to Boulder. Gives
+		// the "rocky crag" feel Sam called out — visually clustered
+		// outcrops rather than salt-and-pepper noise across every sand
+		// tile. Skips water + sand-ring tiles (per the v0.5.18 coast
+		// projection) so the crags appear on the buildable land, not in
+		// the surf or directly on the shoreline strip.
+		private static void ScatterCoastalCrags(LocalMap map, int seed, Random rng)
+		{
+			int cragCount = rng.Next(1, 4);   // 1-3 crags per map
+			var cragNoise = new FastNoiseLite
+			{
+				NoiseType         = FastNoiseLite.NoiseTypeEnum.Simplex,
+				Seed              = seed,
+				Frequency         = 0.18f,    // crag-shape detail
+				FractalType       = FastNoiseLite.FractalTypeEnum.Fbm,
+				FractalOctaves    = 3,
+				FractalLacunarity = 2.0f,
+				FractalGain       = 0.5f,
+			};
+
+			for (int c = 0; c < cragCount; c++)
+			{
+				// Pick a seed tile: land, passable, not Water/Sand. Retry up
+				// to 30 times so we don't fail on map-with-mostly-water.
+				int seedX = -1, seedY = -1;
+				for (int attempt = 0; attempt < 30; attempt++)
+				{
+					int tx = rng.Next(2, map.Width  - 2);
+					int ty = rng.Next(2, map.Height - 2);
+					var t = map.Get(tx, ty);
+					if (!t.Passable) continue;
+					if (t.Terrain == TerrainType.Water) continue;
+					if (t.Terrain == TerrainType.Boulder) continue;
+					seedX = tx; seedY = ty;
+					break;
+				}
+				if (seedX < 0) continue;
+
+				// Radius of influence — small enough to feel like a crag,
+				// large enough to read as a cluster. 3-5 tiles in each axis
+				// → 6-12 tile crag blob.
+				int radius = rng.Next(3, 6);
+				for (int dy = -radius; dy <= radius; dy++)
+				for (int dx = -radius; dx <= radius; dx++)
+				{
+					int tx = seedX + dx;
+					int ty = seedY + dy;
+					if (!map.InBounds(tx, ty)) continue;
+					// Distance falloff + noise to shape the blob's edge.
+					float distNorm = (float)Math.Sqrt(dx * dx + dy * dy) / radius;
+					if (distNorm > 1.0f) continue;
+					float n = (cragNoise.GetNoise2D(tx, ty) + 1f) * 0.5f;
+					// Noise-shaped threshold: stronger toward the centre,
+					// breaks up at the edge for a natural blob outline.
+					float threshold = 0.45f + distNorm * 0.45f;
+					if (n < threshold) continue;
+					var tt = map.Get(tx, ty);
+					// Skip water (don't fill shoreline back in with rock) and
+					// existing impassable terrain.
+					if (tt.Terrain == TerrainType.Water) continue;
+					if (tt.Terrain == TerrainType.Boulder) continue;
+					if (tt.Terrain == TerrainType.DeadLog) continue;
+					if (tt.Terrain == TerrainType.LivingWood) continue;
+					tt.Terrain  = TerrainType.Boulder;
+					tt.Passable = false;
+					map.Set(tx, ty, tt);
+				}
+			}
+		}
+
+		private static void ScatterRuins(LocalMap map, WorldTile worldTile)
+		{
+			var rng = new System.Random(worldTile.LocalSeed ^ 0x5717DA);
+			int ruinCount = rng.Next(0, 4);   // 0-3
+			int placed = 0, attempts = 0;
+
+			while (placed < ruinCount && attempts < 30)
+			{
+				attempts++;
+				int w = 4 + rng.Next(3);   // 4-6 tiles wide
+				int h = 4 + rng.Next(3);
+				int x0 = rng.Next(2, map.Width  - w - 2);
+				int y0 = rng.Next(2, map.Height - h - 2);
+
+				// Site requires the entire footprint to be passable + non-water
+				// + non-stockpile-conflict. Reject and re-roll otherwise.
+				bool clear = true;
+				for (int dy = 0; dy < h && clear; dy++)
+				for (int dx = 0; dx < w && clear; dx++)
+				{
+					var t = map.Get(x0 + dx, y0 + dy);
+					if (!t.Passable) clear = false;
+					if (t.Terrain == TerrainType.Water || t.Terrain == TerrainType.Shallows) clear = false;
+					if (t.Terrain == TerrainType.Mud) clear = false;   // cave floor — leave alone
+				}
+				if (!clear) continue;
+
+				int variant = rng.Next(3);
+				int doorSide = rng.Next(4);   // 0=N 1=S 2=W 3=E
+				int doorOffset = (variant == 2) ? -1 : 1 + rng.Next((doorSide < 2 ? w : h) - 2);
+
+				if (variant == 2)
+				{
+					// Mushroom shrine — ring of LargeMushroom around an empty
+					// centre. Doesn't need walls; the ring marks the site.
+					int cx = x0 + w / 2, cy = y0 + h / 2;
+					int radius = System.Math.Min(w, h) / 2;
+					for (int yy = -radius; yy <= radius; yy++)
+					for (int xx = -radius; xx <= radius; xx++)
+					{
+						int dist2 = xx * xx + yy * yy;
+						if (dist2 < (radius - 1) * (radius - 1)) continue;
+						if (dist2 > radius * radius) continue;
+						int tx = cx + xx, ty = cy + yy;
+						if (!map.InBounds(tx, ty)) continue;
+						// Only paint vegetation slot — terrain stays passable.
+						map.SetVegetation(tx, ty, VegetationSlot.Create(VegetationType.LargeMushroom));
+					}
+					placed++;
+					continue;
+				}
+
+				// Stone (variant 0) or wood (variant 1) ruin — rectangular
+				// walls, hollow interior, doorway gap on one side.
+				TerrainType wallType = (variant == 0) ? TerrainType.Boulder : TerrainType.DeadLog;
+				for (int dy = 0; dy < h; dy++)
+				for (int dx = 0; dx < w; dx++)
+				{
+					bool isWall = (dx == 0 || dx == w - 1 || dy == 0 || dy == h - 1);
+					if (!isWall) continue;
+					// Doorway gap — skip wall placement at the doorway tile.
+					bool isDoor = false;
+					if (doorSide == 0 && dy == 0     && dx == doorOffset) isDoor = true;
+					if (doorSide == 1 && dy == h - 1 && dx == doorOffset) isDoor = true;
+					if (doorSide == 2 && dx == 0     && dy == doorOffset) isDoor = true;
+					if (doorSide == 3 && dx == w - 1 && dy == doorOffset) isDoor = true;
+					if (isDoor) continue;
+
+					var t = map.Get(x0 + dx, y0 + dy);
+					t.Terrain  = wallType;
+					t.Passable = false;
+					map.Set(x0 + dx, y0 + dy, t);
+				}
+				placed++;
+			}
+		}
+
+		// N16 — Resource clusters (concentrated rare-material veins).
+		// Reuses the v0.4.2 stone-subtype system: places Kentucky-inspired
+		// ground-level mineral clusters on existing Boulder tiles. Excavation
+		// drops a standard StoneBlock with the subtype intact (parallel to
+		// MagicCrystal → CrystalShard at BehaviorSystem.cs ~2540 — the
+		// same hook can spawn special drops per mineral once Phase 6
+		// crafting needs them). Cluster size 5-10 tiles (vs MagicCrystal's
+		// 3-5) so the find is gameplay-meaningful; total vein chance 0.4%
+		// per Boulder, weighted across 4 mineral types.
+		//
+		// v0.5.15 — material palette revised from v0.5.14's Gold/Sapphire
+		// (didn't fit shroomp-scale lore — they mine ground-level rocks, not
+		// deep gemstone shafts) to Kentucky-inspired ground minerals.
+		// Weights tuned for "Hematite is your iron / Garnet is the lottery."
+		private static void ScatterResourceVeins(LocalMap map, WorldTile worldTile, float scarcity = 1.0f)
+		{
+			var rng = new System.Random(worldTile.LocalSeed ^ 0x60175A6);
+			// v0.5.84t — vein chance scales with scarcity. At Scarce (0.25) only
+			// ~0.1 % of Boulder tiles get a vein vs the 0.4 % at Abundant.
+			float veinChance = 0.004f * scarcity;
+
+			// Per-mineral weights — biome-aware. Mountains = more Hematite +
+			// Coal (real Kentucky mining geology). Magic biomes get a Garnet
+			// bias because gem deposits "feel right" there. Other biomes
+			// get balanced spread.
+			(string SubType, float Weight)[] table = worldTile.Biome switch
+			{
+				BiomeType.Mountains or BiomeType.Peaks =>
+					new[] { ("Hematite", 0.45f), ("Coal", 0.20f), ("Pyrite", 0.15f), ("Fluorite", 0.10f), ("Garnet", 0.05f), ("Agate", 0.05f) },
+				BiomeType.MagicGrove =>
+					new[] { ("Hematite", 0.20f), ("Garnet", 0.20f), ("Fluorite", 0.20f), ("Agate", 0.20f), ("Pyrite", 0.10f), ("Coal", 0.10f) },
+				BiomeType.Hills =>
+					new[] { ("Hematite", 0.40f), ("Pyrite", 0.20f), ("Coal", 0.15f), ("Fluorite", 0.10f), ("Agate", 0.10f), ("Garnet", 0.05f) },
+				BiomeType.Coast or BiomeType.Island =>
+					new[] { ("Agate", 0.30f), ("Hematite", 0.25f), ("Pyrite", 0.20f), ("Fluorite", 0.15f), ("Coal", 0.05f), ("Garnet", 0.05f) },
+				_ =>
+					new[] { ("Hematite", 0.30f), ("Pyrite", 0.20f), ("Fluorite", 0.15f), ("Agate", 0.15f), ("Coal", 0.10f), ("Garnet", 0.10f) },
+			};
+
+			for (int y = 0; y < map.Height; y++)
+			for (int x = 0; x < map.Width; x++)
+			{
+				if (map.Get(x, y).Terrain != TerrainType.Boulder) continue;
+				if (rng.NextDouble() > veinChance) continue;
+
+				string sub = PickFromCumulative(table, (float)rng.NextDouble());
+
+				int len = 5 + rng.Next(6);   // 5-10 tiles per cluster
+				int cx = x, cy = y;
+				for (int step = 0; step < len; step++)
+				{
+					if (!map.InBounds(cx, cy)) break;
+					if (map.Get(cx, cy).Terrain != TerrainType.Boulder) break;
+					map.SetTileStone(cx, cy, new Sporeholm.Simulation.Items.MaterialKey("Stone", sub));
+					int dir = rng.Next(4);
+					cx += dir switch { 0 => 1, 1 => -1, _ => 0 };
+					cy += dir switch { 2 => 1, 3 => -1, _ => 0 };
+				}
+			}
+		}
+
+		// N18 — Buried treasure quest hooks. Marks 0-2 random Boulder tiles
+		// per map (preferring tiles inside dense rock so the discovery feels
+		// earned, not landed-on). Excavation hook in BehaviorSystem drops a
+		// bonus Trinket alongside the standard StoneBlock when a marked
+		// tile is mined. Sam: "what will I find under there?"
+		//
+		// Stub: sleeping creatures (also N18) deferred until Phase 9 animal
+		// system lands. The marker mechanism here is the same one creatures
+		// would use — just with a different on-excavate effect.
+		private static void ScatterBuriedTreasure(LocalMap map, WorldTile worldTile)
+		{
+			var rng = new System.Random(worldTile.LocalSeed ^ 0xBADAB10);
+			int treasureCount = rng.Next(0, 3);   // 0-2
+			int placed = 0, attempts = 0;
+
+			while (placed < treasureCount && attempts < 100)
+			{
+				attempts++;
+				int x = rng.Next(2, map.Width  - 2);
+				int y = rng.Next(2, map.Height - 2);
+				if (map.Get(x, y).Terrain != TerrainType.Boulder) continue;
+				// Prefer tiles surrounded by rock (≥5 of 8 neighbours
+				// impassable) so treasure isn't visible at the rock edge.
+				int rockNeighbours = 0;
+				for (int dy = -1; dy <= 1; dy++)
+				for (int dx = -1; dx <= 1; dx++)
+				{
+					if (dx == 0 && dy == 0) continue;
+					if (!map.IsPassable(x + dx, y + dy)) rockNeighbours++;
+				}
+				if (rockNeighbours < 5) continue;
+				if (map.HasBuriedTreasure(x, y)) continue;
+				map.SetBuriedTreasure(x, y);
+				placed++;
+			}
+		}
+
+		// v0.5.16 — Partial buried skeletons. Places 0-4 small clusters
+		// of TerrainType.Skeleton tiles per map (biome-weighted: more in
+		// Mountains/Caves/Desert where bones survive longer; fewer in
+		// wet biomes where decay is faster). Each cluster is 1-3 tiles
+		// representing fragments of a single larger creature scaled to
+		// shroomp perspective — a rib bone, partial skull, or pelvis poking
+		// out of the ground. Excavating drops Bone material via the
+		// BehaviorSystem.GatherMaterial hook (line ~2520).
+		//
+		// Sam: "Add as a material dropped from impassable 'Skeleton'
+		// generations that will generate on level maps in the form of
+		// partially buried skeletons (scaled to shroomp size, so imitate
+		// the look of a rib bone or partial animal skull poking out of
+		// the ground)."
+		//
+		// Generation pattern adapted from typical procedural-bone-pile
+		// approaches: pick a seed tile on passable ground, place 1-3
+		// connected Skeleton tiles in a small organic shape (random
+		// short walk). Each tile is a "fragment" — visually the renderer
+		// can tint these distinctly from rock so the player recognises
+		// them as bones rather than boulders. Cluster placement avoids
+		// existing impassable terrain so skeletons appear *exposed*
+		// rather than buried under rock.
+		private static void ScatterSkeletons(LocalMap map, WorldTile worldTile)
+		{
+			var rng = new System.Random(worldTile.LocalSeed ^ 0xB07E5C);
+
+			// Biome weighting: bones survive in dry / cold / underground
+			// environments. Wet biomes decompose them faster.
+			int maxSkeletons = worldTile.Biome switch
+			{
+				BiomeType.Desert =>             4,
+				BiomeType.Mountains             => 4,
+				BiomeType.Peaks                 => 3,
+				BiomeType.Hills                 => 3,
+				BiomeType.MagicGrove            => 2,
+				BiomeType.Coast or BiomeType.Island => 2,
+				BiomeType.Forest                => 2,
+				BiomeType.Swamp                 => 1,   // wet — bones rot
+				_                               => 2,
+			};
+
+			// v0.5.84t — at least 1 skeleton per map so Bone is reliably findable
+			// before Phase 9 animal butchery lands (pre-Phase 6 the only Bone
+			// source is excavating Skeleton terrain). Sam: "Bone impossible to
+			// find pre-phase 6." Range now `[1, maxSkeletons]` inclusive.
+			int count = 1 + rng.Next(maxSkeletons);
+			int placed = 0, attempts = 0;
+			while (placed < count && attempts < 50)
+			{
+				attempts++;
+				int x = rng.Next(2, map.Width  - 2);
+				int y = rng.Next(2, map.Height - 2);
+				if (!map.IsPassable(x, y)) continue;
+				var seedTile = map.Get(x, y);
+				if (seedTile.Terrain == TerrainType.Water
+				 || seedTile.Terrain == TerrainType.Shallows
+				 || seedTile.Terrain == TerrainType.Mud) continue;   // skeletons appear on solid ground
+
+				// Place 1-3 connected Skeleton fragments via short random
+				// walk. Most clusters are 1-2 tiles (small bone fragments);
+				// occasional 3-tile cluster represents a larger skull /
+				// pelvis with adjacent rib.
+				int fragments = 1 + rng.Next(3);
+				int cx = x, cy = y;
+				for (int f = 0; f < fragments; f++)
+				{
+					if (!map.InBounds(cx, cy)) break;
+					if (!map.IsPassable(cx, cy)) break;
+					var t = map.Get(cx, cy);
+					if (t.Terrain == TerrainType.Water
+					 || t.Terrain == TerrainType.Shallows) break;
+					t.Terrain  = TerrainType.Skeleton;
+					t.Passable = false;
+					map.Set(cx, cy, t);
+					int dir = rng.Next(4);
+					cx += dir switch { 0 => 1, 1 => -1, _ => 0 };
+					cy += dir switch { 2 => 1, 3 => -1, _ => 0 };
+				}
+				placed++;
+			}
+		}
+
+		// N19 — Wildlife spawn-point stubs. Per-biome faunal table picks
+		// AnimalKind weights; this pass scatters 2-6 spawn points on
+		// passable terrain. The Phase 9 animal system (rimport.md N12 +
+		// Roadmap §9) will consume these to populate creatures. Until
+		// then the list is just generation output; no creatures actually
+		// spawn.
+		//
+		// v0.5.15 — biome tables rebuilt around the Phase 9 species
+		// roster (MushroomGoat / BonecrestBeetle / CaveLizard / GlowBunny
+		// / ForestBoar) instead of the v0.5.14 generic placeholders.
+		// Tag-driven role weighting (rough mapping):
+		//   • MushroomGoat   = primary grazer / livestock anchor → forest
+		//                      + grove biomes
+		//   • GlowBunny      = passive small prey → forest + meadow + grove
+		//   • BonecrestBeetle= pack/scavenger → swamp + mountain + cave
+		//   • CaveLizard     = predator → mountain + cave + desert
+		//   • ForestBoar     = aggressive omnivore → forest + hills
+		private static void ScatterAnimalSpawnPoints(LocalMap map, WorldTile worldTile)
+		{
+			var rng = new System.Random(worldTile.LocalSeed ^ 0xA917A1);
+			int spawnCount = 2 + rng.Next(5);   // 2-6 spawn points
+
+			(AnimalKind Kind, float Weight)[] table = worldTile.Biome switch
+			{
+				BiomeType.MagicGrove =>
+					new[] { (AnimalKind.MushroomGoat, 0.40f), (AnimalKind.GlowBunny, 0.30f), (AnimalKind.BonecrestBeetle, 0.20f), (AnimalKind.CaveLizard, 0.10f) },
+				BiomeType.Forest =>
+					new[] { (AnimalKind.MushroomGoat, 0.30f), (AnimalKind.GlowBunny, 0.25f), (AnimalKind.ForestBoar, 0.25f), (AnimalKind.BonecrestBeetle, 0.15f), (AnimalKind.CaveLizard, 0.05f) },
+				BiomeType.Swamp =>
+					new[] { (AnimalKind.BonecrestBeetle, 0.40f), (AnimalKind.MushroomGoat, 0.25f), (AnimalKind.CaveLizard, 0.20f), (AnimalKind.GlowBunny, 0.15f) },
+				BiomeType.Mountains or BiomeType.Peaks =>
+					new[] { (AnimalKind.CaveLizard, 0.45f), (AnimalKind.BonecrestBeetle, 0.30f), (AnimalKind.MushroomGoat, 0.15f), (AnimalKind.ForestBoar, 0.10f) },
+				BiomeType.Hills =>
+					new[] { (AnimalKind.MushroomGoat, 0.35f), (AnimalKind.ForestBoar, 0.25f), (AnimalKind.GlowBunny, 0.20f), (AnimalKind.BonecrestBeetle, 0.15f), (AnimalKind.CaveLizard, 0.05f) },
+				BiomeType.Desert =>
+					new[] { (AnimalKind.CaveLizard, 0.55f), (AnimalKind.BonecrestBeetle, 0.35f), (AnimalKind.MushroomGoat, 0.10f) },
+				BiomeType.Coast or BiomeType.Island =>
+					new[] { (AnimalKind.GlowBunny, 0.30f), (AnimalKind.BonecrestBeetle, 0.30f), (AnimalKind.MushroomGoat, 0.20f), (AnimalKind.CaveLizard, 0.20f) },
+				_ =>
+					new[] { (AnimalKind.MushroomGoat, 0.35f), (AnimalKind.GlowBunny, 0.25f), (AnimalKind.BonecrestBeetle, 0.20f), (AnimalKind.CaveLizard, 0.15f), (AnimalKind.ForestBoar, 0.05f) },
+			};
+
+			int placed = 0, attempts = 0;
+			while (placed < spawnCount && attempts < 50)
+			{
+				attempts++;
+				int x = rng.Next(2, map.Width  - 2);
+				int y = rng.Next(2, map.Height - 2);
+				if (!map.IsPassable(x, y)) continue;
+				var t = map.Get(x, y);
+				if (t.Terrain == TerrainType.Water || t.Terrain == TerrainType.Shallows) continue;
+
+				// Roll AnimalKind from the biome table.
+				float total = 0;
+				foreach (var (_, w) in table) total += w;
+				float roll = (float)rng.NextDouble() * total;
+				AnimalKind kind = table[0].Kind;
+				foreach (var (k, w) in table)
+				{
+					roll -= w;
+					if (roll <= 0) { kind = k; break; }
+				}
+
+				map.AddAnimalSpawn(new AnimalSpawnPoint(x, y, kind));
+				placed++;
+			}
+		}
+
 		private static int CountVegetation(LocalMap map, VegetationType type)
 		{
 			int count = 0;
@@ -2300,6 +2923,12 @@ namespace SmurfulationC.World
 
 		// Boulder scatter threshold — ensures stone appears on most maps but sparser than wood.
 		// Peaks/Mountains already get heavy boulder coverage from the elevation pass; skip them.
+		// v0.5.39 — Coast + Island raised from 0.91 → 0.98 because the
+		// shoreline already adds surf-zone boulders (the inlet pass) and
+		// the new ScatterCoastalCrags cluster pass adds a couple of
+		// concentrated rock outcrops on the land. Previous threshold
+		// dropped a Boulder on ~9 % of land tiles, producing the visibly
+		// noisy "rocks scattered everywhere" look Sam called out.
 		private static float BiomeBoulderScatterThreshold(BiomeType biome) => biome switch
 		{
 			BiomeType.Peaks      => 2.0f,    // elevation already saturates with stone
@@ -2308,7 +2937,8 @@ namespace SmurfulationC.World
 			BiomeType.Desert     => 0.94f,   // sparse rocky desert outcrops
 			BiomeType.Forest     => 0.90f,   // scattered rocks on the forest floor
 			BiomeType.Plains     => 0.91f,
-			BiomeType.Coast      => 0.91f,
+			BiomeType.Coast      => 0.98f,   // v0.5.39 — very sparse; crag pass adds clusters
+			BiomeType.Island     => 0.98f,   // v0.5.39 — same as Coast
 			BiomeType.MagicGrove => 0.92f,
 			BiomeType.Swamp      => 0.93f,   // fewest rocks — wet ground
 			_                    => 0.91f,
@@ -2364,12 +2994,12 @@ namespace SmurfulationC.World
 			return VegetationType.HerbCluster;
 		}
 
-		// Plains: moderate — SmurfberryBush, Underbrush, HerbCluster, rare LargeMushroom
-		// SmurfberryBush band halved (0.28 → 0.14 range); Underbrush absorbs freed space.
+		// Plains: moderate — CapberryBush, Underbrush, HerbCluster, rare LargeMushroom
+		// CapberryBush band halved (0.28 → 0.14 range); Underbrush absorbs freed space.
 		private static VegetationType SelectPlains(float n)
 		{
 			if (n <= 0.48f) return VegetationType.None;
-			if (n <= 0.62f) return VegetationType.SmurfberryBush;
+			if (n <= 0.62f) return VegetationType.CapberryBush;
 			if (n <= 0.90f) return VegetationType.Underbrush;
 			if (n <= 0.95f) return VegetationType.HerbCluster;
 			return VegetationType.LargeMushroom;
@@ -2386,41 +3016,41 @@ namespace SmurfulationC.World
 			return VegetationType.LargeMushroom;
 		}
 
-		// Hills: moderate — SmurfberryBush, MossPatch, rare LargeMushroom
-		// SmurfberryBush band halved (0.245 → 0.12 range); MossPatch absorbs freed space.
+		// Hills: moderate — CapberryBush, MossPatch, rare LargeMushroom
+		// CapberryBush band halved (0.245 → 0.12 range); MossPatch absorbs freed space.
 		private static VegetationType SelectHills(float n)
 		{
 			if (n <= 0.58f) return VegetationType.None;
-			if (n <= 0.70f) return VegetationType.SmurfberryBush;
+			if (n <= 0.70f) return VegetationType.CapberryBush;
 			if (n <= 0.93f) return VegetationType.MossPatch;
 			return VegetationType.LargeMushroom;
 		}
 
-		// Coast: moderate — SmurfberryBush, Underbrush, rare LargeMushroom
-		// SmurfberryBush band halved (0.235 → 0.12 range); Underbrush absorbs freed space.
+		// Coast: moderate — CapberryBush, Underbrush, rare LargeMushroom
+		// CapberryBush band halved (0.235 → 0.12 range); Underbrush absorbs freed space.
 		private static VegetationType SelectCoast(float n)
 		{
 			if (n <= 0.62f) return VegetationType.None;
-			if (n <= 0.74f) return VegetationType.SmurfberryBush;
+			if (n <= 0.74f) return VegetationType.CapberryBush;
 			if (n <= 0.945f) return VegetationType.Underbrush;
 			return VegetationType.LargeMushroom;
 		}
 
-		// Mountains: sparse — SmurfberryBush, SmallMushroom (~5% each), MossPatch, rare LargeMushroom
+		// Mountains: sparse — CapberryBush, SmallMushroom (~5% each), MossPatch, rare LargeMushroom
 		private static VegetationType SelectMountains(float n)
 		{
 			if (n <= 0.68f) return VegetationType.None;
-			if (n <= 0.73f) return VegetationType.SmurfberryBush;
+			if (n <= 0.73f) return VegetationType.CapberryBush;
 			if (n <= 0.78f) return VegetationType.SmallMushroom;
 			if (n <= 0.94f) return VegetationType.MossPatch;
 			return VegetationType.LargeMushroom;
 		}
 
-		// Peaks: very sparse — SmurfberryBush, SmallMushroom (~5% each), MossPatch, very rare LargeMushroom
+		// Peaks: very sparse — CapberryBush, SmallMushroom (~5% each), MossPatch, very rare LargeMushroom
 		private static VegetationType SelectPeaks(float n)
 		{
 			if (n <= 0.78f) return VegetationType.None;
-			if (n <= 0.83f) return VegetationType.SmurfberryBush;
+			if (n <= 0.83f) return VegetationType.CapberryBush;
 			if (n <= 0.88f) return VegetationType.SmallMushroom;
 			if (n <= 0.97f) return VegetationType.MossPatch;
 			return VegetationType.LargeMushroom;
@@ -2479,7 +3109,7 @@ namespace SmurfulationC.World
 			if (n <= 0.60f) return VegetationType.LargeMushroom;
 			if (n <= 0.88f) return VegetationType.SmallMushroom;
 			if (n <= 0.93f) return VegetationType.HerbCluster;
-			if (n <= 0.97f) return VegetationType.SmurfberryBush;
+			if (n <= 0.97f) return VegetationType.CapberryBush;
 			return VegetationType.MagicFlower;
 		}
 

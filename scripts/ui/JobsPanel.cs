@@ -1,14 +1,14 @@
 using Godot;
 using System.Collections.Generic;
-using SmurfulationC.Simulation;
-using SmurfulationC.UI;
+using Sporeholm.Simulation;
+using Sporeholm.UI;
 
 // v0.3.47 (Phase 4 sub-B) — RimWorld-style work priority grid.
 //
 // Replaces the v0.3.x "Phase 3.10 stub" label in BottomTabPanel's Jobs tab.
 // Columns are WorkPriorityDefaults.Categories (Patient, BedRest, Doctor,
 // Construct, Mine, PlantCut, Grow, Cook, Hunt, Forage, Chop, Haul, Clean,
-// Research, Attune); rows are alive smurfs in roster order. Cell values
+// Research, Attune); rows are alive shroomps in roster order. Cell values
 // are 0 (off) through 4 (priority); clicking a cell cycles 1 → 2 → 3 → 4 →
 // off → 1. Header click cycles every cell in that column. Right-click on
 // a cell or header sets to off.
@@ -26,10 +26,14 @@ public partial class JobsPanel : Control
     private static readonly Color Prio4     = new(0.85f, 0.55f, 0.30f);
     private static readonly Color OffColor  = new(0.45f, 0.40f, 0.32f);
 
-    public SmurfulationC.SimulationManager Sim { get; set; } = null!;
+    public Sporeholm.SimulationManager Sim { get; set; } = null!;
 
-    private ScrollContainer _scroll = null!;
-    private GridContainer   _grid   = null!;
+    private ScrollContainer _scroll     = null!;
+    private GridContainer   _grid       = null!;
+    // v0.5.48 — sticky header lives OUTSIDE the scroll so it stays
+    // visible while the player scrolls through the shroomp list at
+    // high-population counts.
+    private GridContainer   _headerGrid = null!;
 
     // Per-cell button captured so Refresh can update labels in place.
     private readonly Dictionary<(string Name, string Cat), Button> _cells = new();
@@ -66,11 +70,25 @@ public partial class JobsPanel : Control
     // from 96 → 76; grid separations 4×3 → 2×1; outer margins / vbox
     // separation halved. Result: same 15 columns × N rows in roughly
     // 60 % of the previous footprint.
-    private const int CellW   = 38;
-    private const int CellH   = 18;
-    private const int NameW   = 76;
-    private const int FontSm  = 10;
-    private const int FontHdr = 10;
+    //
+    // v0.5.38 — `CellW` is now the *minimum* width per column instead of
+    // a fixed width. Every cell sets `SizeFlagsHorizontal = ExpandFill`
+    // so the GridContainer distributes any extra width across the 15
+    // columns equally. The vbox no longer forces a 700-px minimum, so a
+    // narrow host (small viewport + large UI Size + many other tabs) lets
+    // cells compress to `CellMinW` instead of clipping the rightmost
+    // columns. `NameW` similarly is a minimum that grows with available
+    // width via the same Expand flag.
+    private const int CellW    = 70;   // preferred width when room allows
+    // v0.5.43 → v0.5.48 — CellMinW bumped 48 → 64 so all 15 in-game-verb
+    // headers fit at default UI Size without the panel needing to grow
+    // to its absolute minimum. Each column still ExpandFills extra space.
+    private const int CellMinW = 64;
+    private const int CellH    = 18;
+    private const int NameW    = 96;
+    private const int NameMinW = 78;   // shroomp-name column — fits long names like "Architect"
+    private const int FontSm   = 10;
+    private const int FontHdr  = 10;
 
     private void BuildShell()
     {
@@ -84,10 +102,17 @@ public partial class JobsPanel : Control
 
         var vbox = new VBoxContainer();
         vbox.AddThemeConstantOverride("separation", 3);
-        // Wide enough for 15 work categories + name column at the new
-        // compact metrics: 76 (name) + 15 × 38 (cells) + 14 × 2 (h_sep)
-        // ≈ 674 px at 1× scale; round up for breathing room.
-        vbox.CustomMinimumSize = new Vector2(UITheme.Scaled(700), UITheme.Scaled(200));
+        vbox.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        vbox.SizeFlagsVertical   = SizeFlags.ExpandFill;
+        // v0.5.38 — minimum width reads off CellMinW + NameMinW so the
+        // panel fits into a constrained host (e.g. UI Size at 100 % +
+        // narrow BottomTabPanel slot). At default UI Size: 50 (name) +
+        // 15 × 24 (cells) + 14 × 2 (h_sep) ≈ 438 px (vs the previous
+        // rigid 700 px). Cells use ExpandFill to share any extra
+        // horizontal space — see MakeCell / MakeNameCell.
+        int minW = NameMinW + WorkPriorityDefaults.Categories.Length * CellMinW
+                 + (WorkPriorityDefaults.Categories.Length - 1) * 2;
+        vbox.CustomMinimumSize = new Vector2(UITheme.Scaled(minW), UITheme.Scaled(180));
         margin.AddChild(vbox);
 
         var title = MakeLabel("⚙ Jobs — Work Priorities", UITheme.Scaled(13), Gold);
@@ -97,9 +122,20 @@ public partial class JobsPanel : Control
             UITheme.Scaled(9), Muted);
         vbox.AddChild(subtitle);
 
+        // v0.5.48 — sticky header grid lives OUTSIDE the scroll container,
+        // so column titles stay pinned at the top while the player scrolls
+        // through the shroomp list (RimWorld convention). Both grids share
+        // the same Columns count + ExpandFill cells so column widths
+        // align automatically across the two grids.
+        _headerGrid = new GridContainer { Columns = 1 + WorkPriorityDefaults.Categories.Length };
+        _headerGrid.AddThemeConstantOverride("h_separation", 2);
+        _headerGrid.AddThemeConstantOverride("v_separation", 1);
+        _headerGrid.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        vbox.AddChild(_headerGrid);
+
         _scroll = new ScrollContainer
         {
-            HorizontalScrollMode = ScrollContainer.ScrollMode.Auto,
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,   // v0.5.48 — header isn't scrolled horizontally; columns auto-fit
             VerticalScrollMode   = ScrollContainer.ScrollMode.Auto,
             SizeFlagsHorizontal  = SizeFlags.ExpandFill,
             SizeFlagsVertical    = SizeFlags.ExpandFill,
@@ -107,10 +143,13 @@ public partial class JobsPanel : Control
         };
         vbox.AddChild(_scroll);
 
-        // GridContainer columns = 1 (name) + Categories.Length
+        // Data GridContainer — same Columns count as _headerGrid; rows
+        // are shroomps, columns are work categories. Cells use ExpandFill
+        // so columns align with the header above.
         _grid = new GridContainer { Columns = 1 + WorkPriorityDefaults.Categories.Length };
         _grid.AddThemeConstantOverride("h_separation", 2);
         _grid.AddThemeConstantOverride("v_separation", 1);
+        _grid.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         _scroll.AddChild(_grid);
 
         BuildHeaderRow();
@@ -118,18 +157,32 @@ public partial class JobsPanel : Control
 
     private void BuildHeaderRow()
     {
-        // Top-left corner — empty.
-        _grid.AddChild(MakeHeaderLabel(""));
+        // v0.5.48 — header cells now go into the dedicated _headerGrid
+        // OUTSIDE the scroll container so they stay pinned while the
+        // player scrolls the data grid.
+        _headerGrid.AddChild(MakeHeaderLabel(""));
 
         foreach (var cat in WorkPriorityDefaults.Categories)
         {
+            // v0.5.40 — header text uses the in-game verb (Excavate / Cut /
+            // Gather / Build / Chop) while the column key stays at the
+            // save-compat-stable internal name (Mine / PlantCut / Forage /
+            // Construct / Chop). Tooltip explains what the column gates.
+            string label   = WorkPriorityDefaults.DisplayLabel(cat);
+            string tooltip = WorkPriorityDefaults.DisplayTooltip(cat) +
+                "\n\nClick the header to cycle every shroomp in this column. Right-click clears the column to off.";
             var btn = new Button
             {
-                Text              = cat,
+                Text              = label,
                 Flat              = true,
                 FocusMode         = FocusModeEnum.None,
-                CustomMinimumSize = new Vector2(UITheme.Scaled(CellW), UITheme.Scaled(CellH)),
-                TooltipText       = $"Click to cycle every smurf's '{cat}' priority. Right-click to set all to off.",
+                // v0.5.38 — minimum width only; ExpandFill makes the
+                // header share width with the cell columns below it
+                // so the grid stays aligned at any host width / UI scale.
+                CustomMinimumSize = new Vector2(UITheme.Scaled(CellMinW), UITheme.Scaled(CellH)),
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                TooltipText       = tooltip,
+                ClipText          = true,   // overflow names (e.g. "Construct") clip rather than expand
             };
             btn.AddThemeFontSizeOverride("font_size", UITheme.Scaled(FontHdr));
             btn.AddThemeColorOverride("font_color", Gold);
@@ -143,7 +196,7 @@ public partial class JobsPanel : Control
                     SetColumnAll(captured, 0);
                 }
             };
-            _grid.AddChild(btn);
+            _headerGrid.AddChild(btn);   // v0.5.48 — into sticky header grid
         }
     }
 
@@ -176,12 +229,10 @@ public partial class JobsPanel : Control
 
         if (sameShape) return;
 
-        // Rebuild rows (keep header — it lives in the first row).
-        var keep = new List<Node>();
-        for (int j = 0; j < 1 + WorkPriorityDefaults.Categories.Length; j++)
-            keep.Add(_grid.GetChild(j));
-        foreach (Node c in _grid.GetChildren())
-            if (!keep.Contains(c)) c.QueueFree();
+        // v0.5.48 — header lives in the separate _headerGrid outside the
+        // scroll, so the data _grid only contains shroomp rows now. Clear
+        // everything and rebuild from the snapshot.
+        foreach (Node c in _grid.GetChildren()) c.QueueFree();
         _cells.Clear();
         _lastRowNames.Clear();
 
@@ -222,11 +273,15 @@ public partial class JobsPanel : Control
 
     private Label MakeHeaderLabel(string text)
     {
+        // The top-left corner cell. Mirrors the name column's min width
+        // (ExpandFill so the spacer holds the shroomp-name column width
+        // even when the header text is empty).
         var l = new Label
         {
             Text = text,
-            CustomMinimumSize = new Vector2(UITheme.Scaled(NameW), UITheme.Scaled(CellH)),
+            CustomMinimumSize = new Vector2(UITheme.Scaled(NameMinW), UITheme.Scaled(CellH)),
             VerticalAlignment = VerticalAlignment.Center,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
         };
         l.AddThemeColorOverride("font_color", Gold);
         l.AddThemeFontSizeOverride("font_size", UITheme.Scaled(FontHdr));
@@ -238,8 +293,11 @@ public partial class JobsPanel : Control
         var l = new Label
         {
             Text = name,
-            CustomMinimumSize = new Vector2(UITheme.Scaled(NameW), UITheme.Scaled(CellH)),
+            CustomMinimumSize = new Vector2(UITheme.Scaled(NameMinW), UITheme.Scaled(CellH)),
             VerticalAlignment = VerticalAlignment.Center,
+            // v0.5.38 — share width with the corner cell + cells below.
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            ClipText            = true,
         };
         l.AddThemeColorOverride("font_color", Parchment);
         l.AddThemeFontSizeOverride("font_size", UITheme.Scaled(FontSm));
@@ -253,7 +311,12 @@ public partial class JobsPanel : Control
             Text              = "—",
             Flat              = true,
             FocusMode         = FocusModeEnum.None,
-            CustomMinimumSize = new Vector2(UITheme.Scaled(CellW), UITheme.Scaled(CellH)),
+            // v0.5.38 — minimum cell width only. The GridContainer
+            // distributes any extra horizontal space equally across
+            // the 15 priority columns via the Expand flag.
+            CustomMinimumSize = new Vector2(UITheme.Scaled(CellMinW), UITheme.Scaled(CellH)),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            ClipText          = true,
         };
         btn.AddThemeFontSizeOverride("font_size", UITheme.Scaled(FontSm));
         btn.AddThemeColorOverride("font_color", OffColor);
@@ -289,7 +352,7 @@ public partial class JobsPanel : Control
     private void CycleColumn(string cat)
     {
         var snap = Sim.GetWorkPrioritiesSnapshot();
-        // Use the first smurf's value to decide the cycle direction.
+        // Use the first shroomp's value to decide the cycle direction.
         byte cur = 0;
         foreach (var (_, prios) in snap)
         {

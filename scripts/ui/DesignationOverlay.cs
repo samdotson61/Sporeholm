@@ -1,5 +1,5 @@
 using Godot;
-using SmurfulationC.World;
+using Sporeholm.World;
 
 // v0.3.21 — sibling Node2D to LocalMapRenderer that draws semi-transparent
 // coloured rectangles + glyphs on every tile flagged DesignatedForExcavation
@@ -35,7 +35,7 @@ public partial class DesignationOverlay : Node2D
     public override void _Ready()
     {
         TextureFilter = TextureFilterEnum.Nearest;
-        // Above the map texture but below the smurf colony view so a smurf
+        // Above the map texture but below the shroomp colony view so a shroomp
         // walking over a designation visually obscures the tile tint.
         ZIndex = 0;
 

@@ -10,8 +10,8 @@ config_version=5
 
 [application]
 
-config/name="SmurfulationC"
-config/description="Colony and evolutionary simulation game of Homo smurficus"
+config/name="Sporeholm"
+config/description="Colony and evolutionary simulation in the Shroomiverse — guide your Mycelian colony through generations"
 config/version="v0.4.23"
 run/main_scene="res://scenes/MainMenu.tscn"
 config/features=PackedStringArray("4.6", "C#", "Forward Plus")
@@ -28,10 +28,11 @@ SFXManager="*res://scripts/audio/SFXManager.cs"
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
+window/vsync/vsync_mode=0
 
 [dotnet]
 
-project/assembly_name="SmurfulationC"
+project/assembly_name="Sporeholm"
 
 [input]
 

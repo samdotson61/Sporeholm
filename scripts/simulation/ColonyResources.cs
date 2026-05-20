@@ -1,7 +1,7 @@
-using SmurfulationC.Simulation.Items;
-using SmurfulationC.World;
+using Sporeholm.Simulation.Items;
+using Sporeholm.World;
 
-namespace SmurfulationC.Simulation
+namespace Sporeholm.Simulation
 {
     // v0.3.46 (Phase 4 core) — the float ledger is now a derived aggregate
     // over the colony Inventory. Existing call sites read Food / Stone /

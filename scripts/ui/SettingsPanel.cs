@@ -39,26 +39,36 @@ public partial class SettingsPanel : Control
 	// v0.4.36 — live-readable input gate. GameController consults this
 	// flag in HandleMouseClick to decide whether a no-tool left-drag
 	// starts a multi-select box. Defaults to ON so accidental drags
-	// don't unintentionally rope a dozen smurfs into a move order —
+	// don't unintentionally rope a dozen shroomps into a move order —
 	// players who want the v0.3.24 behaviour can flip it off here.
 	public static bool BoxSelectRequiresCtrl { get; private set; } = true;
 	private OptionButton   _tooltipSizeDrop  = null!;
-	private OptionButton   _uiScaleDrop      = null!;
+	// v0.5.29 — UI size is now a continuous slider (33 → 100 %) instead of
+	// the v0.3.20 three-option Large / Normal / Small dropdown. Sam's request:
+	// "Change UI size in settings to a slider from Small(33%) to Large(100%)".
+	private HSlider        _uiScaleSlider    = null!;
+	private Label          _uiScaleVal       = null!;
 	private bool           _isFullscreen;
 	private bool           _updatingMode;
 	private bool           _pauseOnStart  = true;
 	private bool           _showTooltips  = true;
 	private string         _tooltipSize   = "large";
 	private int            _zoomSpeed     = 5;
-	// 0 = 1.00× (default), 1 = 0.66×, 2 = 0.33×. Index matches dropdown order.
-	private int            _uiScaleIdx    = 0;
+	// 33 → 100. Stored as integer percentage so config files stay
+	// human-readable. Default 100 = Large (the v0.3.20 default).
+	private int            _uiScalePct    = UIScalePctDefault;
+
+	private const int UIScalePctMin     = 33;
+	private const int UIScalePctMax     = 100;
+	private const int UIScalePctDefault = 100;
 
 	private static readonly string[] TooltipSizeKeys = { "large", "normal", "small" };
-	private static readonly float[]  UIScaleValues   = { 1.00f, 0.66f, 0.33f };
-	// v0.3.30 — display names changed from raw percentages to plain English.
-	// The float values still correspond to 100 % / 66 % / 33 %; this is only
-	// the dropdown text the player sees.
-	private static readonly string[] UIScaleLabels   = { "Large", "Normal", "Small" };
+
+	// v0.5.29 — Backward compatibility for saves written with the old
+	// `ui_scale_idx` discrete dropdown (0 = Large, 1 = Normal, 2 = Small).
+	// `LoadSavedUIScale` and `LoadSettings` consult this when the new
+	// `ui_scale_pct` key is absent from settings.cfg.
+	private static readonly int[] LegacyUIScalePctByIdx = { 100, 66, 33 };
 
 	public override void _Ready()
 	{
@@ -434,7 +444,7 @@ public partial class SettingsPanel : Control
 	// RTS-style multi-select box if Left Ctrl is held; without it, the
 	// drag is treated as a deselect (and items / vegetation under the
 	// cursor still open their inspector card as before). Stops
-	// accidental drags from roping a dozen smurfs into a single move
+	// accidental drags from roping a dozen shroomps into a single move
 	// order when the player was just adjusting the camera.
 	private void AddBoxSelectCtrlRow(VBoxContainer parent)
 	{
@@ -447,7 +457,7 @@ public partial class SettingsPanel : Control
 			"When ON: left-click + drag only starts a multi-select box\n" +
 			"while Left Ctrl is held. Without Ctrl, an empty drag just\n" +
 			"clears the current selection. Prevents accidental crowd\n" +
-			"orders while panning. Single-smurf left-clicks still work\n" +
+			"orders while panning. Single-shroomp left-clicks still work\n" +
 			"either way.";
 		row.AddChild(lbl);
 
@@ -484,8 +494,8 @@ public partial class SettingsPanel : Control
 			"Developer Mode (RimWorld-style dev tools).\n" +
 			"When ON: F12 toggles a floating debug panel with\n" +
 			"  • Sim controls (tick once, speed bursts, force-pause)\n" +
-			"  • Selected-smurf manipulation (fill/drain needs, kill, spawn thought)\n" +
-			"  • Item / smurf spawning at cursor\n" +
+			"  • Selected-shroomp manipulation (fill/drain needs, kill, spawn thought)\n" +
+			"  • Item / shroomp spawning at cursor\n" +
 			"  • Map mutation + visualisation overlays\n" +
 			"  • Stubs for future systems (combat, weather, traders).\n" +
 			"Leave OFF for normal play.";
@@ -503,7 +513,7 @@ public partial class SettingsPanel : Control
 		{
 			_devMode         = on;
 			_devModeBtn.Text = on ? "ON" : "OFF";
-			SmurfulationC.DevMode.IsEnabled = on;   // notifies DevPanel + HUD
+			Sporeholm.DevMode.IsEnabled = on;   // notifies DevPanel + HUD
 		};
 		row.AddChild(_devModeBtn);
 	}
@@ -556,10 +566,12 @@ public partial class SettingsPanel : Control
 
 	// Roadmap §3.x.4 — UI Size lets the player shrink the floating panels so they
 	// take up less of the playfield without changing the camera zoom. 100 % is
-	// the default; 66 % and 33 % are descending discrete sizes the player can
-	// switch between for high-res screens or when running with a small viewport.
-	// Applied by scaling the `UILayer` CanvasLayer's transform; GameController
-	// reads the setting at scene-ready and on the `SettingsClosed` signal.
+	// the default; the slider scales down to 33 % (Small) for high-res screens
+	// or when running with a small viewport. v0.5.29 — converted from the
+	// 3-option Large/Normal/Small dropdown to a continuous slider so players
+	// can fine-tune to any percentage between 33 % and 100 %. Applied by
+	// scaling the `UILayer` CanvasLayer's transform; GameController reads the
+	// setting at scene-ready and on the `SettingsClosed` signal.
 	private void AddUIScaleRow(VBoxContainer parent)
 	{
 		var row = new HBoxContainer();
@@ -567,32 +579,97 @@ public partial class SettingsPanel : Control
 		parent.AddChild(row);
 
 		var lbl = RowLabel("UI Size");
-		lbl.TooltipText = "Shrinks the font and minimum sizes on every floating UI panel without moving them away from the viewport edges. 'Normal' and 'Small' reclaim playfield space on small or busy maps. Change applies immediately.";
+		lbl.TooltipText = "Shrinks the font and minimum sizes on every floating UI panel without moving them away from the viewport edges. Lower percentages reclaim playfield space on small or busy maps. 33 % = Small, 100 % = Large. Change applies immediately.";
 		lbl.MouseFilter = MouseFilterEnum.Pass;
 		row.AddChild(lbl);
 
-		_uiScaleDrop = new OptionButton { CustomMinimumSize = new Vector2(115, 0) };
-		StyleOptionButton(_uiScaleDrop);
-		foreach (var label in UIScaleLabels) _uiScaleDrop.AddItem(label);
-		_uiScaleDrop.Selected = _uiScaleIdx;
-		_uiScaleDrop.ItemSelected += idx =>
+		// Slider + ProgressBar pair, same idiom as AddZoomSpeedRow so the
+		// visual style matches the rest of the gameplay-section sliders.
+		var wrap = new Control();
+		wrap.SizeFlagsHorizontal = SizeFlags.Fill | SizeFlags.Expand;
+		wrap.CustomMinimumSize   = new Vector2(180, 28);
+		row.AddChild(wrap);
+
+		var bar = new ProgressBar
 		{
-			_uiScaleIdx = (int)idx;
-			ApplyUIScale(UIScaleValues[_uiScaleIdx]);
+			MinValue       = UIScalePctMin,
+			MaxValue       = UIScalePctMax,
+			Value          = _uiScalePct,
+			ShowPercentage = false,
+			MouseFilter    = MouseFilterEnum.Ignore,
 		};
-		row.AddChild(_uiScaleDrop);
+		bar.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+
+		var fill = new StyleBoxFlat { BgColor = Gold };
+		fill.SetCornerRadiusAll(4);
+		bar.AddThemeStyleboxOverride("fill", fill);
+
+		var track = new StyleBoxFlat
+		{
+			BgColor = new Color(Gold.R * 0.35f, Gold.G * 0.35f, Gold.B * 0.35f, 0.45f),
+		};
+		track.SetCornerRadiusAll(4);
+		bar.AddThemeStyleboxOverride("background", track);
+		wrap.AddChild(bar);
+
+		_uiScaleSlider = new HSlider
+		{
+			MinValue = UIScalePctMin,
+			MaxValue = UIScalePctMax,
+			Step     = 1,
+			Value    = _uiScalePct,
+		};
+		_uiScaleSlider.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+
+		var invis = new StyleBoxFlat { BgColor = Colors.Transparent };
+		_uiScaleSlider.AddThemeStyleboxOverride("slider",                 invis);
+		_uiScaleSlider.AddThemeStyleboxOverride("grabber_area",           invis);
+		_uiScaleSlider.AddThemeStyleboxOverride("grabber_area_highlight", invis);
+		wrap.AddChild(_uiScaleSlider);
+
+		_uiScaleVal = new Label
+		{
+			Text                = $"{_uiScalePct} %",
+			CustomMinimumSize   = new Vector2(56, 0),
+			HorizontalAlignment = HorizontalAlignment.Right,
+		};
+		_uiScaleVal.AddThemeColorOverride("font_color", DarkWood);
+		_uiScaleVal.AddThemeFontSizeOverride("font_size", 15);
+
+		_uiScaleSlider.ValueChanged += v =>
+		{
+			_uiScalePct      = Mathf.Clamp((int)v, UIScalePctMin, UIScalePctMax);
+			bar.Value        = _uiScalePct;
+			_uiScaleVal.Text = $"{_uiScalePct} %";
+			ApplyUIScale(_uiScalePct / 100f);
+		};
+
+		row.AddChild(_uiScaleVal);
 	}
 
 	// Static public accessor used by GameController on scene-ready / on close
 	// of the settings panel to read the persisted UI scale without depending on
 	// SettingsPanel being instantiated.
+	//
+	// v0.5.29 — reads the new continuous `ui_scale_pct` key first; falls back
+	// to the legacy `ui_scale_idx` (0/1/2) when loading a save written before
+	// the slider conversion. Returns a 0.33 → 1.00 multiplier.
 	public static float LoadSavedUIScale()
 	{
 		var cfg = new ConfigFile();
-		if (cfg.Load("user://settings.cfg") != Error.Ok) return 1f;
+		if (cfg.Load("user://settings.cfg") != Error.Ok) return UIScalePctDefault / 100f;
+
+		// New key — continuous percentage.
+		if (cfg.HasSectionKey("gameplay", "ui_scale_pct"))
+		{
+			int pct = (int)(double)cfg.GetValue("gameplay", "ui_scale_pct", (double)UIScalePctDefault);
+			return Mathf.Clamp(pct, UIScalePctMin, UIScalePctMax) / 100f;
+		}
+
+		// Legacy key — discrete index from the v0.3.20 dropdown.
 		int idx = (int)(double)cfg.GetValue("gameplay", "ui_scale_idx", 0.0);
-		idx = Mathf.Clamp(idx, 0, UIScaleValues.Length - 1);
-		return UIScaleValues[idx];
+		idx = Mathf.Clamp(idx, 0, LegacyUIScalePctByIdx.Length - 1);
+		return LegacyUIScalePctByIdx[idx] / 100f;
 	}
 
 	private void ApplyUIScale(float scale)
@@ -600,7 +677,7 @@ public partial class SettingsPanel : Control
 		// v0.3.20: live re-scale. UITheme.SetUIScale fires UIScaleChanged;
 		// every Phase-3.x component subscribes in its `_Ready` and rebuilds
 		// itself with the new scale on the next frame. No scene reload needed.
-		SmurfulationC.UI.UITheme.SetUIScale(scale);
+		Sporeholm.UI.UITheme.SetUIScale(scale);
 	}
 
 	private void AddZoomSpeedRow(VBoxContainer parent)
@@ -705,7 +782,10 @@ public partial class SettingsPanel : Control
 		cfg.SetValue("gameplay", "pause_on_start",  _pauseOnStart);
 		cfg.SetValue("gameplay", "show_tooltips",   _showTooltips);
 		cfg.SetValue("gameplay", "tooltip_size",    _tooltipSize);
-		cfg.SetValue("gameplay", "ui_scale_idx",    _uiScaleIdx);
+		// v0.5.29 — slider replaces dropdown; persist as integer percent.
+		// Legacy `ui_scale_idx` is intentionally not written back so old
+		// saves slowly migrate to the new key on first re-save.
+		cfg.SetValue("gameplay", "ui_scale_pct",    _uiScalePct);
 		cfg.SetValue("gameplay", "zoom_speed",      _zoomSpeed);
 		cfg.SetValue("gameplay", "developer_mode",  _devMode);
 		cfg.SetValue("gameplay", "box_select_requires_ctrl", _boxSelRequiresCtrl);
@@ -765,10 +845,22 @@ public partial class SettingsPanel : Control
 		_tooltipSizeDrop.Selected = tsIdx >= 0 ? tsIdx : 0;
 		ApplyTooltipSize(_tooltipSize);
 
-		_uiScaleIdx = Mathf.Clamp((int)(double)cfg.GetValue("gameplay", "ui_scale_idx", 0.0),
-								  0, UIScaleValues.Length - 1);
-		_uiScaleDrop.Selected = _uiScaleIdx;
-		ApplyUIScale(UIScaleValues[_uiScaleIdx]);
+		// v0.5.29 — read continuous slider value with legacy-idx fallback.
+		if (cfg.HasSectionKey("gameplay", "ui_scale_pct"))
+		{
+			int pct = (int)(double)cfg.GetValue("gameplay", "ui_scale_pct", (double)UIScalePctDefault);
+			_uiScalePct = Mathf.Clamp(pct, UIScalePctMin, UIScalePctMax);
+		}
+		else
+		{
+			int legacyIdx = Mathf.Clamp(
+				(int)(double)cfg.GetValue("gameplay", "ui_scale_idx", 0.0),
+				0, LegacyUIScalePctByIdx.Length - 1);
+			_uiScalePct = LegacyUIScalePctByIdx[legacyIdx];
+		}
+		_uiScaleSlider.Value = _uiScalePct;
+		_uiScaleVal.Text     = $"{_uiScalePct} %";
+		ApplyUIScale(_uiScalePct / 100f);
 
 		int zs = (int)(double)cfg.GetValue("gameplay", "zoom_speed", 5.0);
 		_zoomSpeed            = Mathf.Clamp(zs, 1, 10);
@@ -779,7 +871,7 @@ public partial class SettingsPanel : Control
 		_devMode                       = dm;
 		_devModeBtn.Text               = dm ? "ON" : "OFF";
 		_devModeBtn.ButtonPressed      = dm;
-		SmurfulationC.DevMode.IsEnabled = dm;
+		Sporeholm.DevMode.IsEnabled = dm;
 
 		bool bs = (bool)cfg.GetValue("gameplay", "box_select_requires_ctrl", true);
 		_boxSelRequiresCtrl        = bs;
@@ -833,9 +925,10 @@ public partial class SettingsPanel : Control
 		_tooltipSizeDrop.Selected = 0;
 		ApplyTooltipSize("large");
 
-		_uiScaleIdx              = 0;
-		_uiScaleDrop.Selected    = 0;
-		ApplyUIScale(UIScaleValues[0]);
+		_uiScalePct          = UIScalePctDefault;
+		_uiScaleSlider.Value = UIScalePctDefault;
+		_uiScaleVal.Text     = $"{UIScalePctDefault} %";
+		ApplyUIScale(UIScalePctDefault / 100f);
 
 		_zoomSpeed        = 5;
 		_zoomSlider.Value = 5;
@@ -844,7 +937,7 @@ public partial class SettingsPanel : Control
 		_devMode                       = false;
 		_devModeBtn.Text               = "OFF";
 		_devModeBtn.ButtonPressed      = false;
-		SmurfulationC.DevMode.IsEnabled = false;
+		Sporeholm.DevMode.IsEnabled = false;
 
 		_boxSelRequiresCtrl            = true;
 		_boxSelCtrlBtn.Text            = "ON";
@@ -918,7 +1011,10 @@ public partial class SettingsPanel : Control
 		("kb_speed_2",      "Speed 2×",            Key.Key2,     "Fast sim speed."),
 		("kb_speed_5",      "Speed 5×",            Key.Key3,     "Very fast sim speed."),
 		("kb_speed_10",     "Speed 10×",           Key.Key4,     "Maximum sim speed."),
-		("kb_context_menu", "Context Menu (hold)", Key.Alt,      "Hold and right-click to open the action context menu."),
+		// v0.5.75 — kb_context_menu removed (Sam: "remove context menu
+		// setting from settings menu as it's currently unused"). The
+		// right-click-action context menu in GameController falls back
+		// to a hardcoded Key.Alt check, so the gameplay path still works.
 		("kb_menu",         "Open Pause Menu",     Key.Escape,   "Opens the pause / save / load menu."),
 	};
 

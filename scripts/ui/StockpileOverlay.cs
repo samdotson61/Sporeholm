@@ -1,5 +1,5 @@
 using Godot;
-using SmurfulationC.World;
+using Sporeholm.World;
 
 // v0.5.0 (Phase 5A — rimport N1) — sibling Node2D to LocalMapRenderer that
 // draws a translucent fill on every cell belonging to a stockpile zone.
@@ -40,7 +40,7 @@ public partial class StockpileOverlay : Node2D
         // overlay right after the map but before designations / items /
         // selection so the tint sits ON the floor, BENEATH the
         // designation glyphs and item icons (which is what the original
-        // intent was). Smurfs at z=1 still walk over everything.
+        // intent was). Shroomps at z=1 still walk over everything.
         ZIndex = 0;
 
         var quad = new QuadMesh { Size = new Vector2(TS, TS) };

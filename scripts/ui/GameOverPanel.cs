@@ -52,7 +52,7 @@ public partial class GameOverPanel : Control
         vbox.AddChild(sep);
 
         // Flavour line
-        var flavour = MakeLbl("Every smurf has perished.\nThe mushroom village stands empty.", 16, Parchment);
+        var flavour = MakeLbl("Every shroomp has perished.\nThe mushroom village stands empty.", 16, Parchment);
         flavour.HorizontalAlignment = HorizontalAlignment.Center;
         flavour.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         vbox.AddChild(flavour);

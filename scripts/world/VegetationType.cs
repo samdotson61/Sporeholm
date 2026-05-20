@@ -1,10 +1,10 @@
-namespace SmurfulationC.World
+namespace Sporeholm.World
 {
     public enum VegetationType
     {
         None,
-        Underbrush,      // dense leaf litter; passable; no yield; hides smurfs
-        SmurfberryBush,  // canonical Smurf food; yields Food
+        Underbrush,      // dense leaf litter; passable; no yield; hides shroomps
+        CapberryBush,  // canonical Shroomp food; yields Food
         SmallMushroom,   // secondary food; fast regrowth; yields Food
         LargeMushroom,   // structural material; impassable; yields Fungal Wood
         HerbCluster,     // dual-yield; yields Food + MagicEssence

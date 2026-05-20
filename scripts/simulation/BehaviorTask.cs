@@ -1,6 +1,6 @@
 using Godot;
 
-namespace SmurfulationC.Simulation
+namespace Sporeholm.Simulation
 {
     // Roadmap §3.2 task type enumeration. Tier 1 (critical needs) maps to Eat /
     // Sleep / Socialize / Attune / SeekSafety; Tier 2 (role tasks) maps to
@@ -12,6 +12,15 @@ namespace SmurfulationC.Simulation
         // Tier 1 — critical needs
         Eat, Sleep, Socialize, Attune, SeekSafety,
         // Tier 2 — role tasks
+        // v0.5.26 — Research + Guard are stubs scheduled for later phases:
+        //   Research → Phase 11 (Technology and Culture) — Scholar role
+        //              works at a research bench, accumulates Knowledge
+        //              that unlocks tech-tier furniture / recipes.
+        //   Guard    → Phase 7 (Combat) — Guardian role patrols + engages
+        //              hostile entities. Pairs with the v0.5.x stub
+        //              CombatTargetName + Phase 7 hediff system.
+        // Both have `case` placeholders elsewhere returning null/no-op
+        // until their phase lands. Roadmap §4.y rimport tracker reflects.
         GatherFood, GatherMaterial, Build, Research, Heal, Guard,
         // v0.3.38 — new Tier 2 tasks for the Chop Wood / Cut Plants orders.
         // ChopWood targets wood-yielding shrooms (LargeMushroom variants);
@@ -25,12 +34,28 @@ namespace SmurfulationC.Simulation
         // the Jobs tab already exposes them — they just no-op on
         // arrival until the prerequisite buildings exist.
         Haul, Cook,
+        // v0.5.84s — Phase 5.5 Crafting Bills System. A `DoBill` task
+        // points a Crafter at a specific workbench tile with a specific
+        // bill index; BillSystem.Apply runs the consume-work-produce
+        // loop. Selected by SelectTask alongside Cook (Cook becomes the
+        // no-bill auto-cook fallback for raw food in inventory; DoBill
+        // is the explicit-recipe path the player queues via the Bills UI).
+        DoBill,
+        // v0.5.60 — RimWorld-parity build job split. Pre-v0.5.60 Build did
+        // both the material haul AND the framing — a single Crafter solo'd
+        // every build while idle Foragers / Caretakers stood around. Split
+        // mirrors RimWorld's WorkGiver_ConstructDeliverResources +
+        // WorkGiver_ConstructFinishFrames: BuildHaul is gated by Haul
+        // priority (any role can deliver materials), Build is gated by
+        // Construct priority (Crafter does the framing). Multiple shroomps
+        // can BuildHaul to one blueprint simultaneously.
+        BuildHaul,
         // Tier 3 — idle. Wander still exists as the "go somewhere new"
-        // baseline; v0.3.43 adds five more idle behaviours so smurfs stop
+        // baseline; v0.3.43 adds five more idle behaviours so shroomps stop
         // jittering in place between commands:
         //   • Loiter  — drift a tile or two and stand for a while.
         //   • Observe — pick a nearby spot of interest, stand and watch.
-        //   • Converse — walk over to another smurf and chat (also boosts Social).
+        //   • Converse — walk over to another shroomp and chat (also boosts Social).
         //   • Meditate — Mages, Daydreamers — stand and boost MagicResonance.
         //   • VisitFavorite — head to a remembered favourite spot.
         Wander, Loiter, Observe, Converse, Meditate, VisitFavorite,
@@ -38,19 +63,19 @@ namespace SmurfulationC.Simulation
         PlayerOrder,
     }
 
-    // Roadmap §3.2 behavior task carried by each Smurf. Target is in *pixel*
+    // Roadmap §3.2 behavior task carried by each Shroomp. Target is in *pixel*
     // space (LocalMap tile size × tile coordinate + half tile) so it's
-    // directly comparable with Smurf.SimPos without per-frame conversion.
+    // directly comparable with Shroomp.SimPos without per-frame conversion.
     //
     // v0.3.36 — converted from a `sealed class` to `readonly record struct`.
     // BehaviorSystem allocated a fresh BehaviorTask every time SelectTask
-    // returned (~1 alloc per smurf per tick with v0.3.23's "Wander always
-    // re-evaluates"). At 20 smurfs that's ~1200 allocs/sec; at the planned
-    // 1000-smurf scale it would be 60k allocs/sec — catastrophic gen-0 GC
-    // pressure. As a value-type struct the task lives on the smurf's
+    // returned (~1 alloc per shroomp per tick with v0.3.23's "Wander always
+    // re-evaluates"). At 20 shroomps that's ~1200 allocs/sec; at the planned
+    // 1000-shroomp scale it would be 60k allocs/sec — catastrophic gen-0 GC
+    // pressure. As a value-type struct the task lives on the shroomp's
     // memory inline; SelectTask returns a struct copy with no heap traffic.
     //
-    // `Smurf.CurrentTask` is now `BehaviorTask?` (Nullable<BehaviorTask>).
+    // `Shroomp.CurrentTask` is now `BehaviorTask?` (Nullable<BehaviorTask>).
     // Null checks still work; field reads go through `.Value` or pattern
     // matching (see BehaviorSystem.cs).
     public readonly record struct BehaviorTask
@@ -63,7 +88,7 @@ namespace SmurfulationC.Simulation
         public int      TargetTileX    { get; init; }
         public int      TargetTileY    { get; init; }
         public string?  TargetId       { get; init; }
-        // v0.3.43 — ticks the smurf should linger at the target after arrival
+        // v0.3.43 — ticks the shroomp should linger at the target after arrival
         // before re-evaluating to a new task. Zero (the default) preserves
         // the prior immediate-re-evaluation behaviour for work tasks.
         // Tier-3 idle tasks set non-zero values via the NewXxx constructors.

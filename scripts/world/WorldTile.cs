@@ -1,4 +1,4 @@
-namespace SmurfulationC.World
+namespace Sporeholm.World
 {
     public struct WorldTile
     {

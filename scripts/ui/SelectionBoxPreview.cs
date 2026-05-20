@@ -2,9 +2,9 @@ using Godot;
 
 // v0.3.24 — RTS-style click-and-drag selection rectangle. Drawn while the
 // player is dragging on empty terrain with no designation tool active. On
-// release, GameController collects every smurf whose visual position falls
+// release, GameController collects every shroomp whose visual position falls
 // inside the rect and adds them to the multi-selection. Low alpha so the
-// player can still see which smurfs they're sweeping over.
+// player can still see which shroomps they're sweeping over.
 public partial class SelectionBoxPreview : Node2D
 {
     public bool DragActive { get; private set; }

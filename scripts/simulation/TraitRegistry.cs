@@ -1,14 +1,14 @@
 using System;
 using System.Collections.Generic;
 
-namespace SmurfulationC.Simulation
+namespace Sporeholm.Simulation
 {
-    // Static registry of the 13 canonical Homo smurficus biological traits.
+    // Static registry of the 13 canonical Homo mycelianus biological traits.
     // Penetrance 0.0 = trait fully suppressed; 1.0 = fully expressed.
     // Dawn Era penetrance ranges reflect the early colony's evolutionary state:
     // traits that require cultural development (StorkOviposition, MagicalAptitude)
     // start low; core physiological traits (ExtremeLongevity, HaemocyaninMetabolism) start high.
-    // Source: SmurfulationC_Entities.md §2
+    // Source: Sporeholm_Entities.md §2
     public static class TraitRegistry
     {
         // Trait name constants — use these everywhere instead of raw strings.
@@ -47,7 +47,7 @@ namespace SmurfulationC.Simulation
         };
 
         // Ordered list of all 13 traits with Dawn Era penetrance bounds.
-        // Dawn Era values sourced from SmurfulationC_Roadmap_2026.md §2.1 and Entities.md §2.
+        // Dawn Era values sourced from Sporeholm_Roadmap_2026.md §2.1 and Entities.md §2.
         public static readonly IReadOnlyList<TraitDef> All = new TraitDef[]
         {
             // Roadmap §2.1 explicitly sets haemocyanin (BluePigmentation) at 0.10–0.30 for Dawn Era.
@@ -66,21 +66,29 @@ namespace SmurfulationC.Simulation
             new(ResonanceSensitivity,  "Heightened sensitivity to magical fields and ley lines; rare in Dawn Era",      0.05f, 0.30f),
         };
 
-        // Assigns all 13 traits to a smurf using Dawn Era penetrance ranges.
-        public static void AssignDawnEraTraits(Smurf smurf, Random rng)
+        // Assigns all 13 traits to a shroomp using Dawn Era penetrance ranges.
+        // v0.5.84t — also rolls personality-level flags (Pacifist) alongside
+        // the biological-penetrance traits so every gen site picks them up
+        // through the existing single-method call.
+        public static void AssignDawnEraTraits(Shroomp shroomp, Random rng)
         {
             foreach (var def in All)
             {
                 double t = rng.NextDouble();
                 float penetrance = (float)(def.DawnFloor + t * (def.DawnCeiling - def.DawnFloor));
-                smurf.Traits[def.Name] = Math.Clamp(penetrance, 0f, 1f);
+                shroomp.Traits[def.Name] = Math.Clamp(penetrance, 0f, 1f);
             }
+            // v0.5.84t — Pacifist (~8% incidence, RimWorld NonViolent parity).
+            // EquipmentSystem.AutoEquipBetterWeapon early-returns for pacifists
+            // so they never pick up a weapon. Future combat (Phase 7) gates
+            // drafting + violent task selection on this flag too.
+            shroomp.IsPacifist = rng.NextDouble() < 0.08;
         }
 
         // Returns the combined trait need decay multiplier for a given need.
         // A value < 1.0 means traits collectively reduce decay; > 1.0 means they accelerate it.
         // Clamped to [0.10, 3.0] to prevent degenerate values.
-        public static float GetNeedDecayMod(Smurf s, string need)
+        public static float GetNeedDecayMod(Shroomp s, string need)
         {
             float mod = 1f;
             foreach (var (traitName, effects) in _needEffects)
