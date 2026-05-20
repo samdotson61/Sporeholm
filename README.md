@@ -139,7 +139,7 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 | 14 | Polish + Individual mode | — |
 | 14.5 | Sprite + Texture pass | — |
 
-Full per-version detail in [`changelog.md`](changelog.md). Design docs at `SporeDes/Sporeholm_Roadmap_2026.md` (sibling folder, not in this repo).
+Full per-version detail in [`changelog.md`](changelog.md).
 
 ---
 
@@ -224,8 +224,6 @@ A typical first colony:
 
 ## Inspirations + credits
 
-Design inspirations: **Dwarf Fortress** (Tarn & Zach Adams), **RimWorld** (Tynan Sylvester), **Mushroom Men** (the visual flavor), **Minecraft Mushroom Fields** biome.
-
 Music: see in-game **Credits** panel for full attribution. All bundled tracks are CC-BY / CC0 / royalty-free per the asset spec.
 
 Engine: [Godot Engine 4.6](https://godotengine.org/) (MIT) with C# / .NET 8.
@@ -255,7 +253,8 @@ The sim runs on its own thread; UI consumes snapshots via `SimulationSnapshot`. 
 
 ## Contributing
 
-Sporeholm is a solo project in active development. Issues + feedback welcome via GitHub Issues; PRs are not currently accepted as the architecture is still in flux.
+
+Sporeholm is a solo project in active development by Sam Dotson. Issues + feedback welcome via GitHub Issues; PRs are not currently accepted as the architecture is still in flux.
 
 ---
 
