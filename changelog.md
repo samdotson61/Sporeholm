@@ -30,6 +30,36 @@ Sam: *"There is also noticeable pawn movement/sim slowdown with 50 pawns attempt
 
 **Build:** 0 warnings, 0 errors. Pure additive — no behaviour change. The counter increments add ~2 ns/A*-call + a single `GetTimestamp` pair per tick; far below measurement noise.
 
+### Also in this patch — mushroom-themed biological traits + README-on-every-change rule
+
+Sam: *"Add to memory that the README should be updated with any change. Also rework the biological traits to match the mushroom aesthetic — this will be flavor only for now, though ensure they do what they say on the tin, so to speak."*
+
+**Trait rename** (`TraitRegistry.cs`). Pre-v0.5.84t the 13 biological traits carried Latin-scientific names (`MagicalAptitude` / `CommunalBonding` / `Miniaturization` / `HaemocyaninMetabolism` / etc.) that didn't match the mushroom flavor of the game. Renamed all 13 to mushroom-themed identifiers; the 7 effect-bearing traits picked names that telegraph their gameplay impact so a player skimming the trait list can guess what each one does:
+
+| Old (scientific Latin)  | New (mushroom flavor) | Effect                                       |
+|-------------------------|------------------------|----------------------------------------------|
+| MagicalAptitude         | **MyceliumAttuned**    | MagicResonance ↓ decay (0.35 × penetrance)   |
+| CommunalBonding         | **ClusterFruiting**    | Social ↓ decay (0.20 ×)                       |
+| MycophagicDependency    | **EfficientGills**     | Nutrition ↓ decay (0.12 ×)                    |
+| LowThermalTolerance     | **RapidMetabolism**    | Nutrition ↑ decay (−0.18 × — biological cost) |
+| ResonanceSensitivity    | **SporeResonant**      | MagicResonance ↓ decay (0.20 ×, secondary)    |
+| Miniaturization         | **CompactStature**     | Carry capacity ↓ (−15 × penetrance)           |
+| StatureAgility          | **WispyFrame**         | Carry capacity ↓ (−5 × penetrance)            |
+| BluePigmentation        | **BlueCap**            | flavor only                                   |
+| ExtremeLongevity        | **PerennialMycelium**  | flavor only                                   |
+| MaleSexBias             | **RareFemales**        | flavor only                                   |
+| StorkOviposition        | **StorkBorne**         | flavor only                                   |
+| HaemocyaninMetabolism   | **CopperHemolymph**    | flavor only                                   |
+| CognitivelyPlastic      | **PlasticHyphae**      | flavor only                                   |
+
+Penetrance ranges + Dawn-Era floors/ceilings preserved verbatim. Effect coefficients in `_needEffects` unchanged — only the dictionary keys were renamed. Shroomp.cs carry-capacity computation updated to read `CompactStature` / `WispyFrame` instead of `Miniaturization` / `StatureAgility`.
+
+**Save migration** (`TraitRegistry.MigrateLegacyTraitNames`). New static method takes a `Shroomp`, walks a snapshot of its `Traits` keys, and for each old key (`MagicalAptitude` etc.) moves its penetrance value onto the new key (`MyceliumAttuned` etc.) — only if the new key isn't already present. `SimulationManager.LoadFromSave` calls it right after restoring the `Traits` dict and BEFORE the back-fill loop that adds any missing registry traits, so accumulated old-save penetrance carries forward intact instead of being overwritten by a fresh Dawn-Era roll.
+
+**README rule memorialised** (`memory/feedback_version_bump_checklist.md`). Sam: *"Add to memory that the README should be updated with any change."* New rule block "Always update the README on any meaningful change (v0.5.84t rule)" explicitly added between the bundling section and the bump-checklist section. Applies to BOTH full bumps AND bundled-fix runs — when a change touches user-visible behaviour (new features, renamed items/roles/traits, changed controls, new buildable structures, new recipes, new screens, removed systems), `Sporeholm/README.md` must be refreshed in the same turn. Internal-only changes (perf, save shims, refactors) are exempt. The bump checklist itself bumped from 4 required steps to 5 to make the README refresh explicit at every actual version bump.
+
+**Build:** 0 warnings, 0 errors. Bundled into v0.5.84.
+
 ### Also in this patch — equipment policy + room types + buildable torches
 
 Sam: *"Pawns should also want to equip knives and other tools based on their role — they should drop them unless they're forced and they should generally want to pick up a better weapon (suited to their skills) unless they're a pacifist. Analyze how rimworld does this before implementation. We also need to ensure the room system from the roadmap is implemented. Add buildable torches that can be added to the inside of walls made from any kind of wood and a little grass. These should emit light and later heat (stub for now)."*

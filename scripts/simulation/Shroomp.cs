@@ -677,7 +677,7 @@ namespace Sporeholm.Simulation
 		}
 
 		// v0.4.30 — DF/RimWorld-style per-shroomp carrying capacity. Range
-		// 5 (sprout) to 75 (peak adult with Brawny + low Miniaturization).
+		// 5 (sprout) to 75 (peak adult with Brawny + low CompactStature).
 		// Computed from life stage + personality + biological traits.
 		// Worn equipment doesn't count; unworn items in Inventory do.
 		// Recomputed on each read — cheap (≤25 dict lookups), no caching
@@ -722,16 +722,21 @@ namespace Sporeholm.Simulation
 				}
 
 				// Biological trait modifiers — scaled by penetrance.
-				// Miniaturization (smaller body) is the dominant negative;
-				// StatureAgility (built for speed not load) is a softer
-				// pull. ExtremeLongevity / HaemocyaninMetabolism /
-				// LowThermalTolerance don't move the carry budget.
+				// CompactStature (smaller truffle-like body) is the dominant
+				// negative; WispyFrame (built for speed not load) is a softer
+				// pull. PerennialMycelium / CopperHemolymph / RapidMetabolism
+				// don't move the carry budget.
+				// v0.5.84t — trait names renamed from Miniaturization /
+				// StatureAgility to mushroom-themed CompactStature /
+				// WispyFrame. Pre-v0.5.84t saves migrate via
+				// TraitRegistry.MigrateLegacyTraitNames so this still finds
+				// the right penetrance values after load.
 				float modBio = 0f;
 				if (Traits != null)
 				{
-					if (Traits.TryGetValue(TraitRegistry.Miniaturization, out float pMin))
+					if (Traits.TryGetValue(TraitRegistry.CompactStature, out float pMin))
 						modBio -= pMin * 15f;
-					if (Traits.TryGetValue(TraitRegistry.StatureAgility, out float pAgi))
+					if (Traits.TryGetValue(TraitRegistry.WispyFrame, out float pAgi))
 						modBio -= pAgi * 5f;
 				}
 

@@ -1418,6 +1418,12 @@ namespace Sporeholm
 				if (sd.Traits != null && sd.Traits.Count > 0)
 				{
 					foreach (var (k, v) in sd.Traits) s.Traits[k] = v;
+					// v0.5.84t — migrate pre-rename scientific-Latin trait keys
+					// (MagicalAptitude / Miniaturization / HaemocyaninMetabolism
+					// / etc.) onto the new mushroom-themed keys BEFORE the
+					// back-fill so accumulated penetrance carries forward
+					// rather than being overwritten with a fresh Dawn-Era roll.
+					TraitRegistry.MigrateLegacyTraitNames(s);
 					// Back-fill any traits added to the registry after this save was made.
 					foreach (var def in TraitRegistry.All)
 						if (!s.Traits.ContainsKey(def.Name))

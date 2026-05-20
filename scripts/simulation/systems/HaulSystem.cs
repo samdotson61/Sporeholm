@@ -150,7 +150,7 @@ namespace Sporeholm.Simulation.Systems
             // committed to either continuing the trip or delivering.
             if (s.Inventory.Count > 0) return null;
             if (map == null) return null;
-            // Capacity gate: if a shroomp is so weak (e.g. Sprout w/ Miniaturization)
+            // Capacity gate: if a shroomp is so weak (e.g. Sprout w/ CompactStature)
             // that their cap is at the floor of 5, that's still ≥ 1 — but we
             // skip if somehow zero (defensive; shouldn't happen with the
             // [5,75] clamp).

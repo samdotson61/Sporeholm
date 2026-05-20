@@ -3,28 +3,49 @@ using System.Collections.Generic;
 
 namespace Sporeholm.Simulation
 {
-    // Static registry of the 13 canonical Homo mycelianus biological traits.
+    // Static registry of the 13 canonical Shroomp biological traits.
     // Penetrance 0.0 = trait fully suppressed; 1.0 = fully expressed.
-    // Dawn Era penetrance ranges reflect the early colony's evolutionary state:
-    // traits that require cultural development (StorkOviposition, MagicalAptitude)
-    // start low; core physiological traits (ExtremeLongevity, HaemocyaninMetabolism) start high.
-    // Source: Sporeholm_Entities.md §2
+    //
+    // v0.5.84t — renamed from the v0.4.x scientific-Latin set
+    // (BluePigmentation / Miniaturization / HaemocyaninMetabolism / etc.)
+    // to the mushroom-themed set below. Sam: "rework the biological
+    // traits to match the mushroom aesthetic — this will be flavor only
+    // for now, though ensure they do what they say on the tin." Active
+    // traits (the 7 that drive gameplay effects) carry names that hint
+    // at their mechanical effect:
+    //   MyceliumAttuned / SporeResonant  → MagicResonance decays slower
+    //   ClusterFruiting                  → Social decays slower
+    //   EfficientGills                   → Nutrition decays slower
+    //   RapidMetabolism                  → Nutrition decays FASTER (cost)
+    //   CompactStature                   → Carry capacity reduced
+    //   WispyFrame                       → Carry capacity reduced (lighter penalty)
+    // The other 6 are flavor only — they sit in the dict but no system
+    // reads them yet. Future phases (combat, magic, breeding) will hook
+    // CopperHemolymph, RareFemales, StorkBorne, etc. as needed.
+    //
+    // Save-compat: pre-v0.5.84t saves carry the old key names in
+    // Shroomp.Traits. SimulationManager's load path calls
+    // MigrateLegacyTraitNames before reading, which renames the old keys
+    // to the new ones so the need-decay system still finds the right
+    // penetrance values.
     public static class TraitRegistry
     {
-        // Trait name constants — use these everywhere instead of raw strings.
-        public const string BluePigmentation      = "BluePigmentation";
-        public const string Miniaturization       = "Miniaturization";
-        public const string ExtremeLongevity      = "ExtremeLongevity";
-        public const string MaleSexBias           = "MaleSexBias";
-        public const string StorkOviposition      = "StorkOviposition";
-        public const string MagicalAptitude       = "MagicalAptitude";
-        public const string CommunalBonding       = "CommunalBonding";
-        public const string HaemocyaninMetabolism = "HaemocyaninMetabolism";
-        public const string LowThermalTolerance   = "LowThermalTolerance";
-        public const string MycophagicDependency  = "MycophagicDependency";
-        public const string CognitivelyPlastic    = "CognitivelyPlastic";
-        public const string StatureAgility        = "StatureAgility";
-        public const string ResonanceSensitivity  = "ResonanceSensitivity";
+        // ── Trait name constants (use these everywhere) ─────────────────
+        // Active traits — names describe their gameplay effect.
+        public const string MyceliumAttuned   = "MyceliumAttuned";   // MagicResonance ↓ decay
+        public const string ClusterFruiting   = "ClusterFruiting";   // Social ↓ decay
+        public const string EfficientGills    = "EfficientGills";    // Nutrition ↓ decay
+        public const string RapidMetabolism   = "RapidMetabolism";   // Nutrition ↑ decay (cost)
+        public const string SporeResonant     = "SporeResonant";     // MagicResonance ↓ decay (secondary)
+        public const string CompactStature    = "CompactStature";    // Carry capacity ↓ (-15 × p)
+        public const string WispyFrame        = "WispyFrame";        // Carry capacity ↓ (-5 × p)
+        // Flavor-only traits — no gameplay system reads them today.
+        public const string BlueCap           = "BlueCap";
+        public const string PerennialMycelium = "PerennialMycelium";
+        public const string RareFemales       = "RareFemales";
+        public const string StorkBorne        = "StorkBorne";
+        public const string CopperHemolymph   = "CopperHemolymph";
+        public const string PlasticHyphae     = "PlasticHyphae";
 
         public record TraitDef(
             string Name,
@@ -39,31 +60,57 @@ namespace Sporeholm.Simulation
         // Negative coeff → higher penetrance increases decay (biological cost).
         private static readonly Dictionary<string, (string Need, float Coeff)[]> _needEffects = new()
         {
-            [MagicalAptitude]      = new[] { ("MagicResonance", 0.35f) },
-            [CommunalBonding]      = new[] { ("Social",         0.20f) },
-            [MycophagicDependency] = new[] { ("Nutrition",      0.12f) },
-            [ResonanceSensitivity] = new[] { ("MagicResonance", 0.20f) },
-            [LowThermalTolerance]  = new[] { ("Nutrition",     -0.18f) },
+            [MyceliumAttuned] = new[] { ("MagicResonance", 0.35f) },
+            [ClusterFruiting] = new[] { ("Social",         0.20f) },
+            [EfficientGills]  = new[] { ("Nutrition",      0.12f) },
+            [SporeResonant]   = new[] { ("MagicResonance", 0.20f) },
+            [RapidMetabolism] = new[] { ("Nutrition",     -0.18f) },
         };
 
         // Ordered list of all 13 traits with Dawn Era penetrance bounds.
-        // Dawn Era values sourced from Sporeholm_Roadmap_2026.md §2.1 and Entities.md §2.
         public static readonly IReadOnlyList<TraitDef> All = new TraitDef[]
         {
-            // Roadmap §2.1 explicitly sets haemocyanin (BluePigmentation) at 0.10–0.30 for Dawn Era.
-            new(BluePigmentation,      "Haemocyanin copper circulatory pigment; copper-based oxygen transport",         0.10f, 0.30f),
-            new(Miniaturization,       "Post-Great Shrinking body reduction; low caloric demand, slow construction",    0.15f, 0.40f),
-            new(ExtremeLongevity,      "Telomere regulation enabling ~550-year lifespan; well established",             0.50f, 0.85f),
-            new(MaleSexBias,           "49:1 male-to-female ratio; foundational reproductive biology",                  0.70f, 0.95f),
-            new(StorkOviposition,      "Stork-mediated oviposition; resonance-gated; pre-pact era — very low",          0.00f, 0.10f),
-            new(MagicalAptitude,       "Innate capacity to perceive and channel magical forces; developing",             0.10f, 0.45f),
-            new(CommunalBonding,       "Hyper-social wiring; isolation causes rapid mood degradation",                  0.40f, 0.75f),
-            new(HaemocyaninMetabolism, "Copper-based blood chemistry; incompatible with iron-rich foods",               0.60f, 0.90f),
-            new(LowThermalTolerance,   "Small body mass; poor cold adaptation; elevated baseline caloric demand",       0.30f, 0.65f),
-            new(MycophagicDependency,  "Diet evolved around fungal sources; mushrooms as primary nutrition",            0.50f, 0.85f),
-            new(CognitivelyPlastic,    "High neuroplasticity; skill acquisition possible across full lifespan",         0.30f, 0.65f),
-            new(StatureAgility,        "Small body enables high relative speed and evasion",                            0.35f, 0.70f),
-            new(ResonanceSensitivity,  "Heightened sensitivity to magical fields and ley lines; rare in Dawn Era",      0.05f, 0.30f),
+            // ── Active traits (effects wired) ────────────────────────────
+            new(MyceliumAttuned,
+                "Attuned to the underground mycelial network — channels magic with less drain on personal reserves.",
+                0.10f, 0.45f),
+            new(ClusterFruiting,
+                "Thrives in mushroom clusters — social need decays slowly when around colony-mates.",
+                0.40f, 0.75f),
+            new(EfficientGills,
+                "Gills absorb more nutrition from fungal food — hunger decays slowly.",
+                0.50f, 0.85f),
+            new(RapidMetabolism,
+                "Spore production burns through reserves fast — hunger decays faster than peers. Biological cost.",
+                0.30f, 0.65f),
+            new(SporeResonant,
+                "Body resonates with ambient magical fields — secondary magic-resonance buffer.",
+                0.05f, 0.30f),
+            new(CompactStature,
+                "Small truffle-like build — light and unobtrusive but carries less weight per trip.",
+                0.15f, 0.40f),
+            new(WispyFrame,
+                "Slim, springy hyphae — agile and quick on the foot but a weaker frame for hauling.",
+                0.35f, 0.70f),
+            // ── Flavor-only traits (no system reads them yet) ───────────
+            new(BlueCap,
+                "Cap pigmented blue-violet by copper-rich substrate. Distinctive at a glance.",
+                0.10f, 0.30f),
+            new(PerennialMycelium,
+                "Underground network is long-lived; this shroomp's roots run deep. ~550-year lifespan.",
+                0.50f, 0.85f),
+            new(RareFemales,
+                "Carries the lineage trait behind the 49:1 male-to-female spore ratio.",
+                0.70f, 0.95f),
+            new(StorkBorne,
+                "Born of stork-mediated spore dispersal. Pre-pact lineage; very low in Dawn Era.",
+                0.00f, 0.10f),
+            new(CopperHemolymph,
+                "Copper-based blood chemistry — incompatible with iron-rich foods. Future combat hediff source.",
+                0.60f, 0.90f),
+            new(PlasticHyphae,
+                "Hyphae remain neurologically plastic — skill acquisition possible across full lifespan.",
+                0.30f, 0.65f),
         };
 
         // Assigns all 13 traits to a shroomp using Dawn Era penetrance ranges.
@@ -83,6 +130,43 @@ namespace Sporeholm.Simulation
             // so they never pick up a weapon. Future combat (Phase 7) gates
             // drafting + violent task selection on this flag too.
             shroomp.IsPacifist = rng.NextDouble() < 0.08;
+        }
+
+        // v0.5.84t — legacy trait-name migration. Pre-v0.5.84t saves carry
+        // the old scientific-Latin trait keys (MagicalAptitude etc.). Map
+        // them forward to the new mushroom-themed keys so the need-decay
+        // system + carry-capacity computation still find the right
+        // penetrance values. Called by SimulationManager.LoadFromSave
+        // right after restoring Traits.
+        private static readonly Dictionary<string, string> _legacyKeyMap = new()
+        {
+            ["MagicalAptitude"]       = MyceliumAttuned,
+            ["CommunalBonding"]       = ClusterFruiting,
+            ["MycophagicDependency"]  = EfficientGills,
+            ["LowThermalTolerance"]   = RapidMetabolism,
+            ["ResonanceSensitivity"]  = SporeResonant,
+            ["Miniaturization"]       = CompactStature,
+            ["StatureAgility"]        = WispyFrame,
+            ["BluePigmentation"]      = BlueCap,
+            ["ExtremeLongevity"]      = PerennialMycelium,
+            ["MaleSexBias"]           = RareFemales,
+            ["StorkOviposition"]      = StorkBorne,
+            ["HaemocyaninMetabolism"] = CopperHemolymph,
+            ["CognitivelyPlastic"]    = PlasticHyphae,
+        };
+
+        public static void MigrateLegacyTraitNames(Shroomp s)
+        {
+            if (s?.Traits == null || s.Traits.Count == 0) return;
+            // Walk a snapshot of the keys so we can mutate the dict mid-loop.
+            var keys = new List<string>(s.Traits.Keys);
+            foreach (var oldKey in keys)
+            {
+                if (!_legacyKeyMap.TryGetValue(oldKey, out var newKey)) continue;
+                if (s.Traits.ContainsKey(newKey)) continue;   // already migrated
+                s.Traits[newKey] = s.Traits[oldKey];
+                s.Traits.Remove(oldKey);
+            }
         }
 
         // Returns the combined trait need decay multiplier for a given need.
