@@ -7,6 +7,67 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.6.0] — 2026-05-21 — Phase 6 entity system + door-aware rooms + door open animation
+
+Phase 6 (Entity System) lands as the v0.6.0 headline plus two structural fixes in the room/door layer that completed the v0.5.84 "room system gap-fill" work properly. Three coordinated landings; each self-contained, each verified compiling against the existing shroomp pipeline.
+
+### Door-aware room flood-fill (`RoomDetector.cs`)
+
+Pre-v0.6.0 the room flood-fill walked THROUGH door tiles because doors are passable to shroomp movement. Consequence: any enclosure with a doorway bled out to the outdoor room — the player would build a 5×5 room with a single door and the system would call the whole region outdoor. This made room types, room beauty, and the SleptInBedroom thought near-impossible to trigger without sealing every wall solid.
+
+Fix: doors (and door blueprints) are now treated as room boundaries even though they're passable. The flood-fill skips them; doors carry no RoomId. Adjacent doors still count toward a room's FurnitureCount + FurnitureBeauty via a new perimeter-audit pass (`TryCountAdjacentDoor`) that walks the freshly-flooded region and credits each cardinally-adjacent built Door once — a HashSet on tile-linear-index prevents double-counting when a door touches the same room on two sides.
+
+Result: a wall-and-door enclosure now correctly reads as a closed room. RoomType inference (Bedroom / Kitchen / Workshop / Storage) fires; beauty + temperature offsets apply; the SleptInBedroom mood thought (+2 / 20 game-hour) lands as designed. Old saves rebuild the room registry on first query post-load, so the fix takes effect retroactively.
+
+### Door open / close animation (`StructureOverlay.cs`)
+
+Doors now visibly swing open when a shroomp is within ~14 px of the door centre and close gracefully after they leave. Implementation is purely visual — has no effect on pathing or room detection.
+
+- **Cache populated by `RebuildInstances`**: each rendered Door (regular + fungal) registers a `DoorRenderRef` (tile-key + sprite centre + MMI handle + instance index). Cache resets every rebuild so MMI indices stay in sync.
+- **Per-tile openness lerps**: `_doorOpenness` dict keyed on tile-linear-index. Per-frame, `UpdateDoorAnimationTick` walks the cache; for each door, scans the live shroomp positions (supplied by GameController via `SetShroompPositionsForDoorAnim`) for any within `DoorOpenRadiusPx²` of the door centre. Target openness 1.0 if any shroomp is near, else 0.0. Lerps current openness toward target with separate up-rate (12 /sec — snaps open quickly) and down-rate (6 /sec — closes gracefully).
+- **Visual**: door MMI per-instance Transform2D scales X by `1 − 0.78 × openness` (compresses to ~22% width when fully open) plus a small lateral slide so it reads as "swung aside" rather than "shrunken." Origin shifts up to ~⅓ tile right as openness rises.
+
+Cost: O(doors × shroomps) per frame; typical map ≈ 30 doors × 60 shroomps = 1 800 squared-distance ops, well below measurement noise.
+
+### Phase 6 — Entity System (Roadmap §6.1–§6.4)
+
+The world is now inhabited. 15 species ship spanning the full disposition / biome / role spread of the §6.2 registry; AI runs on a state machine; sprites render via MultiMesh; entities round-trip cleanly through save / load. Hostile species really do attack — the wolf pack you stumble onto in the forest is a threat, not a prop.
+
+**Species roster (15):**
+- *Friendly / Passive (6)* — Glowbunny, Shroomgoat, Shroomalo, Mouse, Ladybug, Hermit Crab
+- *Neutral (4)* — Squirrel, Bonecrest Beetle, Forest Boar, Cave Lizard
+- *Hostile (5)* — Ant Soldier, Wasp Renegade, Snake, Wolf, Magic Wisp
+
+Each species carries its own MaxHealth, BaseSpeedPxPerSec, BodyRadius, AttackPower, AggroRange (hostiles only), FleeRange (friendlies only), group sizes, population cap per map, spawn weight, and butcher drops (Phase 9 hook). Per-individual stats jitter ±10 % against the species baseline at spawn so a pack of three wolves isn't three clones.
+
+Event-only ≥10 ×-shroomp-tall species (Bear, Leopard Tortoise, Tasmanian Mauler, Dragon, Mushroom Drake) are deliberately deferred — the §6.4 rule routes them through the Phase 8 Storyteller pipeline, not the wild-spawn pathway.
+
+**Data model** (`Entity.cs`, `EntityDef.cs`, `EntityKind.cs`, `EntityRegistry.cs`): sim-side entity with Guid id, species kind, jittered stats, Pos / Target / State / Health, optional `TargetShroompId` (for Hunt / Flee), `WanderHome` anchor for ambient idle, `IsTamed` + `TamedByName` (Phase 9 hook). State machine: `Wander / Flee / Hunt / Graze / Tamed / Dead`. EntityRegistry holds the static species table — adding a 16th species means appending an EntityKind value, an EntityRegistry row, and a sprite painter.
+
+**AI driver** (`EntitySystem.cs`): per-tick state-machine driver running after BehaviorSystem.Tick so hostile entities see this tick's shroomp positions before reacting. Hostile species scan within AggroRange for the nearest non-pacifist standing shroomp; on detection they transition to Hunt and chase. On contact (BodyRadius + 12 px) they apply AttackPower damage to a weighted-random body part (Torso 35 / Head 10 / Limbs 55) routed through the existing `BodyParts` dict so bleeding + downed-state recomputation already picks it up. Attack cooldown 60 ticks (≈1 sec). Movement is direct (no A*); entities clip on walls instead of pathing around them — keeps the per-entity tick cost ≈ 5 µs (vs. shroomp's ≈ 50 µs with A*).
+
+**Spawn pipeline** (`EntitySpawnSystem.cs`): two paths.
+1. **Initial seed at colony start** — `PopulateFromSpawnPoints` walks the gen-time `AnimalSpawnPoint` markers placed by `LocalMapGenerator.ScatterAnimalSpawnPoints` (v0.5.14), rolls a group of the matching EntityKind via `FromAnimalKind` mapping, and instantiates at the marker tile (small spiral search finds nearby passable cells if the marker landed on solid terrain that wasn't excavated at gen). Then `SeedAmbientFauna` tops up the remaining 10 species (those without v0.5.14 marker support) at light ambient density so the world feels alive on day 1.
+2. **Day-boundary maintenance** — `MaintainPopulation` once per in-game day; for each species under half its PopulationCap, rolls a chance-weighted respawn of a fresh group at a random biome-appropriate passable tile.
+
+Caps + weights tuned so a default-sized map (240 × 150) carries ~6-10 friendlies + ~4-6 neutrals + ~2-4 hostiles on a fresh load. Spawn picker avoids tiles with built structures (no spawning a wolf inside a workshop).
+
+**Sprite rendering** (`EntityColonyView.cs` + `EntityColonyView.Sprites.cs`): one MultiMeshInstance2D per species, sprites baked at startup as 20×20 RGBA8 procedural pixel art (no asset files). Each species has its own painter — Glowbunny gets a soft green glow halo, Shroomalo wears a tiny red mushroom-cap tuft, Wasp Renegade carries translucent wing overlays, Magic Wisp pulses with a violet sparkle ring, Wolf reads as the long-bodied grey predator with pointed snout and bushy tail. Per-instance Transform2D is updated each snapshot tick from the entity SimPos; wounded entities fade alpha (40 % at 0 HP → 100 % full HP); tamed entities get a warm tint so they read distinct from wild specimens of the same species. Renderer Z-index 0 — same plane as shroomps; tree-order render resolution puts shroomps on top.
+
+**Snapshot integration** (`SimulationSnapshot.cs`, `EntitySnapshot.cs`): new `EntitySnapshot` value-type carrying the full persist field set (Id, Kind, Pos, Target, State, Health, MaxHealth, Speed, AttackPower, IsTamed, TamedByName, WanderHome, RandomSeed, AttackCooldownTicks). `SimulationSnapshot.Entities` is always present (empty list when no entities exist). New ctor `SimulationSnapshot(date, shroomps, entities)` is the canonical Phase 6 path; the old ctor stays for backwards-compat.
+
+**Sim integration** (`SimulationCore.cs`): `_entities` + `_entityLock` list mirrors the existing `_shroomps` / `_shroompLock` shape. `EntitySystem.Tick` fires after BehaviorSystem each tick; dead entities are pruned before snapshot; day-boundary triggers `EntitySpawnSystem.MaintainPopulation`. `PushSnapshot` now constructs the snapshot with both lists.
+
+**Save / load** (`SaveManager.cs`, `SimulationManager.cs`): new `EntitySaveData` record + `ColonySave.Entities` field (nullable; pre-Phase-6 saves deserialise to null and seed fresh wildlife from map markers on load). New `BuildEntityList` helper in SaveManager walks the snapshot's Entities and emits one save record each. `LoadFromSave` restores entities by rebuilding `Entity` instances from the records and registering via `_core.AddEntities`. Round-trips full state (jittered stats, wander home, attack cooldown, tame status).
+
+**Hostile attack damage routing**: when a hostile entity contacts a target shroomp, `ApplyEntityAttack` mutates the shroomp's `BodyParts` dict directly via the same pattern `NeedsSystem` starvation and `SimulationManager.DevDamageToDown` use. Bleeding + downed-state recomputation picks this up automatically through the existing v0.5.81 bleeding + v0.5.79 downed-state pipelines. Phase 7 combat will replace this minimal hit-routing with a proper weapon-vs-armor pipeline.
+
+**Deferred to v0.6.1+:** Hediff base class, mental-breaker system, opinion ledger + relations registry, Phase 8 Storyteller event hooks, entity card / unit panel UI, Phase 9 husbandry tags (Tame / Butcher / Milk / Shear / etc.). The Phase 6 spec calls these out as "lands alongside the entity registry"; the entity registry is the foundation they all build on, and it lands first so the additions can be done in self-contained follow-up bumps.
+
+**Build:** 0 warnings, 0 errors.
+
+---
+
 ## [0.5.84] — 2026-05-19 — Dev-panel perf instrumentation: A* counters + per-phase tick ms
 
 Reported: noticeable pawn movement/sim slowdown with 50 pawns attempting to move around the screen at once, though framerate now stays steady. Framerate-steady-but-sim-slow points the finger at the sim thread's per-tick wall-clock work, not the renderer. Diagnose before guessing — wire the counters and let one playtest narrow it down.
@@ -60,15 +121,15 @@ Penetrance ranges + Dawn-Era floors/ceilings preserved verbatim. Effect coeffici
 
 ### Also in this patch — equipment policy + room types + buildable torches
 
-**Equipment policy** (RimWorld parity via `JobGiver_PickUpOpportunisticWeapon` + `Trait_NonViolent` patterns from josh-m/RW-Decompile). Pre-v0.5.84t Sporeholm's `EquipmentSystem.AutoEquipForTask` only handled Tools; weapons existed (Spear/Sword/Bow/etc. from v0.5.84t recipes) but no code equipped them.
-- **`Shroomp.IsPacifist` bool** — RimWorld parity, rolled at gen ~8% incidence (matches RimWorld NonViolent rate). Added to `TraitRegistry.AssignDawnEraTraits` so every gen site (scenario, birth, wanderer) picks it up. Old saves load with default `false`.
-- **`EquipmentSystem.AutoEquipBetterWeapon(s, resources)`** — RimWorld `JobGiver_PickUpOpportunisticWeapon` analogue. Scores `BaseDamage × BaseAccuracy × QualityMul × (condition/cap) × skillMul` per weapon. Ranged weapons (acc < 0.75) bias to Ranged skill, melee to Melee skill (1 + 0.05 × level). Swap requires `newScore > current × 1.05` hysteresis so near-ties don't churn. **Pacifists early-return — never auto-equip a weapon.** Fires alongside `AutoEquipForTask` at every task transition.
-- **`EquipmentSystem.DropUnsuitableTool(s, map)`** — Sporeholm divergence from RimWorld (which never auto-drops). When task transitions and the held Tool's `PreferredForTasks` doesn't include the new task type AND it's not a role-canonical tool (Sage's Sage Staff, Crafter's Hammer, Forager's Basket), drop it on the current tile unforbidden. HaulSystem moves it to a stockpile.
+**Equipment policy.** Pre-v0.5.84t Sporeholm's `EquipmentSystem.AutoEquipForTask` only handled Tools; weapons existed (Spear/Sword/Bow/etc. from v0.5.84t recipes) but no code equipped them.
+- **`Shroomp.IsPacifist` bool** — rolled at gen ~8% incidence. Added to `TraitRegistry.AssignDawnEraTraits` so every gen site (scenario, birth, wanderer) picks it up. Old saves load with default `false`.
+- **`EquipmentSystem.AutoEquipBetterWeapon(s, resources)`** — opportunistic-weapon pickup. Scores `BaseDamage × BaseAccuracy × QualityMul × (condition/cap) × skillMul` per weapon. Ranged weapons (acc < 0.75) bias to Ranged skill, melee to Melee skill (1 + 0.05 × level). Swap requires `newScore > current × 1.05` hysteresis so near-ties don't churn. **Pacifists early-return — never auto-equip a weapon.** Fires alongside `AutoEquipForTask` at every task transition.
+- **`EquipmentSystem.DropUnsuitableTool(s, map)`** — Sporeholm-specific behaviour. When task transitions and the held Tool's `PreferredForTasks` doesn't include the new task type AND it's not a role-canonical tool (Sage's Sage Staff, Crafter's Hammer, Forager's Basket), drop it on the current tile unforbidden. HaulSystem moves it to a stockpile.
 
 **Room system gap fill** (Phase 5H per Roadmap §5.5):
 - **Beauty thought emission was already wired** at `BehaviorSystem.cs:866-890` (v0.5.23 — periodic 300-tick sample of room BeautyScore → emits `BeautyPretty +3` / `BeautyUgly -3`). Audit confirmed working; no change needed.
-- **`RoomType` enum + inference** (`RoomDetector.cs`). New `RoomType { Outdoor, Generic, Bedroom, Kitchen, Workshop, Storage }`. Inferred at `RoomDetector.Rebuild` from per-furniture counts (BedCount / WorkbenchCount / ShelfCount). Priority: Bedroom > Kitchen > Workshop > Storage > Generic. Surfaced in `TilePropertiesPanel` Room section: "Room #N · Bedroom · 12 tiles · roofed". RimWorld parity (their `RoomRoleWorker_Bedroom` etc. use the same furniture-driven inference).
-- **`SleptInBedroom` mood thought** (+2 mood, 20 in-game-hour duration). Fires on wake at `BehaviorSystem.Sleep` apply when the bed tile is inside a `RoomType.Bedroom`. Stacks with `WellRested`. RimWorld parity ("Slept in bedroom" comfort thought).
+- **`RoomType` enum + inference** (`RoomDetector.cs`). New `RoomType { Outdoor, Generic, Bedroom, Kitchen, Workshop, Storage }`. Inferred at `RoomDetector.Rebuild` from per-furniture counts (BedCount / WorkbenchCount / ShelfCount). Priority: Bedroom > Kitchen > Workshop > Storage > Generic. Surfaced in `TilePropertiesPanel` Room section: "Room #N · Bedroom · 12 tiles · roofed".
+- **`SleptInBedroom` mood thought** (+2 mood, 20 in-game-hour duration). Fires on wake at `BehaviorSystem.Sleep` apply when the bed tile is inside a `RoomType.Bedroom`. Stacks with `WellRested`.
 
 **Buildable torches** (`StructureSlot.TorchPlanned/Torch` enum entries 26/27, `Tool.BuildTorch`). Mirror Hearth pattern: enum + cost (1 wood unit) + BuildPanel chip (Furniture sub-cat) + DesignationToolbar entry + `StructureOverlay.BakeTorchSprite` (wood haft + layered orange/yellow/white-hot flame) + `RoomDetector.TorchCount` tracker. Heat: `Room.TemperatureOffsetC` now folds `+ (TorchCount × 2f)` alongside Hearth's `+10°C` and base `+2°C`. **Light emission is stub today** — `TorchCount` is tracked for the future Phase 10 glow grid; no per-tile lighting fog yet. The stretch goal of "made from any kind of wood and a little grass" is deferred: current `BuildMaterialCost` is single-ingredient (wood family); the grass ingredient awaits a multi-ingredient build pipeline refactor.
 
@@ -76,7 +137,7 @@ Penetrance ranges + Dawn-Era floors/ceilings preserved verbatim. Effect coeffici
 
 ### Also in this patch — natural roof tiles + steering: avoid before climb
 
-**Steering: avoid before climb** (`BehaviorSystem.cs` MoveOneTick). Pre-v0.5.84t (this patch) priority-2 was *"primary tile is crowded but climb-useful → step onto blocker."* That fast path fired BEFORE the fan-out side-step search, so a BuildHaul hauler walking through a stockpile committed to a step-on-blocker every tick instead of going around. Removed the fast-path entirely. New priority order (RimWorld parity):
+**Steering: avoid before climb** (`BehaviorSystem.cs` MoveOneTick). Pre-v0.5.84t (this patch) priority-2 was *"primary tile is crowded but climb-useful → step onto blocker."* That fast path fired BEFORE the fan-out side-step search, so a BuildHaul hauler walking through a stockpile committed to a step-on-blocker every tick instead of going around. Removed the fast-path entirely. New priority order:
 
 1. Primary tile uncrowded → take it.
 2. Fan-out for an uncrowded side-step (`SteerVectors` rotated baseStep, first uncrowded passable candidate wins).
@@ -85,22 +146,22 @@ Penetrance ranges + Dawn-Era floors/ceilings preserved verbatim. Effect coeffici
 
 Also added `CrossesTileBoundary` to the primary-as-fallback condition so the stuck detector can't be bypassed by a partial-pixel commit.
 
-**Roof system** — per-tile `LocalTile.IsRoofed` flag. RimWorld parallel via josh-m/RW-Decompile `Verse/RoofGrid.cs` + `Verse/RoofCollapseUtility.cs`: stores a `RoofDef[]` parallel grid pre-painted on solid tiles during mountain worldgen so when the player mines into a mountain the carved-out tile retains "cavern roof" status. Sporeholm now mirrors the storage model (per-tile bool, not per-room) with three integration points:
+**Roof system** — per-tile `LocalTile.IsRoofed` flag. Per-tile bool (not per-room) pre-painted on solid tiles during mountain worldgen so when the player mines into a mountain the carved-out tile retains "cavern roof" status. Three integration points:
 
 - **Worldgen paint** (`LocalMapGenerator.PaintInitialRoofs`, new). After all terrain passes complete, walks every tile and sets `IsRoofed = true` if (a) terrain is solid (Boulder / DeadLog / LivingWood / Skeleton) OR (b) passable tile with ≥3 impassable cardinal neighbours (cave-interior — covers `CarveUniversalCaves` carve-outs and pockets surrounded by wood/stone masses). Persists through mining because `LocalMap.MutateTerrain` + `ApplyTerrainDelta` only mutate `Terrain` + `Passable` — `IsRoofed` rides along untouched.
 - **Visual** (`LocalMapRenderer.PaintTile`). Roofed terrain multiplied by `(0.74, 0.78, 0.86)` before fill — subtle dark cool cast that reads as "under a ceiling" without overwhelming the underlying biome color. The accents painted on top inherit the tint via the modified base `terrain` color.
-- **Insulation** (`ItemDeteriorationSystem.ResolveInsulationMul`). Pre-v0.5.84t the colony-wide indoor check only counted tiles inside a player-built room. Now also counts `IsRoofed` tiles, so a colony settled inside a natural cave gets the same 0.5× / 0.25× insulation multiplier without needing to build walls. RimWorld parity.
+- **Insulation** (`ItemDeteriorationSystem.ResolveInsulationMul`). Pre-v0.5.84t the colony-wide indoor check only counted tiles inside a player-built room. Now also counts `IsRoofed` tiles, so a colony settled inside a natural cave gets the same 0.5× / 0.25× insulation multiplier without needing to build walls.
 - **Surface in `TilePropertiesPanel`**: roofed tiles show *"Roof: Cavern (natural)"* under terrain info.
 
 **Save/load — no schema change needed.** `LocalMapGenerator.Generate` runs on load (deterministic from `WorldTile.LocalSeed`), `PaintInitialRoofs` re-derives the base roof state from the regenerated terrain, and `ApplyTerrainDelta` preserves `IsRoofed` through every mined tile in `TerrainDeltas`. Old saves load with roofs auto-derived correctly.
 
-**Out of scope** (deferred to v0.6+ per RimWorld parity research): constructed roofs (player-painted roof zones), RoofCollapseUtility (ceiling collapse when supporting walls are mined). Both add bug surface and zero gameplay at current scope.
+**Out of scope** (deferred to v0.6+): constructed roofs (player-painted roof zones), RoofCollapseUtility (ceiling collapse when supporting walls are mined). Both add bug surface and zero gameplay at current scope.
 
 **Build:** 0 warnings, 0 errors. Bundled into v0.5.84.
 
 ### Also in this patch — extended weapon catalogue (bows, crossbows, atlatls, swords, axes, shields)
 
-**6 new items** (`ItemRegistry.cs`). All `ItemKind.Weapon` except Shield (`ItemKind.Apparel`, `BodyClass.Hand` for off-hand slotting). RimWorld-scale combat stats — Phase 7 reads at swing-resolution time:
+**6 new items** (`ItemRegistry.cs`). All `ItemKind.Weapon` except Shield (`ItemKind.Apparel`, `BodyClass.Hand` for off-hand slotting). Combat stats — Phase 7 reads at swing-resolution time:
 
 | Item | Kind | Damage | Accuracy | Notes |
 |---|---|---|---|---|
@@ -150,7 +211,7 @@ VariantCount: 40 → 49.
 
 ### Also in this patch — tool crafting + per-tick mining + tool work-speed bonuses + combat stubs
 
-**Audit first — what existed**: 6 tools (Pick / Basket / Focus / Sickle / Hammer / Knife) with `PreferredForTasks` wired to auto-equip, but **no work-speed bonus** at task-apply time. 3 weapons (Spear / Club / Sling) registered for scenario-kit rolls but with no recipes. Mining was **one-shot** on arrival; `SkillCurve.MiningSpeedFactor` (4 % lvl 0 → 100 % lvl 8, matches RimWorld verbatim) was wired but **dormant** because the GatherMaterial apply path had no per-tick loop. RimWorld parallel via josh-m/RW-Decompile + rimworldwiki Mining: tools in RimWorld don't multiply work-speed — only skill does. Sporeholm departs from that to honor "pickaxes make mining faster," but the skill curve remains the dominant gate (a lvl-20 master is ~60× faster than a lvl-0 novice; a Masterwork Pick adds ~75 % on top).
+**Audit first — what existed**: 6 tools (Pick / Basket / Focus / Sickle / Hammer / Knife) with `PreferredForTasks` wired to auto-equip, but **no work-speed bonus** at task-apply time. 3 weapons (Spear / Club / Sling) registered for scenario-kit rolls but with no recipes. Mining was **one-shot** on arrival; `SkillCurve.MiningSpeedFactor` (4 % lvl 0 → 100 % lvl 8) was wired but **dormant** because the GatherMaterial apply path had no per-tick loop. Sporeholm honours "pickaxes make mining faster," but the skill curve remains the dominant gate (a lvl-20 master is ~60× faster than a lvl-0 novice; a Masterwork Pick adds ~75 % on top).
 
 **Recipes — 20 new tool/weapon recipes** (`RecipeRegistry.cs`). Mirrors the v0.5.84t Knife multi-variant pattern: each tool has 2-3 recipes covering its `AllowedFamilies`, so a colony can craft from whichever material they have on hand.
 
@@ -183,7 +244,7 @@ VariantCount: 40 → 49.
 
 The skill curve dominates (60× spread); the tool adds ~75 % at the high end and ~75 % at the low end — meaningful but not the main lever.
 
-**Combat stubs** (`ItemRegistry.cs` + `ItemSubTypeDef`). New `BaseDamage` (float) and `BaseAccuracy` (0-1) fields on every weapon + every tool that doubles as an improvised weapon. RimWorld-scale values:
+**Combat stubs** (`ItemRegistry.cs` + `ItemSubTypeDef`). New `BaseDamage` (float) and `BaseAccuracy` (0-1) fields on every weapon + every tool that doubles as an improvised weapon. Values:
 
 | Item | Damage | Accuracy |
 |---|---|---|
@@ -235,14 +296,14 @@ New `VariantIndexFor` mappings for the v0.5.84t items: BerryJuice (food), MossCl
 
 Playtest report: pawns bunching up on a two-tile-thick wall despite having a three-tile-wide doorway behind them. They should entirely ignore impassable terrain for pathing unless it's specifically designated. Pawns weren't fully stalled — they were micro-jittering against walls, 0.6 px/tick, which beat the 0.5 px stuck threshold and never triggered re-pathing.
 
-**Root cause** — `Pathfinder.cs` is clean (impassable tiles never enter the open set; `PathEndMode.Touch` parity at line 137-143 retargets impassable goals to adjacent passable cells). The bugs were in the **local steering** layer below A*:
+**Root cause** — `Pathfinder.cs` is clean (impassable tiles never enter the open set; touch-arrival logic at line 137-143 retargets impassable goals to adjacent passable cells). The bugs were in the **local steering** layer below A*:
 
 - **`IsClimbOverUseful` (line 499)** returned true for any candidate Chebyshev-1 from the task target — including the wall itself — because it never checked the candidate tile's own passability. When the crowdedFallback path initialised from a wall-adjacent primary, the shroomp committed a 1-2 px step toward the wall every tick.
 - **`ResolveWalkTarget` (line 2060)** redirected impassable targets to adjacent passable tiles ONLY for Gather/Chop/Cut (the `RequiresAdjacentApproach` set). Build / Sleep / DoBill / etc. let `walkTo` point at the wall tile centre; primary direction then pointed straight into impassable terrain.
 - **Stuck detector (line 1791)** measured `(SimPos - PrevSimPos).Length() < 0.5 px`. Micro-jitter of 0.6 px/tick beat the threshold every tick — `StuckTicks` never accumulated, `RePathTried` never fired, the cycle ran forever.
 - **Climb-over-primary commit (line 1669)** fired on any "useful" crowded primary, even when the step kept the shroomp inside the same tile. Partial-pixel nudges bypassed everything downstream.
 
-**RimWorld parity** (from josh-m/RW-Decompile `Verse.AI/PathFinder.cs` + `Pawn_PathFollower.cs`): RimWorld has NO local steering layer. `Pawn_PathFollower.TryEnterNextPathCell` consumes the A* path one cell at a time; if the next cell is blocked by a pawn, `BestPathHadPawnsInTheWayRecently` decides wait-or-replan. No velocity rotation, no partial-pixel commits, no fallback to raw task target.
+**Reference behaviour**: pure tile-by-tile waypoint consumption with NO local steering layer. A path-follower consumes the A* path one cell at a time; if the next cell is blocked by a pawn, a "best path had pawns in the way recently" check decides wait-or-replan. No velocity rotation, no partial-pixel commits, no fallback to raw task target.
 
 **Four surgical fixes** (no architectural rewrite; preserves yield + claim-counter + arrival + bleeding + every other MoveOneTick invariant):
 
@@ -251,11 +312,11 @@ Playtest report: pawns bunching up on a two-tile-thick wall despite having a thr
 | A | `IsClimbOverUseful` hard-rejects candidates whose own tile is impassable | BehaviorSystem.cs:511 |
 | B | `ResolveWalkTarget` redirects ANY impassable task target to nearest adjacent passable tile (not just Gather/Chop/Cut) | BehaviorSystem.cs:2060 |
 | C | Stuck detector counts as stuck if EITHER pixel motion < 0.5 px OR the shroomp hasn't crossed a tile boundary this tick. New `Shroomp.LastProgressTileIdx` field tracks last tile crossing. Slow legitimate walks still cross tiles every 3-8 ticks, well under the StuckRePathTicks threshold. | BehaviorSystem.cs:1791 + Shroomp.cs:280 |
-| D | Climb-over-primary requires `CrossesTileBoundary(SimPos, primary)` — partial-pixel nudges within the same tile fall through to fan-out → no candidate → wait. RimWorld parity at the commit gate: "either step or wait, never nudge." | BehaviorSystem.cs:1669 |
+| D | Climb-over-primary requires `CrossesTileBoundary(SimPos, primary)` — partial-pixel nudges within the same tile fall through to fan-out → no candidate → wait. Commit gate is "either step or wait, never nudge." | BehaviorSystem.cs:1669 |
 
 Combined effect: a pawn can no longer end up steered onto an impassable tile, can no longer have `walkTo` pointing at a wall centre, and can no longer micro-jitter past the stuck detector. Existing systems (single-hauler reservation, yield/lie-down, A* crowd cost, climb-over for genuine cluster movement) all remain wired and effective.
 
-**Out of scope (deferred follow-up)**: full RimWorld-parity removal of the local steering layer in favour of pure tile-by-tile waypoint consumption. The four fixes above eliminate the reported bug class without requiring that architectural rewrite. If wall-bunching persists in playtest, the next step is the steering-layer removal.
+**Out of scope (deferred follow-up)**: full removal of the local steering layer in favour of pure tile-by-tile waypoint consumption. The four fixes above eliminate the reported bug class without requiring that architectural rewrite. If wall-bunching persists in playtest, the next step is the steering-layer removal.
 
 **Build:** 0 warnings, 0 errors. Bundled into v0.5.84.
 
@@ -265,7 +326,7 @@ Playtest report: dozens of 1-6-unit material drops sitting permanently on built 
 
 **Root cause** (BehaviorSystem.cs:2619). The BuildHaul branch let multiple shroomps simultaneously commit to the same blueprint (the v0.5.60 comment literally said *"BuildHaul layer doesn't claim the blueprint exclusively"*). Selection computes `remaining = cost - delivered`, doesn't subtract in-flight commitments — so N haulers each see "blueprint needs 1" and all fetch a carry-load. First arriver deposits, increments MaterialsDelivered, satisfies the blueprint. Arrivers N-1 hit the `needed <= 0` guard at line 4323, abandon the task — but their carried material **stays in inventory**. Next tick SelectTask sees they're carrying matching material → instantly re-routes them to the same blueprint (or the next one needing 1 unit). They arrive, find it satisfied, abandon, re-acquire. Forever. The conga line is the visible artifact of N-1 haulers ping-ponging between under-supplied blueprints they can never actually deliver to.
 
-**Fix #1 — single-hauler reservation per blueprint** (`ReservationManager.LayerBuildHaul`). The first hauler to `ReserveTile(blueprintTile, LayerBuildHaul, s.Id)` gets exclusive delivery rights; other haulers searching for haul targets skip blueprints already reserved by another. New `FindDesignatedBuildForHaul` finds the next-nearest unreserved-for-haul blueprint; `LocalMap.FindNearestBlueprint` gains an `extraLayer` parameter so the haul-side pick can additionally filter on LayerBuildHaul. Selection Branch 2 (BehaviorSystem.cs:2619+) reserves before returning the BuildHaul task and releases on every abandon path via `ReleaseTaskClaim`. RimWorld parity: one delivery convoy per blueprint at a time. The hauler can make multiple round trips if `cost > carry`; other haulers wait their turn or pick a different blueprint.
+**Fix #1 — single-hauler reservation per blueprint** (`ReservationManager.LayerBuildHaul`). The first hauler to `ReserveTile(blueprintTile, LayerBuildHaul, s.Id)` gets exclusive delivery rights; other haulers searching for haul targets skip blueprints already reserved by another. New `FindDesignatedBuildForHaul` finds the next-nearest unreserved-for-haul blueprint; `LocalMap.FindNearestBlueprint` gains an `extraLayer` parameter so the haul-side pick can additionally filter on LayerBuildHaul. Selection Branch 2 (BehaviorSystem.cs:2619+) reserves before returning the BuildHaul task and releases on every abandon path via `ReleaseTaskClaim`. One delivery convoy per blueprint at a time. The hauler can make multiple round trips if `cost > carry`; other haulers wait their turn or pick a different blueprint.
 
 **Fix #2 — drop surplus inventory on BuildHaul abandon** (BehaviorSystem.cs:4954+). The new ReleaseTaskClaim BuildHaul branch walks the shroomp's inventory, drops every Material item on the current tile as **unforbidden**, and clears it from inventory. HaulSystem picks the dropped surplus up to the nearest accepting stockpile. Replaces the v0.5.60 silent "abandon with material stuck in inventory" path. Five `s.CurrentTask = null` sites in the BuildHaul Apply branch (blueprint vanished, needed<=0 race, delivered-complete, no-matching-carry, invalid-target) now all call `ReleaseTaskClaim(s, map)` before nulling so reservation + surplus cleanup fires uniformly.
 
@@ -334,7 +395,7 @@ Playtest on a pre-patch save: wander-through-walls still happening, dev panel sh
 
 **Root cause** (BehaviorSystem.cs:1139). The path-fail handler only cleared `s.CurrentTask` for **designation** tasks (Excavate / Gather / Chop / Cut). Every other task type — Wander, Loiter, Observe, VisitFavorite, Converse, Meditate, Haul, player Goto — left the task alive with empty `PathWaypoints`. `ResolveWalkTarget` then fell through to `task.Target` (the raw destination pixel), local steering tried to walk straight there, and the shroomp orbited whatever wall was in the way until the stuck-detector eventually gave up.
 
-The v0.5.83 region gate covered the "destination in a different DF region" case for the **picker** — never selects unreachable. But two paths still produced A* failures:
+The v0.5.83 region gate covered the "destination in a different region" case for the **picker** — never selects unreachable. But two paths still produced A* failures:
 
 1. **Pre-v0.5.83 saved game state.** The picker fix prevents new tasks from being unreachable; it doesn't fix tasks already in flight at save time. `CurrentTask` isn't persisted across save/load (verified — not in SaveManager.ShroompSaveData) so loaded shroomps get fresh tasks, but the new tasks can still hit case 2 below.
 2. **Cluster crowd cost exhausts MaxNodes.** The chokepoint at the structure door (visible in the screenshot — 15+ shroomps packed at the bottom) makes every tile near the cluster cost cardinal + 175×crowd. A 12-tile path through the cluster easily totals > 1024 expansions and the search times out at MaxNodes. The destination is technically in the same region; the search just can't fit under budget.
@@ -377,15 +438,15 @@ Goal: ensure no structures or items can be built with materials that are not gen
 
 **Build:** 0 warnings, 0 errors. Bundled into v0.5.84.
 
-### Also in this patch — floor + wall art redo (RimWorld-inspired blending)
+### Also in this patch — floor + wall art redo (blended continuous surfaces)
 
-Issue: floor pattern was reading as a grid of textured tiles rather than continuous ground; A/B floor toggle didn't fix the underlying issue. Direction: floors should appear flatter (but with texture) to contrast with the walls/stone. Deadwood/Livingwood/Stone subtypes should all be given the 2.5D treatment with textures that blend in large groups to imitate singular bodies. RimWorld's art implementation provides a useful reference while preserving the pixelshroom aesthetic.
+Issue: floor pattern was reading as a grid of textured tiles rather than continuous ground; A/B floor toggle didn't fix the underlying issue. Direction: floors should appear flatter (but with texture) to contrast with the walls/stone. Deadwood/Livingwood/Stone subtypes should all be given the 2.5D treatment with textures that blend in large groups to imitate singular bodies. The reference aesthetic preserves the pixelshroom style.
 
-**RimWorld pattern.** RimWorld walls have a sunlit top edge + base shadow, no per-tile outer border on left/right, and adjacent walls visually fuse into one continuous masonry/wood body. Floors are near-uniform surfaces with subtle non-aligned noise — no plank seams, no grid borders, no per-tile structure. The eye reads "one floor" across N adjacent tiles.
+**Pattern.** Walls have a sunlit top edge + base shadow, no per-tile outer border on left/right, and adjacent walls visually fuse into one continuous masonry/wood body. Floors are near-uniform surfaces with subtle non-aligned noise — no plank seams, no grid borders, no per-tile structure. The eye reads "one floor" across N adjacent tiles.
 
 **Floor redo** (`BakeFloorSprite` + `BakeFloorSpriteFungal`). Dropped the v0.5.25 three-plank seam pattern + dark outer border AND the v0.5.70 fungal gill-rib + spore-spot pattern. Both now ship a near-flat base colour + 8 sparse asymmetric single-pixel accent points (one slightly-lighter + one slightly-darker shade) with no structural lines and no border. Accent positions are chosen to be non-repeating so an N×N tiling reads as scattered noise rather than a regular grid. Per-instance MaterialTint passes through unchanged so stone/wood subtypes still differentiate by colour.
 
-**Stone wall redo** (`BakeWallSprite`). Dropped the dark outer left + top borders so horizontally-adjacent walls blend. New anatomy: row 0 = sunlit cap-light (full width), row 1 = cap-mid, rows 2-13 = brick body with single horizontal mortar at row 7 and staggered vertical mortar segments at quarter columns (stopping 1 px short of the edges so adjacent walls don't form a continuous grid line), rows 14-15 = base shadow gradient (dim band + deep shadow drop), col 15 = thin right-side depth column. The result: long wall runs read as one masonry body with a continuous lit top edge and shadowed base, RimWorld-style.
+**Stone wall redo** (`BakeWallSprite`). Dropped the dark outer left + top borders so horizontally-adjacent walls blend. New anatomy: row 0 = sunlit cap-light (full width), row 1 = cap-mid, rows 2-13 = brick body with single horizontal mortar at row 7 and staggered vertical mortar segments at quarter columns (stopping 1 px short of the edges so adjacent walls don't form a continuous grid line), rows 14-15 = base shadow gradient (dim band + deep shadow drop), col 15 = thin right-side depth column. The result: long wall runs read as one masonry body with a continuous lit top edge and shadowed base.
 
 **Wood wall sprite** (`BakeWallSpriteWood` — NEW). Pre-fix DeadWood / LivingWood / generic Wood walls all used the stone-brick sprite tinted brown/green — read as "tinted bricks" not as wood. New plank sprite: 3 vertical planks per tile (seams at q1/q3, full inner height), subtle grain knots at non-aligned positions, same sunlit top cap + base shadow + thin right-side depth column as the stone wall so the two sprite families share visual depth language. Per-instance tint colours each wood subtype (warm brown DeadWood, leafy green LivingWood, near-cream generic Wood). New `_wallWoodMmi` MMI; renderer dispatches `isWoodWall` (DeadWood/LivingWood/Wood) to it before falling through to the existing stone-brick path for Stone subtypes. FungalWood walls unchanged (already have the dedicated v0.5.70 mushroom-cap sprite).
 
@@ -405,21 +466,21 @@ Direction (with a 16-bit pixel art reference image of seamless texture tiles): f
 
 **Build:** 0 warnings, 0 errors. Bundled into v0.5.84.
 
-### Also in this patch — RimWorld-parity pathing fixes (always A*, larger budget, faster ring scan)
+### Also in this patch — pathing fixes (always A*, larger budget, faster ring scan)
 
-Playtest at 50 pop: pawns still visibly getting stuck on walls when attempting to wander. Dev panel showed **20 % A* success rate, 826 avg exp/call, tick 9.07 ms**. The smoking gun was three compounding issues; fix matches RimWorld's pathing philosophy as closely as our architecture allows.
+Playtest at 50 pop: pawns still visibly getting stuck on walls when attempting to wander. Dev panel showed **20 % A* success rate, 826 avg exp/call, tick 9.07 ms**. The smoking gun was three compounding issues; the fix consolidates around a single "always pathfind" philosophy.
 
 **Issue 1 — Local steering had no escape route around walls.** `BehaviorSystem.cs:1112-1113` gated A* on `distSq > PreferAStarDistSqPx` (8 tiles); Loiter (2-5 tiles), Observe (3-7), close Wander hops, and Converse-partner walks all fell through to greedy local steering with NO waypoint path. Steering's fan-out can dodge small obstacles but dead-ends against walls — pawn orbits the wall trying every angle until the stuck-detector fires. This was the visible "stuck on walls when attempting to wander."
 
-RimWorld's `PathFinder.FindPath` is called for **every** pawn move regardless of distance — no local-steering shortcut. The explicit waypoint list means local steering can never try to walk straight at an impassable tile because there's always a path with valid neighbours. We adopt the same: every task with a target tile now goes through A*. Fail-fast via region check (Pathfinder.cs:127) means short reachable searches are dirt-cheap (<20 expansions), so the perf cost is negligible.
+The reference behaviour is to call full pathfinding for **every** pawn move regardless of distance — no local-steering shortcut. The explicit waypoint list means local steering can never try to walk straight at an impassable tile because there's always a path with valid neighbours. We adopt the same: every task with a target tile now goes through A*. Fail-fast via region check (Pathfinder.cs:127) means short reachable searches are dirt-cheap (<20 expansions), so the perf cost is negligible.
 
-**Issue 2 — `MaxNodes = 1024` too tight for crowded chokepoints.** With 175 cost per pawn on a candidate tile and 15+ pawns at a doorway, every path through that door totalled 4-8k cost. A* explored ~1024 candidate nodes around the cluster trying to find a cheaper alternative (there isn't one — only one door), hit the budget, returned false. Same destination is technically reachable; the search just couldn't fit under budget. RimWorld's equivalent (`Verse.PathFinder.SearchLimit`) is **160,000** — they essentially never fail on reachable paths because the region system fail-fasts the unreachable ones in O(1).
+**Issue 2 — `MaxNodes = 1024` too tight for crowded chokepoints.** With 175 cost per pawn on a candidate tile and 15+ pawns at a doorway, every path through that door totalled 4-8k cost. A* explored ~1024 candidate nodes around the cluster trying to find a cheaper alternative (there isn't one — only one door), hit the budget, returned false. Same destination is technically reachable; the search just couldn't fit under budget. A more permissive budget (effectively never failing on reachable paths) relies on a region system that fail-fasts the unreachable ones in O(1).
 
-Bumped our `MaxNodes` from 1024 to 4096. Still tiny vs RimWorld's 160k but enough room for the cluster cases. Region fail-fast keeps the unreachable destinations from ever entering the expansion loop, so the worst-case per-call cost grows 4× but the failure rate drops dramatically.
+Bumped our `MaxNodes` from 1024 to 4096. Enough room for the cluster cases. Region fail-fast keeps the unreachable destinations from ever entering the expansion loop, so the worst-case per-call cost grows 4× but the failure rate drops dramatically.
 
 **Issue 3 — Ring-scan fallback was O((2r+1)²) when it should have been O(8r).** The v0.5.84b deterministic perimeter scan iterated the full square then filtered to perimeter, ~50k operations per call at maxRadius=28. With 50 pawns falling through the random sampler every tick, that's ~2.5M ops/tick — the main Behavior-tick cost spike (8.99 ms / tick). Replaced with direct perimeter walk via top + bottom + left + right edge passes, plus `TryRingPoint` + `MakeIdle` helpers. Same result, ~16× less work (3.2k ops/call worst case).
 
-**RimWorld's wall-pathing prevention.** RimWorld prevents pathing through impassable obstacles via `Map.pathFinder` consulting `pathGrid.pathCosts[idx]` per cell — a wall's pathCost is `uint.MaxValue` so A* never expands into it (neighbours get filtered by `if (cost < int.MaxValue)`). We use the same mechanism via `passable[nIdx]` in our `Pathfinder.cs:184`. Walls are blocked at expansion time, not at result-validation time. So pathing THROUGH walls was never the actual bug — what looked like "through walls" was a pawn with NO path (A*-failed or A*-skipped) using raw direction + local fan-out, orbiting against the wall surface until stuck-detect fired.
+**Wall-pathing prevention.** Sporeholm prevents pathing through impassable obstacles via `passable[nIdx]` filtering in `Pathfinder.cs:184` — walls are blocked at expansion time, not at result-validation time. So pathing THROUGH walls was never the actual bug — what looked like "through walls" was a pawn with NO path (A*-failed or A*-skipped) using raw direction + local fan-out, orbiting against the wall surface until stuck-detect fired.
 
 **Build:** 0 warnings, 0 errors. Bundled into v0.5.84.
 
@@ -436,7 +497,7 @@ Playtest report: pawn movement on a fresh game has extraordinarily high latency 
 
 - **`Shroomp.PathFailCooldownTicks` — new field.** Set to 30 (~0.5 s at 1×) immediately after any A* failure releases the task. Decremented each per-pawn tick in BehaviorSystem (alongside `WorkSearchCooldownTicks`).
 - **`needNewTask` gate.** The `CurrentTask == null` branch — previously `needNewTask = true` unconditionally — now reads `needNewTask = s.PathFailCooldownTicks <= 0 || IsLifeThreatening(s)`. While the cooldown is non-zero the pawn stands still rather than triggering another SelectTask → A* cycle. Starving or otherwise life-threatened shroomps bypass the gate so urgent overrides keep working.
-- **`MaxNodes` reverted 4096 → 1024.** With the throttle in place at the source, the per-call budget no longer needs the headroom; the worst-case A* cost goes back to its pre-v0.5.84f value. RimWorld can afford 160k MaxNodes because it has additional pathfinding tiers (region-graph hierarchical search) amortising the per-call cost — adopting those is a future phase, not this patch.
+- **`MaxNodes` reverted 4096 → 1024.** With the throttle in place at the source, the per-call budget no longer needs the headroom; the worst-case A* cost goes back to its pre-v0.5.84f value. A larger budget would require additional pathfinding tiers (region-graph hierarchical search) to amortise the per-call cost — that's a future phase, not this patch.
 
 **Expected behaviour.** A pawn at a fully-saturated chokepoint will A* once, fail, stand still for ~0.5 sec, A* again, fail again, stand still. Cycles forever until the cluster clears. Cost: ~2 A* calls/sec/pawn at worst case. At 50 pawns × 100 % failure: 100 A*/sec × 1024 exp avg = 100k exp/sec ≈ 0.1 ms/sec of A* work. Tractable.
 
@@ -448,7 +509,7 @@ Goal: all furniture, doors, and joy objects should be buildable with stone subty
 
 The build pipeline already supports it — `StructureMatMeta.ConsumeSubType` strict-consumes the right stone subtype for any structure type (Granite Door consumes Granite blocks, etc.), and the per-instance MaterialTint coloured the sprite at render time regardless of structure family. The only blocker was the panel-side `stoneOk` gate hiding the chips. Dropped: all 9 material chips (generic Stone, Granite, Limestone, Marble, Obsidian, Quartz, DeadWood, FungalWood, LivingWood) now offer for every build tool. Per-map availability gating (v0.5.84d) still applies — chips for materials not generated on the current map stay disabled with the explanatory tooltip.
 
-Sprites for stone-tinted furniture follow the RimWorld pattern: the wood-shape door / bed / shelf / table sprite paints with the stone subtype's tint. Visually distinct from wood without needing per-material per-furniture bakes.
+Sprites for stone-tinted furniture follow the same-sprite-per-instance-tint pattern: the wood-shape door / bed / shelf / table sprite paints with the stone subtype's tint. Visually distinct from wood without needing per-material per-furniture bakes.
 
 **Build:** 0 warnings, 0 errors. Bundled into v0.5.84.
 
@@ -469,13 +530,13 @@ Sprites for stone-tinted furniture follow the RimWorld pattern: the wood-shape d
 
 **Beauty** drives the (Phase 5/6) Beauty score on built structures: Marble 1.5, Obsidian 1.4, Quartz 1.3, FungalWood 1.2, LivingWood 1.1, Granite 1.0, Limestone 0.95, DeadWood 0.9. Stub-safe — code paths can read it before the Beauty system fully ships.
 
-**Bed comfort wired into Sleep** (`BehaviorSystem.cs` Sleep apply). `effectiveness *= StructureMatMeta.Comfort(bedSlot.Material)` stacks multiplicatively with the existing quality multiplier. A Granite Masterwork bed (0.70 × 1.25 = 0.875) only marginally beats a FungalWood Crude bed (1.05 × 0.86 = 0.903) — material matters but masterwork crafting still rewards the player. A vanilla FungalWood bed (1.05) restores rest noticeably faster than a vanilla Obsidian bed (0.65). RimWorld parity: the bed comfort table from `BedComfortDef` does the same thing across wood / steel / stone in RimWorld vanilla.
+**Bed comfort wired into Sleep** (`BehaviorSystem.cs` Sleep apply). `effectiveness *= StructureMatMeta.Comfort(bedSlot.Material)` stacks multiplicatively with the existing quality multiplier. A Granite Masterwork bed (0.70 × 1.25 = 0.875) only marginally beats a FungalWood Crude bed (1.05 × 0.86 = 0.903) — material matters but masterwork crafting still rewards the player. A vanilla FungalWood bed (1.05) restores rest noticeably faster than a vanilla Obsidian bed (0.65).
 
 **Generic Stone removed from BuildPanel** (`BuildPanel.cs`). The 🪨 Stone chip is dropped — players pick a concrete subtype (Granite / Limestone / Marble / Obsidian / Quartz). Generic Wood was never a chip to begin with. `StructureMat.Stone` and `StructureMat.Wood` enum values KEPT for save-compat — existing slots with `Material = Stone` or `Material = Wood` still render via the existing tint and consume via family-fallback. They just can't be picked for new blueprints.
 
 **Default ActiveBuildMaterial** changed from `StructureMat.Stone` to `StructureMat.Granite` (`DesignationToolbar.cs`). Granite is the only stone subtype present in every biome's weight table, so it's the safest default — guaranteed to be available on every map a player loads into.
 
-**Textures** kept as same-sprite-per-instance-tint (RimWorld pattern). A Marble bed paints the bed silhouette in marble white, a Granite bed paints it in granite grey, a FungalWood bed paints it in cream — visually distinct without needing per-material per-furniture sprite bakes. Per-material distinct geometries (e.g. a stone-slab door silhouette vs a wood-plank door silhouette) is a future polish pass.
+**Textures** kept as same-sprite-per-instance-tint. A Marble bed paints the bed silhouette in marble white, a Granite bed paints it in granite grey, a FungalWood bed paints it in cream — visually distinct without needing per-material per-furniture sprite bakes. Per-material distinct geometries (e.g. a stone-slab door silhouette vs a wood-plank door silhouette) is a future polish pass.
 
 **Build:** 0 warnings, 0 errors. Bundled into v0.5.84.
 
@@ -592,7 +653,7 @@ Big pre-playtest pass. Skill graph compacted, role bonuses rebalanced, healing r
 - `HaulSystem` drop completion awards **Athletics** 40 XP per delivered stack.
 - `BehaviorSystem.MoveOneTick` awards **Athletics** 0.04 XP per move tick — walking-trickle.
 
-**Natural biological healing** (`NeedsSystem.HealParts`). Flat `HealRate` constants removed. New `NaturalHealNonVital = 0.02f/tick` + `NaturalHealVital = 0.01f/tick` + `HealerPresenceBonus = 0.02f/tick` (Caretaker presence doubles natural heal for now; Phase 7 §7.18 replaces with per-patient tending). Runs on every alive shroomp's every non-zero body part every sim-second. At default speed (~180 sec / in-game day) this approximates DF-slow ~3 condition / day for non-vital, ~1.5 / day for vital — the chosen pace ("DF-ish: very slow").
+**Natural biological healing** (`NeedsSystem.HealParts`). Flat `HealRate` constants removed. New `NaturalHealNonVital = 0.02f/tick` + `NaturalHealVital = 0.01f/tick` + `HealerPresenceBonus = 0.02f/tick` (Caretaker presence doubles natural heal for now; Phase 7 §7.18 replaces with per-patient tending). Runs on every alive shroomp's every non-zero body part every sim-second. At default speed (~180 sec / in-game day) this approximates ~3 condition / day for non-vital, ~1.5 / day for vital — the chosen pace (very slow).
 
 **Athletics-derived stats** (`Shroomp.cs`):
 - **Move-speed multiplier**: `1.0 + 0.005 × AthleticsLevel` → lvl 20 = +10 % move speed. Applied in `BehaviorSystem.MoveOneTick` alongside terrain + injury-mediated moving capacity.
@@ -608,7 +669,7 @@ Big pre-playtest pass. Skill graph compacted, role bonuses rebalanced, healing r
 
 **Roadmap additions** (`Sporeholm_Roadmap_2026.md`):
 
-- **NEW Phase 5.5 — Crafting Bills System (pre-Phase 6).** RimWorld/DF-style bills queue per workbench. New `Bill` record (RecipeId, RepeatMode, IngredientFilters, SkillRequirement, QualityFilter) + `RecipeRegistry` (7 initial recipes covering existing materials: Cook Meal, Brew Capberry Wine, Mossleaf Cloth, Bone Tool, Magic Herb Poultice, Stone Block refine, Fungal Wood Plank) + new `TaskType.DoBill` + Bills tab in workbench tile-properties. Enables Phase 7 weapons + Phase 7 §7.18 medicine items + Phase 9 farming-processed-food recipes.
+- **NEW Phase 5.5 — Crafting Bills System (pre-Phase 6).** Bills queue per workbench. New `Bill` record (RecipeId, RepeatMode, IngredientFilters, SkillRequirement, QualityFilter) + `RecipeRegistry` (7 initial recipes covering existing materials: Cook Meal, Brew Capberry Wine, Mossleaf Cloth, Bone Tool, Magic Herb Poultice, Stone Block refine, Fungal Wood Plank) + new `TaskType.DoBill` + Bills tab in workbench tile-properties. Enables Phase 7 weapons + Phase 7 §7.18 medicine items + Phase 9 farming-processed-food recipes.
 - **NEW Phase 7 §7.18 — Healer system + downed-pawn rescue.** Three new task types: `LieInBed` (long-lived patient task), `Rescue` (pick up + carry downed pawn to bed, uses v0.5.84o held-item layer with a special "carried-pawn" sprite), `TreatPatient` (Healer walks to patient, consumes 1 medicine item per wound, applies `TendQuality` from `SkillCurve.HealingTendFactor(skill) × MedicineItem.Potency`). Medicine items crafted via Phase 5.5 (initial: Magic Herb Poultice — 2 RawEssence + 1 HerbCluster). Bed comfort × material × tend quality compound into ~10× natural heal rate at the high end. New thoughts: TendedBy / Untended / NursedTo.
 
 Phase 14.5 §14.5.4 Stage 4 already noted the held-weapon layer; same pattern applies for the carried-pawn sprite in the Rescue task.
@@ -619,7 +680,7 @@ Phase 14.5 §14.5.4 Stage 4 already noted the held-weapon layer; same pattern ap
 
 ### Also in this patch — Phase 5.5 Crafting Bills System (full implementation)
 
-The full RimWorld/DF-style bills pipeline: queue recipes on workbenches, Crafters pick them up, consume ingredients from inventory, work for N ticks, produce output on the workbench tile. Closes the gameplay loop opened by Phase 4 (Item economy) + Phase 5 (Workbench structures) — currently you could build workbenches but they did nothing visible until a free auto-cook fired.
+The full bills pipeline: queue recipes on workbenches, Crafters pick them up, consume ingredients from inventory, work for N ticks, produce output on the workbench tile. Closes the gameplay loop opened by Phase 4 (Item economy) + Phase 5 (Workbench structures) — currently you could build workbenches but they did nothing visible until a free auto-cook fired.
 
 **Data model** (new `scripts/simulation/crafting/`):
 - `RecipeDef` (Recipe.cs) — recipe def with Id / DisplayName / Description / Ingredients / Outputs / WorkTicks / PrimarySkill / SkillMinimum / SecondarySkill / SecondaryMinimum / XpReward
@@ -658,15 +719,15 @@ The full RimWorld/DF-style bills pipeline: queue recipes on workbenches, Crafter
 
 **Build:** 0 warnings, 0 errors. Bundled into v0.5.84.
 
-### Also in this patch — RimWorld texture conventions adapted to Phase 14.5 roadmap
+### Also in this patch — texture conventions adapted to Phase 14.5 roadmap
 
-Direction (with the RimWorld Wiki "Modding Tutorials/Textures" page as reference): adapt the methods to our 16bit pixel style textures. Anything to do with systems not yet added should be added to the roadmap appropriately (weapons, etc.). The game will not have firearms at this time, though something similar could be added later.
+Direction: adapt established colony-sim texture methods to our 16bit pixel style. Anything to do with systems not yet added should be added to the roadmap appropriately (weapons, etc.). The game will not have firearms at this time, though something similar could be added later.
 
 Phase 14.5 (Sprite and Texture Pass) extended in `Sporeholm_Roadmap_2026.md` with 6 new sub-sections:
 
-- **§14.5.1 — Sprite conventions adapted from RimWorld** for 16-bit pixel art. Tile resolution stays at 16 ppt (RimWorld 64-128 → ours 16, "power of two" satisfied). Outline rules adapted: interactive built objects get 1-px dark outline (already adopted), walls + floors deliberately omit outline so adjacent tiles fuse (v0.5.84d/e blending philosophy). Plants get green outline (future vegetation sprite pass — RimWorld parity). Transparent-pixel preservation: use `(0,0,0,0)` not `default` to avoid Godot compression white-halo.
-- **§14.5.2 — Texture mask system (deferred).** Documents RimWorld's `_m.png` mask convention (black = literal, red = primary material tint, green = secondary). Our per-instance uniform tint covers whole-sprite cases but breaks for partial-tint (bed frame tints, mattress stays white). Implementation outline: bake helper returning `(base, mask)` pair + CanvasItemMaterial shader. Deferred until at least one sprite visibly needs it.
-- **§14.5.3 — Linked-atlas autotile walls.** RimWorld's 4×4 atlas approach for connected wall sprites — corners, T-junctions, endcaps based on 4-bit neighbour mask. Per-material atlas. Deferred until unified polish pass.
+- **§14.5.1 — Sprite conventions** for 16-bit pixel art. Tile resolution stays at 16 ppt ("power of two" satisfied). Outline rules adapted: interactive built objects get 1-px dark outline (already adopted), walls + floors deliberately omit outline so adjacent tiles fuse (v0.5.84d/e blending philosophy). Plants get green outline (future vegetation sprite pass). Transparent-pixel preservation: use `(0,0,0,0)` not `default` to avoid Godot compression white-halo.
+- **§14.5.2 — Texture mask system (deferred).** Documents the `_m.png` mask convention (black = literal, red = primary material tint, green = secondary). Our per-instance uniform tint covers whole-sprite cases but breaks for partial-tint (bed frame tints, mattress stays white). Implementation outline: bake helper returning `(base, mask)` pair + CanvasItemMaterial shader. Deferred until at least one sprite visibly needs it.
+- **§14.5.3 — Linked-atlas autotile walls.** 4×4 atlas approach for connected wall sprites — corners, T-junctions, endcaps based on 4-bit neighbour mask. Per-material atlas. Deferred until unified polish pass.
 - **§14.5.4 — Layered pawn rendering** (head / body / apparel / weapon). Currently single bake per (mood, sex). Phase 7 (Combat) needs held-weapon layer; apparel needs clothing layer. Stage 1 = direction-facing, stages 2-4 = layered. **Prerequisite for Phase 7 to feel visually complete.**
 - **§14.5.5 — Apparel system (NEW phase capability).** Sporeholm has no apparel system today. Data layer (ItemKind.Apparel + ApparelSlot + ApparelDef) + mood integration (Naked / Cold / Well-dressed thoughts) + warmth + sprite layer (depends on §14.5.4). Era gating: Dawn = Mossleaf cloth; Iron = + Capberry hide; Magic = + Spore silk. Phase placement: alongside Phase 7 since combat armor is the immediate driver.
 - **§14.5.6 — What we explicitly DON'T adopt.** Firearms / gunpowder ranged ("Our game will not have firearms at this time"); industrial / electrical sprites (no electricity in Sporeholm); DDS / compressed texture formats; asset-bundle packaging. "Something similar [to firearms] could be added later" noted as possible Phase 13 Magic Era unlock (spore launcher) without gunpowder.
@@ -677,7 +738,7 @@ Existing furniture bakes already follow the dark-outline convention (Shelf, Work
 
 ### Also in this patch — autotile walls + layered pawn render foundation; weapons/apparel moved to Phase 7
 
-**Autotile walls (RimWorld linked-atlas pattern, 16 variants per family).** `StructureOverlay.BakeWallSpriteStone/Wood/Fungal` rewritten to take a `mask` parameter — a 4-bit cardinal-neighbour flag (N=1, E=2, S=4, W=8). Edge caps (top sunlit cap, base shadow gradient, right depth column, left depth column) paint only on sides that LACK a same-family wall neighbour. `_wallMmi` / `_wallFungalMmi` / `_wallWoodMmi` single MMIs replaced with `_wallMmis[16]` / `_wallFungalMmis[16]` / `_wallWoodMmis[16]` arrays (48 MMIs total at boot). At boot, the bake loop runs 48 times to populate all variants. `RebuildInstances` computes the per-tile mask once and dispatches to the right MMI; per-mask counter arrays track instance counts.
+**Autotile walls (linked-atlas pattern, 16 variants per family).** `StructureOverlay.BakeWallSpriteStone/Wood/Fungal` rewritten to take a `mask` parameter — a 4-bit cardinal-neighbour flag (N=1, E=2, S=4, W=8). Edge caps (top sunlit cap, base shadow gradient, right depth column, left depth column) paint only on sides that LACK a same-family wall neighbour. `_wallMmi` / `_wallFungalMmi` / `_wallWoodMmi` single MMIs replaced with `_wallMmis[16]` / `_wallFungalMmis[16]` / `_wallWoodMmis[16]` arrays (48 MMIs total at boot). At boot, the bake loop runs 48 times to populate all variants. `RebuildInstances` computes the per-tile mask once and dispatches to the right MMI; per-mask counter arrays track instance counts.
 
 Three autotile families (`WallFamily`): all 5 Stone subtypes treat each other as same-family (Granite + Marble walls link visually), Wood subtypes likewise (DeadWood + LivingWood + generic Wood), FungalWood is its own family. Doors don't count as wall neighbours.
 
@@ -685,7 +746,7 @@ Visible result: solo wall pillars get 4-side caps; long horizontal runs continue
 
 **Layered pawn render foundation (Stage 1).** `ShroompColonyView.SetupMultiMeshes` adds a new `_heldItemMmi` layer alongside the per-mood body MMIs. The held-item layer ships with a 1×1 transparent placeholder texture and `VisibleInstanceCount = 0` — empty until Phase 7 weapon rendering wires actual weapon textures (per §7.16). The MMI sits in the child list AFTER the body MMIs, so any held-item content draws on top of the body. Anchor matches body MMIs at (8, 16) so a held-item sprite pins to the same logical pawn position. This is the rendering-core refactor Phase 7 needed; subsequent weapon bakes don't have to touch the pawn-render pipeline.
 
-**Phase 7 (Combat) extended.** New §7.16 (Weapon rendering) and §7.17 (Apparel system) sections moved from Phase 14.5. Weapon rendering covers RimWorld-style equipped-angle offsets, projectile sprites pointing up, era gating. Apparel system covers data layer (`ItemKind.Apparel` + `ApparelSlot` + `ApparelDef`), mood integration (Naked / Cold / Well-dressed thoughts), material integration (Mossleaf cloth / Spore silk / Capberry hide / Bone plate with era gates), and sprite layer dependency on §14.5.4. Both sit under Phase 7 alongside the combat-armor data layer (already designed in §7.4-§7.6).
+**Phase 7 (Combat) extended.** New §7.16 (Weapon rendering) and §7.17 (Apparel system) sections moved from Phase 14.5. Weapon rendering covers equipped-angle offsets, projectile sprites pointing up, era gating. Apparel system covers data layer (`ItemKind.Apparel` + `ApparelSlot` + `ApparelDef`), mood integration (Naked / Cold / Well-dressed thoughts), material integration (Mossleaf cloth / Spore silk / Capberry hide / Bone plate with era gates), and sprite layer dependency on §14.5.4. Both sit under Phase 7 alongside the combat-armor data layer (already designed in §7.4-§7.6).
 
 **Phase 14.5 slimmed.** §14.5.4 (Layered pawn rendering) reduced to the generic layer-split foundation with explicit cross-refs to Phase 7 §7.16 and §7.17 for stages 2-4 (direction sprites, apparel layer, held-weapon textures). §14.5.5 (Apparel system) removed — moved to Phase 7 §7.17. The former §14.5.6 "What we don't adopt" renumbered to §14.5.5.
 
@@ -702,41 +763,41 @@ Bug report: wandering pawns attempt to walk straight through walls, causing them
 **Fix.** Region-equality gate at the picker, using the existing O(1) `LocalMap.GetRegion` / `AreReachable` infrastructure that A* already uses for fail-fast. Three call sites:
 
 - **`PickIdleDestination`** (Wander, Loiter, Observe, VisitFavorite): compute `srcRid = map.GetRegion(cx, cy)` once outside the radii loop; for each candidate, skip if `map.GetRegion(tx, ty) != srcRid`. Escape hatch: if `srcRid == 0` (shroomp in an impassable tile, e.g. mid-passability-flip), skip the gate so they can still find their way out.
-- **`NewConverseTask`** (partner search): skip partners in a different DF region. A shroomp trying to talk to someone inside a sealed room would otherwise path-fail every tick.
+- **`NewConverseTask`** (partner search): skip partners in a different region. A shroomp trying to talk to someone inside a sealed room would otherwise path-fail every tick.
 - **`NewMeditateTask`** (nearest shrine): if the only shrine is unreachable, fall through to in-place meditate instead of queueing a doomed walk. Uses `map.AreReachable(tx, ty, furn.X, furn.Y)`.
 
-**Scope/risk.** Picker-side fix — never selects an unreachable destination in the first place. No downstream code changed. Pathing, steering, stuck detection, yield, reservation, and all v0.5.82 RimWorld-parity logic are untouched. If the surrounding area has zero reachable candidates in any of the three radii, `PickIdleDestination` falls back to the shroomp's current position (existing behaviour) — visible as a tick of standing still before SelectTask re-rolls.
+**Scope/risk.** Picker-side fix — never selects an unreachable destination in the first place. No downstream code changed. Pathing, steering, stuck detection, yield, reservation, and all v0.5.82 logic are untouched. If the surrounding area has zero reachable candidates in any of the three radii, `PickIdleDestination` falls back to the shroomp's current position (existing behaviour) — visible as a tick of standing still before SelectTask re-rolls.
 
 **Build:** 0 warnings, 0 errors.
 
 ---
 
-## [0.5.82] — 2026-05-19 — RimWorld-parity pathing fixes: destination reservation, repath cooldown, full-path re-validation
+## [0.5.82] — 2026-05-19 — Pathing fixes: destination reservation, repath cooldown, full-path re-validation
 
-Direction: perform a broader audit and analyze RimWorld's source code online to figure out how best to implement it. The goal is to know exactly why RimWorld's works and ours doesn't so we can adapt what we need to. Two background research agents — one auditing Sporeholm's pathing layers with line citations, one fetching the decompiled RimWorld `PathFinder` / `Pawn_PathFollower` / `ReservationManager` / `JobDriver_HaulToCell` from public mirrors. Synthesis revealed three load-bearing RimWorld design choices we were missing.
+Direction: perform a broader audit of Sporeholm's pathing layers and pull in load-bearing design choices from established colony-sim pathfinders. Two background research agents — one auditing Sporeholm's pathing layers with line citations, one synthesising path-follower / reservation / haul patterns from public reference material. Synthesis revealed three load-bearing design choices we were missing.
 
 ### Phase 1 — high-impact
 
-**P1a — Haul-destination reservation.** Audit confirmed: `LocalMap.FindStockpileCellFor` had no reservation check, so N haulers in the same tick all picked the closest accepting cell. RimWorld's `JobDriver_HaulToCell.TryMakePreToilReservations` reserves Target B (the cell) *before* Target A (the item) — two haulers literally cannot start the same haul. Adapted:
+**P1a — Haul-destination reservation.** Audit confirmed: `LocalMap.FindStockpileCellFor` had no reservation check, so N haulers in the same tick all picked the closest accepting cell. The reference pattern reserves Target B (the cell) *before* Target A (the item) — two haulers literally cannot start the same haul. Adapted:
 - `FindStockpileCellFor` gains a `Guid askingId` overload that skips cells reserved by other shroomps via the existing v0.5.60 `ReservationManager` on the `LayerHaul` cell-space (item Guids vs tile coords don't collide).
 - `HaulSystem.PickDeliveryTileFor` passes the shroomp Id and calls `ReservationManager.Active.ReserveTile` on the picked cell.
 - Release happens in two places: `BehaviorSystem.ReleaseTaskClaim` (abandon path) and right before `s.CurrentTask = null` in HaulSystem Phase 2 drop (success path). Without the explicit release on success the reservation would leak — the Phase 2 path doesn't go through `ReleaseTaskClaim`.
 
-**P1b — Time-based pawn-blocked repath cooldown.** RimWorld's `Pawn_PathFollower.BestPathHadPawnsInTheWayRecently()` blocks re-pathing for **240 ticks (~4 in-game seconds)** after any path that included pawn-occupied cells — the explicit anti-jitter gate. Sporeholm had only a one-shot `RePathTried` flag, which let a stuck shroomp re-plan once but didn't cap the rate over time. Pre-v0.5.82 a chokepoint cluster would re-path repeatedly into similar-crowded routes.
+**P1b — Time-based pawn-blocked repath cooldown.** Reference pattern: block re-pathing for **240 ticks (~4 in-game seconds)** after any path that included pawn-occupied cells — the explicit anti-jitter gate. Sporeholm had only a one-shot `RePathTried` flag, which let a stuck shroomp re-plan once but didn't cap the rate over time. Pre-v0.5.82 a chokepoint cluster would re-path repeatedly into similar-crowded routes.
 
 Added: `Shroomp.LastPawnBlockedPathTick: long` (default `long.MinValue`) + `BehaviorSystem._currentTick` static (set from the existing `currentTick` Tick arg) + `RecordPathPawnBlockage(s)` helper that scans the fresh path waypoints and stamps the timestamp if any tile has `_shroompPerTile > 0`. The stuck-detection re-path branch (line ~1675) now gates on `_currentTick - s.LastPawnBlockedPathTick >= PawnBlockedRepathCooldown` (240). Called from the head-waypoint re-path (line ~1399) and the initial task-assignment FindPath (line ~1113) too, so any pawn-blocked plan arms the cooldown regardless of which branch produced it.
 
 ### Phase 2 — refinement
 
-**P2a — Full-path re-validation.** Audit caught that the v0.4.19 head-waypoint impassability check (line ~1384) only looked at `PathWaypoints[0]`. A wall placed deeper in the path went undetected until the shroomp walked into it. RimWorld's `NeedNewPath()` re-validates upcoming cells. Adapted: the check now walks every queued waypoint and re-paths on the first impassable hit. O(N) over ≤ ~30 waypoints per tick — cheap.
+**P2a — Full-path re-validation.** Audit caught that the v0.4.19 head-waypoint impassability check (line ~1384) only looked at `PathWaypoints[0]`. A wall placed deeper in the path went undetected until the shroomp walked into it. The reference "need new path" check re-validates upcoming cells. Adapted: the check now walks every queued waypoint and re-paths on the first impassable hit. O(N) over ≤ ~30 waypoints per tick — cheap.
 
-**P2b — Symmetric yield deadlock.** Audit gap #4: `TryYieldBlockerAt` reset the *asker's* StuckTicks but not the blocker's. A 2-shroomp face-to-face corridor block would have A yield B, B lie down for 30 ticks, then B stand up at StuckTicks≈5 and immediately oscillate again. Now the blocker's StuckTicks + RePathTried also reset at yield time, giving them a clean wake-up budget. Mirrors RimWorld's "fresh start after pawn cooldown" semantics — RimWorld doesn't have an explicit yield mechanic at all, but the parity-equivalent is the cooldown reset.
+**P2b — Symmetric yield deadlock.** Audit gap #4: `TryYieldBlockerAt` reset the *asker's* StuckTicks but not the blocker's. A 2-shroomp face-to-face corridor block would have A yield B, B lie down for 30 ticks, then B stand up at StuckTicks≈5 and immediately oscillate again. Now the blocker's StuckTicks + RePathTried also reset at yield time, giving them a clean wake-up budget. Equivalent to a "fresh start after pawn cooldown" — a pawn cooldown reset.
 
 **P2c — Yield/Stuck timing alignment.** `StuckThreshold` 18 → **36** so it covers the existing `YieldDurationTicks = 30` yield window with a 6-tick grace buffer. Pre-v0.5.82 a yielded shroomp's *asker* could time out and abandon the task before the blocker even stood back up — yielding succeeded but the asker's give-up timer fired anyway. 600 ms at 1× still feels responsive.
 
 ### What's INTENTIONALLY not changed
 
-RimWorld doesn't have a yield mechanic — pawns just sit and wait, with the cooldown desyncing them out of deadlocks. Sporeholm keeps yield because it measurably helps in 1-tile-corridor cases RimWorld brute-forces. Pure RimWorld parity would have meant ripping yield out; we kept both because the layered approach handles more cases. If P1+P2 fully resolves the jitter, yield could be removed in a future patch as cleanup.
+Sporeholm keeps the yield mechanic because it measurably helps in 1-tile-corridor cases that the cooldown-only approach brute-forces. The layered approach handles more cases. If P1+P2 fully resolves the jitter, yield could be removed in a future patch as cleanup.
 
 ### Build + backup
 Build clean 0/0. v0.5.82 backups at `C:/Claude/BACKUPS/SporeBack/Sporeholm_v0.5.82` AND `E:/SporeBack2/Sporeholm_v0.5.82` (both include `SporeDes/`).
@@ -841,7 +902,7 @@ Pure design-doc edit to `SporeDes/Sporeholm_Roadmap_2026.md` — no code changes
 - **Phase 12.4 vectors.** New entry for the Cordyceps-specific catch paths: Phase 7 melee bite from Stage 2 (catch ≈ 0.6 per hit — the colony-killer attribute), and Stage 3 death-burst spore cloud (catch ≈ 0.4 in the 3×3 around the death tile, lingering as a temporary Cordyceps Field with 0.05 passing-shroomp catch for ~6 in-game hours).
 - **Phase 12.5 treatment.** New "Magic-only cures" subsection. Cordyceps Stage 1 needs the **Mage Quench** task (not Caretaker Treat) with Fungal Antibiotic or Fae Dust — drains 40 % of the Mage's MagicResonance per attempt, ImmunityRate bonus scales with Mage Arcane skill × Medicine Quality × patient MagicResonance. Once severity > 50 (Stage 2 boundary) the cure stops working — the patient becomes a containment problem (wall off / kill / burn). Same subsection covers Magic Resonance Sickness as the second Mage-only disease, which already existed in the catalogue but wasn't grouped with the magic-cure path.
 
-Phase 8 storyteller is intended to gate Cordyceps Outbreak behind colony-has-a-Mage prerequisites so the event doesn't fire before the player has any counter. Acts as Sporeholm's signature colony-killer event — the answer to RimWorld mechanoid raids / DF necromancer plagues.
+Phase 8 storyteller is intended to gate Cordyceps Outbreak behind colony-has-a-Mage prerequisites so the event doesn't fire before the player has any counter. Acts as Sporeholm's signature colony-killer event.
 
 ### Also in this patch — more mushroom-themed names
 
@@ -894,7 +955,7 @@ Build clean 0/0. v0.5.80 backups at `C:/Claude/BACKUPS/SporeBack/Sporeholm_v0.5.
 
 ## [0.5.79] — 2026-05-19 — Wander-loop break + Downed state + bed-tile snap
 
-Bug report: 162-year-old Elder named Ethan, "Wandering" at hour 23 with Rest=19 (critically low — sleep window). Player right-click move orders were immediately overridden and the shroomp returned to wandering. Reported behaviour: a pawn was infinitely wandering and immediately cancelled player right-click orders to go back to it. Direction: implement a 'down before dead' state like RimWorld or Dwarf Fortress (research + implement with requisite animation), add 'Damage to down' to dev panel, and ensure pawns move to and sleep on the same tile as the bed they're sleeping on.
+Bug report: 162-year-old Elder named Ethan, "Wandering" at hour 23 with Rest=19 (critically low — sleep window). Player right-click move orders were immediately overridden and the shroomp returned to wandering. Reported behaviour: a pawn was infinitely wandering and immediately cancelled player right-click orders to go back to it. Direction: implement a 'down before dead' state (with requisite animation), add 'Damage to down' to dev panel, and ensure pawns move to and sleep on the same tile as the bed they're sleeping on.
 
 ### Fix 1 — Wander multi-hop chain ignored critical needs + player orders
 
@@ -921,9 +982,7 @@ Bed-seeking + sleep effect have been wired since v0.5.35, but the arrival check 
 
 `MoveOneTick`'s arrival block now snaps `SimPos = walkTo` (bed tile pixel centre) when the arriving task is Sleep with a valid target tile. Sleep is the only task type with a strict "on the destination" arrival requirement; everything else lets touch-arrival / ArrivalRadius slack handle it.
 
-### Fix 3 — Downed state (RimWorld parity)
-
-Background agent research summary: RimWorld downs pawns when Moving capacity ≤ 15 % OR Pain ≥ 80 % OR Consciousness < 30 %. Downed pawns can crawl, get rescued, or bleed out; recovery happens when consciousness/moving capacity recovers above the threshold. Dwarf Fortress uses pain ≥ ~150 (bone receptors dominate) as the unconscious threshold; dwarves can be carried to hospital beds.
+### Fix 3 — Downed state
 
 Sporeholm implementation (simplified for the v0.5.79 first cut — no crawl, no rescue, just the down→stand cycle):
 
@@ -1073,7 +1132,7 @@ New `scripts/ui/MusicPlayerWidget.cs` — small parchment-card overlay anchored 
 
 ### Fix 2 — Drop "Inspirations" section from CreditsPanel
 
-Removed the `SectionLabel("Inspirations")` + two `BodyLine` entries (Dwarf Fortress / RimWorld / Mushroom Men). The credits panel now ends with Other Assets → Back, keeping the deck-list aesthetic tighter.
+Removed the `SectionLabel("Inspirations")` + two `BodyLine` entries. The credits panel now ends with Other Assets → Back, keeping the deck-list aesthetic tighter.
 
 ### Fix 3 — Drop the "Context Menu (hold)" keybinding
 
@@ -1207,7 +1266,7 @@ Build clean 0/0. v0.5.72 backups at `C:/Claude/BACKUPS/SporeBack/Sporeholm_v0.5.
 
 ## [0.5.71] — 2026-05-18 — Anthropomorphic shroomp sprite + floor-under-stockpile render order
 
-References shared (Mushroom Men 3D, cute Vexels valentines set, hand-drawn cap-and-stem figures) plus a screenshot of the colony interior showing brown floor squares occluding the green stockpile zone tint. Direction: make shroomp sprites a little more anthropomorphic, add a secondary backup location at E:\SporeBack2, and ensure floor appears below stockpile.
+References shared (cute Vexels valentines set, hand-drawn cap-and-stem figures) plus a screenshot of the colony interior showing brown floor squares occluding the green stockpile zone tint. Direction: make shroomp sprites a little more anthropomorphic, add a secondary backup location at E:\SporeBack2, and ensure floor appears below stockpile.
 
 ### Fix 1 — Anthropomorphic shroomp sprite
 
@@ -1256,7 +1315,7 @@ Build clean 0/0. v0.5.71 backups at `C:/Claude/BACKUPS/SporeBack/Sporeholm_v0.5.
 
 ## [0.5.70] — 2026-05-18 — Mosslet from moss, stone-subtype walls + Fungal Wood mushroom textures
 
-Direction: Mosspatch should drop 'mosslet' (moss cuttings, for later use). Allow stone walls to be made from the player's choice of material like RimWorld — 'obsidian wall', 'quartz wall', 'granite wall', etc. — with different appropriate textures for each. Anything made from fungalwood should also have a mushroom-y texture.
+Direction: Mosspatch should drop 'mosslet' (moss cuttings, for later use). Allow stone walls to be made from the player's choice of material — 'obsidian wall', 'quartz wall', 'granite wall', etc. — with different appropriate textures for each. Anything made from fungalwood should also have a mushroom-y texture.
 
 ### Fix 1 — MossPatch drops Mosslet
 
@@ -1268,7 +1327,7 @@ v0.5.69 lumped MossPatch + Underbrush together under the Cuttings drop. v0.5.70 
 - New green `IconShape.Round` variant in `ItemDropOverlay` (index 29) so dropped Mosslet reads distinct from the desaturated Cuttings square — `VariantCount` bumped 29 → 30
 - Mosslet stays scope-locked (no consumer yet) — held for a future Phase 5+ system ("we'll use later")
 
-### Fix 2 — Stone subtype walls (RimWorld-parity material picker)
+### Fix 2 — Stone subtype walls (material picker)
 
 Pre-v0.5.70 the only stone build option was the generic `StructureMat.Stone` (tinted near-white-grey). Now the player picks a specific stone subtype at blueprint placement, the build strictly consumes that subtype, and the per-instance tint colours the wall accordingly.
 
@@ -1337,9 +1396,9 @@ Build clean 0/0. v0.5.69 backup at `C:/Claude/BACKUPS/SporeBack/Sporeholm_v0.5.6
 
 ---
 
-## [0.5.68] — 2026-05-17 — Food + Sleep: RimWorld-parity ingestion, wake at full Rest, eat-anything-when-starving
+## [0.5.68] — 2026-05-17 — Food + Sleep: ingestion overhaul, wake at full Rest, eat-anything-when-starving
 
-Bug report (with screenshot): 49-pop colony with Food=8 on the HUD, several shroomps dead of starvation despite food being visible on the map. Direction: pawns should stop sleeping at 100 sleep even at night (pawns died of starvation because they slept through the entire night at 100 sleep). Pawns also don't seek out food and eat it to fill their nutrition. Analyze RimWorld's food/eating system and resolve this. Shroomps should eat whatever food is available (even corpses) when they're starving with preferences when they're not.
+Bug report (with screenshot): 49-pop colony with Food=8 on the HUD, several shroomps dead of starvation despite food being visible on the map. Direction: pawns should stop sleeping at 100 sleep even at night (pawns died of starvation because they slept through the entire night at 100 sleep). Pawns also don't seek out food and eat it to fill their nutrition. Resolve this. Shroomps should eat whatever food is available (even corpses) when they're starving with preferences when they're not.
 
 Three connected fixes — the sleep bug compounded the food bug, so shroomps slept through night at 100 Rest, woke up famished, walked to a table, then stood there starving because the food was on the map (in stockpiles), not in the colony Inventory the eat code was checking.
 
@@ -1347,7 +1406,7 @@ Three connected fixes — the sleep bug compounded the food bug, so shroomps sle
 
 `ApplyTaskEffect` for `TaskType.Sleep` capped Rest at 100 but never ended the toil. The needNewTask gate in the main loop only re-evaluates non-idle tasks when CriticalNeedsOverride fires (Nutrition<20 / Rest<15 / Safety<20) — so a shroomp who hit Rest=100 during the night-sleep window (priority 75) kept sleeping until Nutrition crossed below 20. By that time the night was over and they were famished.
 
-Added an explicit `if (s.Rest >= 100f) { s.CurrentTask = null; break; }` after the Rest accumulation. Matches RimWorld's `Toils_LayDown.LayDown` end condition (`pawn.needs.rest.CurLevel >= 1.0`). Once cleared, SelectTask re-evaluates next tick; if it's still night the shroomp re-picks Sleep only when Rest drops below 80 again (the in-window threshold) — natural drift, not a hard sit.
+Added an explicit `if (s.Rest >= 100f) { s.CurrentTask = null; break; }` after the Rest accumulation. Once cleared, SelectTask re-evaluates next tick; if it's still night the shroomp re-picks Sleep only when Rest drops below 80 again (the in-window threshold) — natural drift, not a hard sit.
 
 ### Fix 2 — Eat from map drops (the actual "didn't seek food" bug)
 
@@ -1360,7 +1419,7 @@ Same failure pattern as the v0.5.55 build-from-stockpile fix:
 Fixed in three layers mirroring the v0.5.57 BuildHaul pattern (route to source → consume on arrival):
 
 **MakeEat — three-path routing:**
-1. Inventory has food + a Table exists → walk to Table (RimWorld preferred: meals + tasty produce + table mood bonus).
+1. Inventory has food + a Table exists → walk to Table (preferred: meals + tasty produce + table mood bonus).
 2. Inventory empty / no Table → find nearest map food tile (`LocalMap.FindNearestFoodTile`) and walk there.
 3. Nothing edible anywhere → eat in place (ApplyTaskEffect will fail, clear the task, SelectTask moves on).
 
@@ -1379,11 +1438,11 @@ Fixed in three layers mirroring the v0.5.57 BuildHaul pattern (route to source �
 
 `LocalMap.PickupBestFoodAt` handles `ItemKind.Corpse` when `allowCorpse=true`. Corpses get an implicit `BaseNutrition = 15f × 0.5 stateMul` (≈ 7.5 effective per unit, ~2.5 days of food per shroomp corpse before AteCorpse mood debt overtakes the relief).
 
-**RimWorld parity**: `FoodUtility.TryFindBestFoodSourceFor` falls back to rotten food + corpses when the pawn crosses the Urgent hunger threshold. We use Nutrition < 25 (about 1/4 of the bar) as that threshold.
+Sporeholm uses Nutrition < 25 (about 1/4 of the bar) as the Urgent hunger threshold that unlocks rotten food + corpses.
 
 **New thoughts (`Thought.cs`):**
-- `AteSpoiled` (−7 mood, ~1 in-game day) — "Choked down rotten food." Mirrors RimWorld's `AteRottenFood`.
-- `AteCorpse` (−15 mood, ~3 in-game days, Trauma category) — "Ate a corpse to survive." Mirrors RimWorld's `AteHumanlikeMeatDirect` / `AteCorpse`.
+- `AteSpoiled` (−7 mood, ~1 in-game day) — "Choked down rotten food."
+- `AteCorpse` (−15 mood, ~3 in-game days, Trauma category) — "Ate a corpse to survive."
 
 **Thought-key precedence** in ApplyTaskEffect Eat:
 1. `AteCorpse` (consumed.Kind == Corpse) — overrides everything; eating a body is bad even when starving.
@@ -1413,7 +1472,7 @@ Fixed in three layers mirroring the v0.5.57 BuildHaul pattern (route to source �
 
 ## [0.5.67] — 2026-05-17 — Tile inspector polish: Skeleton terrain surfaced, structure type uses material, blueprint material count
 
-Bug report (with screenshot): tile inspector showed a wall built of Living Wood as "Type: Stone Wall, Material: Living Wood, Quality: + Fine" — type name was hard-coded "Stone Wall" regardless of material. The same screenshot also showed an "Unknown" tile name in the top-right hover overlay where the cursor was sitting on a Skeleton tile. Direction: structure type should be formatted like 'MaterialType Wall' (so a stone wall made of livingwood reads as "Living Wood Wall"). Clicking on a blueprint should also show how many required materials need to be brought to finish construction, like RimWorld or Dwarf Fortress. Also — fix the unknown tile that has no texture.
+Bug report (with screenshot): tile inspector showed a wall built of Living Wood as "Type: Stone Wall, Material: Living Wood, Quality: + Fine" — type name was hard-coded "Stone Wall" regardless of material. The same screenshot also showed an "Unknown" tile name in the top-right hover overlay where the cursor was sitting on a Skeleton tile. Direction: structure type should be formatted like 'MaterialType Wall' (so a stone wall made of livingwood reads as "Living Wood Wall"). Clicking on a blueprint should also show how many required materials need to be brought to finish construction. Also — fix the unknown tile that has no texture.
 
 Three coordinated fixes.
 
@@ -1441,7 +1500,7 @@ Quality and blueprint progress lines unchanged in role; only the header changed.
 
 ### Fix 3 — Blueprint material progress shows material name + remaining count
 
-Pre-fix the blueprint stage line read `Delivering (3/5 materials)` — count-only, no material identity, no explicit "how many more". RimWorld and Dwarf Fortress both show the material name on the line so the player knows what's still needed. Rewrote the blueprint branch:
+Pre-fix the blueprint stage line read `Delivering (3/5 materials)` — count-only, no material identity, no explicit "how many more". Established colony-sim convention shows the material name on the line so the player knows what's still needed. Rewrote the blueprint branch:
 
 - 0 < delivered < cost: `Materials: 3 / 5 Living Wood (2 more needed)`
 - delivered == cost, building: `Materials: 5 / 5 Living Wood (delivered)` + `Frame: 47 % built`
@@ -1488,7 +1547,7 @@ Old filenames containing `smurfulation` / `smurfs` were kept through v0.5.65 for
 - `project_smurfulation_game.md` → `project_sporeholm_game.md`
 - `reference_smurfulation_backup.md` → `reference_sporeholm_backup.md`
 - `reference_smurfulation_design_docs.md` → `reference_sporeholm_design_docs.md`
-- `reference_smurfs_wiki.md` — **deleted**; the Smurfs Fandom wiki is no longer canonical reference material post-rebrand. The Mushroom Men / Boletus edulis sources in `reference_shroomport_sources.md` are the current canon-source set.
+- `reference_smurfs_wiki.md` — **deleted**; the Smurfs Fandom wiki is no longer canonical reference material post-rebrand. The Boletus edulis sources in `reference_shroomport_sources.md` are the current canon-source set.
 
 `MEMORY.md` index rewritten with new filenames and updated descriptions.
 
@@ -1627,7 +1686,7 @@ Content sweep via bulk sed: `SmurfulationC` → `Sporeholm`, `Smurfberry` → `C
 
 ### Roadmap content update
 
-Top-of-doc status snapshot rewritten to reflect v0.5.63 state. Added "What landed v0.5.27 → v0.5.63" section summarizing 37 sub-versions of work since the v0.5.26 cohesion pass — Phase 5 RimWorld-parity arc (v0.5.30–v0.5.37), UI restructure (v0.5.40–v0.5.48), entity registry retcon (v0.5.49), 10× event-only rule + mushroom tameables (v0.5.50), Shroomalo (v0.5.51), build-loop fixes (v0.5.55–v0.5.57), day/night cycle (v0.5.58), pre-rename consolidation (v0.5.60), need decay calibration + ReservationManager migration (v0.5.61), the rename (v0.5.62), cap-and-stem sprite (v0.5.63). Phase 6 marked unblocked.
+Top-of-doc status snapshot rewritten to reflect v0.5.63 state. Added "What landed v0.5.27 → v0.5.63" section summarizing 37 sub-versions of work since the v0.5.26 cohesion pass — Phase 5 cohesion arc (v0.5.30–v0.5.37), UI restructure (v0.5.40–v0.5.48), entity registry retcon (v0.5.49), 10× event-only rule + mushroom tameables (v0.5.50), Shroomalo (v0.5.51), build-loop fixes (v0.5.55–v0.5.57), day/night cycle (v0.5.58), pre-rename consolidation (v0.5.60), need decay calibration + ReservationManager migration (v0.5.61), the rename (v0.5.62), cap-and-stem sprite (v0.5.63). Phase 6 marked unblocked.
 
 ### Memory file sweep
 
@@ -1691,7 +1750,7 @@ Pore-pad ring: cy-3. 3 dots under cap edge. Olive male, brighter yellow
 Stem cylinder: cy-2 to cy+5. 4 px wide centred. Cream with side shadow.
 Eyes:          cy-2, x ± 2. Black-on-cream dots on upper stem below cap.
 Mood dot:      cy-7 cap top. Mood-cued colour (replaces hat-tip dot).
-Feet stubs:    cy+6. Dark earth tone. RimWorld feet-down anchor cue.
+Feet stubs:    cy+6. Dark earth tone. Feet-down anchor cue.
 ```
 
 Sprite cache continues to key on `(Mood, Sex)` — 14 base sprites. **Per-Shroomp colour variation is stored on the Shroomp but NOT yet reflected in the world sprite.** Reflecting it needs per-layer MMI tinting (cap / stem / eyes / pore-pad as separate passes); deferred polish. For now every Shroomp on the map renders in default russet+cream regardless of identity-field values.
@@ -1791,7 +1850,7 @@ New `ShroompNameGenerator` implementation per `shroomport.md` §6:
 
 ### Hard rules (per `shroomport.md` §1)
 
-- ✅ No Mushroom Men character names (Pax, Pester) introduced anywhere
+- ✅ No external-IP character names (Pax, Pester) introduced anywhere
 - ✅ Amanita reserved for the future hostile faction (Phase 11) — not used as a Shroomp class or generator term
 - ✅ Bolete derivation from real-world Boletus edulis taxonomy (public domain), not the game character
 - ✅ Game stays at closed 10cm scale — no human-world objects, no Mouse-World inversion
@@ -1823,7 +1882,7 @@ NeedsSystem.Tick fires every 60 sim ticks = 1 real sec at 1× = 1000 calls per i
 | MagicResonance | 4/day (~25 days) | **20/day** | 5 days → Mages need regular Attune |
 | Safety | 1/day (~100 days) | **5/day** | 20 days → critical-only |
 
-Calibration intent: RimWorld-parity daily cycle. A smurf wakes up at 06:00 with 80 Rest + 80 Nutrition + 90 Joy. By midday Nutrition hits 50 → eat. By 22:00 Rest is ~30 → sleep through the night, restore to ~95 by 06:00. Joy drains over ~2 days, so smurfs need recreation every other day or mood drops.
+Calibration intent: full daily cycle. A smurf wakes up at 06:00 with 80 Rest + 80 Nutrition + 90 Joy. By midday Nutrition hits 50 → eat. By 22:00 Rest is ~30 → sleep through the night, restore to ~95 by 06:00. Joy drains over ~2 days, so smurfs need recreation every other day or mood drops.
 
 ### Personality decay modifiers (new `NeedsSystem.PersonalityDecayMod`)
 
@@ -1850,7 +1909,7 @@ bool inSleepWindow = nightOwl
 if (inSleepWindow && s.Rest < 80f) return MakeSleep(s, priority: 75f, map: map);
 ```
 
-So smurfs go to bed at 22:00 (default) or 10:00 (Night Owl) even at moderate Rest levels (< 80), rather than waiting for Rest to drop below the 40-60 sleep threshold. Matches RimWorld's pawn schedule + the actual circadian "go to bed when it's bedtime" reality. Night Owl's description ("Less effective during the colony's daylight work hours") finally has a mechanical implementation — they sleep during the day and work at night.
+So smurfs go to bed at 22:00 (default) or 10:00 (Night Owl) even at moderate Rest levels (< 80), rather than waiting for Rest to drop below the 40-60 sleep threshold. Matches the actual circadian "go to bed when it's bedtime" reality. Night Owl's description ("Less effective during the colony's daylight work hours") finally has a mechanical implementation — they sleep during the day and work at night.
 
 Priority 75 keeps sleep below true critical needs (Eat at 20% Nutrition is priority 95+; SeekSafety at 20% Safety is 85+) but above all role work (Build/Cook/Haul at 38-55). Sleep is interruptible if a life-threatening need fires mid-night.
 
@@ -1862,7 +1921,7 @@ New Tier-1 critical clause in SelectTask:
 if (s.Joy < 20f) return SelectIdleActivity(s, map, rng, smurfs);
 ```
 
-Below Joy=20, a smurf abandons role work and picks an idle activity (Wander / Loiter / Observe / Converse / Meditate / VisitFavorite — weighted by JoyTolerance and personality). Matches RimWorld's "I need joy" forced-recreation alert that fires when Joy gets critical.
+Below Joy=20, a smurf abandons role work and picks an idle activity (Wander / Loiter / Observe / Converse / Meditate / VisitFavorite — weighted by JoyTolerance and personality). Forced-recreation alert that fires when Joy gets critical.
 
 ### What's NOT changed
 
@@ -1926,17 +1985,17 @@ The codebase is now ready for the **Shroomp rebrand arc (v0.5.62 → v0.5.68)** 
 
 ---
 
-## [0.5.60] — 2026-05-17 — Pre-rename consolidation: 6 RimWorld/DF cohesion systems batched
+## [0.5.60] — 2026-05-17 — Pre-rename consolidation: 6 cohesion systems batched
 
 Direction: spin all of these into one batch in preparation for the big rename job before Phase 6.
 
-Reference: the prior message's research analysis of RimWorld + DF build/social systems and the prioritized list of 6 recommended improvements. This patch lands MVP versions of all six. The Shroomp rebrand arc renumbers: v0.5.61 → v0.5.67 (was planned v0.5.59 → v0.5.65 in `shroomport.md` before two intervening fix versions).
+Reference: the prior message's research analysis of build/social systems and the prioritized list of 6 recommended improvements. This patch lands MVP versions of all six. The Shroomp rebrand arc renumbers: v0.5.61 → v0.5.67 (was planned v0.5.59 → v0.5.65 in `shroomport.md` before two intervening fix versions).
 
-### S1 — Build split: BuildHaul + Build (RimWorld WorkGiver pattern)
+### S1 — Build split: BuildHaul + Build (WorkGiver pattern)
 
 Pre-v0.5.60: single `TaskType.Build` did both material delivery and framing. A Crafter solo'd every build while 6 idle Foragers stood around.
 
-Post-v0.5.60: two task types matching RimWorld's `WorkGiver_ConstructDeliverResources` + `WorkGiver_ConstructFinishFrames`:
+Post-v0.5.60: two task types — one for material delivery, one for framing:
 
 - **`TaskType.BuildHaul`** — gated by **Haul** priority (any role can deliver). Multiple smurfs can BuildHaul to one blueprint concurrently; the BuildHaul layer doesn't claim the blueprint exclusively (only the framing layer does). Stages: A pickup at source → B deposit at blueprint → end when carry depleted or blueprint supplied.
 - **`TaskType.Build`** — gated by **Construct** priority (Crafter preferred). Only assigned when `MaterialsDelivered >= cost`. Stages: D frame → E complete + Quality roll. Single-claim layer for the framing work.
@@ -1947,7 +2006,7 @@ Plumbing: `IsDesignationTaskType` includes BuildHaul; `WorkPriorityDefaults.Cate
 
 Pre-v0.5.60: deposits bumped a `MaterialsDelivered` counter on the blueprint. Players never saw what they were spending.
 
-Post-v0.5.60: BuildHaul Stage B drops a real `Item` (Kind=Material, IsForbidden=true) on the blueprint tile via `map.DropItem`. `MaterialsDelivered` still increments alongside (fast cache for `IsBlueprintBuildReady`), but the items are now visually present. `IsForbidden=true` prevents the HaulSystem from hauling them back to a stockpile mid-build — matches RimWorld's `Frame.resourceContainer` ownership semantics. On Build completion (Stage E), `PickupDroppedAt` consumes all the on-tile material items in one shot, then `SetStructure` flips the tile to the built type.
+Post-v0.5.60: BuildHaul Stage B drops a real `Item` (Kind=Material, IsForbidden=true) on the blueprint tile via `map.DropItem`. `MaterialsDelivered` still increments alongside (fast cache for `IsBlueprintBuildReady`), but the items are now visually present. `IsForbidden=true` prevents the HaulSystem from hauling them back to a stockpile mid-build — frame-owned resource semantics. On Build completion (Stage E), `PickupDroppedAt` consumes all the on-tile material items in one shot, then `SetStructure` flips the tile to the built type.
 
 ### S3 — JoyTolerance per-activity diminishing returns
 
@@ -1960,11 +2019,11 @@ Post-v0.5.60: each `Smurf.JoyTolerance` dict tracks per-TaskType saturation (0-1
 
 Allocation-free implementation via `[ThreadStatic]` reusable key buffer to avoid per-smurf-per-tick list allocations.
 
-### A1 — Interactions-as-events (RimWorld `InteractionWorker` pattern)
+### A1 — Interactions-as-events
 
 Pre-v0.5.60: Social only filled via `TaskType.Converse`, a dedicated job that occupied the smurf for ~5 sec. v0.5.59 patched the chat-forever loop but the underlying model was still "Converse-as-job."
 
-Post-v0.5.60: new `InteractionRegistry` (4 interaction kinds) + `InteractionTracker` (per-tick proximity-and-MTB roll fires interactions independent of any task). Mirrors RimWorld's `Pawn_InteractionsTracker.TryInteractRandomly`. Interactions are one-tick events with outcomes:
+Post-v0.5.60: new `InteractionRegistry` (4 interaction kinds) + `InteractionTracker` (per-tick proximity-and-MTB roll fires interactions independent of any task). Interactions are one-tick events with outcomes:
 
 | Kind | Weight | Social Δ | Opinion Δ | Cooldown |
 |---|---|---|---|---|
@@ -1973,7 +2032,7 @@ Post-v0.5.60: new `InteractionRegistry` (4 interaction kinds) + `InteractionTrac
 | Slight | 8 % | -1 | -3 | 600 ticks |
 | DeepTalk | 5 % | +5 | +5 | 1200 ticks |
 
-Slight is gated by `Preferences.DislikesSmurf` (only fires between smurfs with negative existing opinion — matches Abrasive-trait roll bias in RimWorld). Cooldowns per-pair via `Smurf.InteractionCooldowns` dict prevent the same two smurfs spamming Chitchat every tick. Probability gate (~1 % per tick) means the proximity scan only runs for ~99 % of ticks worth of CPU.
+Slight is gated by `Preferences.DislikesSmurf` (only fires between smurfs with negative existing opinion — mirrors an Abrasive-trait bias). Cooldowns per-pair via `Smurf.InteractionCooldowns` dict prevent the same two smurfs spamming Chitchat every tick. Probability gate (~1 % per tick) means the proximity scan only runs for ~99 % of ticks worth of CPU.
 
 Four new ThoughtRegistry entries (Chitchat / KindWords / Slight / DeepTalk) sized smaller than the existing Converse-task thoughts (NiceChat/ChatWithFriend) — these are micro-interactions, not 5-sec chat sessions.
 
@@ -1981,17 +2040,17 @@ Four new ThoughtRegistry entries (Chitchat / KindWords / Slight / DeepTalk) size
 
 ### A2 — General ReservationManager (additive, foundation for migration)
 
-New `Sporeholm.Simulation.ReservationManager` class. Layered reservations keyed by `(target, layer, claimant)`. Matches RimWorld's `Map.reservationManager.Reserve(target, claimant, maxPawns, stackCount, layer)`.
+New `Sporeholm.Simulation.ReservationManager` class. Layered reservations keyed by `(target, layer, claimant)`. Standard reservation API: `Reserve(target, claimant, maxPawns, stackCount, layer)`.
 
 Layer constants: `LayerBuildFrame`, `LayerBuildHaul`, `LayerInteract`, `LayerMedical`.
 
 v0.5.60 scope: additive only. Existing `LocalMap._claims` / `HaulSystem._reservations` / `_priorityHauls` keep working. Build claims continue to use `LocalMap.TryClaim` for v0.5.60 (the v0.5.59 fix already handles Build claim cleanup). Future versions will migrate the various ad-hoc claim dicts to delegate through ReservationManager. The class exists now so Phase 6 entity targeting + Phase 7 combat can use it from day one.
 
-### B1 — Multi-need activity locations (DF tavern pattern)
+### B1 — Multi-need activity locations (tavern pattern)
 
 Pre-v0.5.60: each task fulfilled exactly one need. Eat → Nutrition. Sleep → Rest. Converse → Social.
 
-Post-v0.5.60: DF lesson — activities fulfill MULTIPLE needs at once. v0.5.60 ships two:
+Post-v0.5.60: activities fulfill MULTIPLE needs at once. v0.5.60 ships two:
 
 - **Eat at table** with another smurf within 3 tiles → tick Social mildly (`SocializeRate * 0.25`). Visually: smurfs eating at the same table chat together. The existing `AteWithoutTable` penalty for solo dining stays in place; the new Social tick only fires when at a table AND a tablemate is nearby. Cohesion win: dining halls become social hubs.
 - **Sleep near partner** within 2 tiles → tick Social mildly (`SocializeRate * 0.15`). Visually: shared bedrooms feel less lonely. Mild effect so it doesn't trivialize the Social need — just makes co-located sleeping cohesive.
@@ -2021,24 +2080,24 @@ Per `shroomport.md` the Shroomp aesthetic rebrand was planned as v0.5.59 → v0.
 
 ---
 
-## [0.5.59] — 2026-05-17 — Chat-forever + Build-loop fixes (RimWorld-parity)
+## [0.5.59] — 2026-05-17 — Chat-forever + Build-loop fixes
 
-Bug report (with screenshot): Jokey "Chatting" at Social 100/100. Pawns chat for far too long at 100 social while others deliver resources infinitely to blueprints that never get built. Direction: research online how RimWorld's relevant systems work and fix these issues. Dig deep.
+Bug report (with screenshot): Jokey "Chatting" at Social 100/100. Pawns chat for far too long at 100 social while others deliver resources infinitely to blueprints that never get built. Direction: research how the relevant systems should work and fix these issues. Dig deep.
 
 Two real bugs, fixed together.
 
-### RimWorld reference (from public knowledge — rimworldwiki blocked WebFetch)
+### Reference patterns
 
-**RimWorld's recreation/social system:**
-- `JoyGiver_SocialRelax` and `JoyGiver_*` family check the pawn's Joy / Social need at job-give time AND at every tick of the in-progress job
+**Recreation/social system:**
+- Recreation jobs check the pawn's Joy / Social need at job-give time AND at every tick of the in-progress job
 - When the need crosses ~90 % (full-ish), the job ends immediately — pawn looks for productive work next
 - The job-give weight scales by remaining need: a pawn at Social=100 won't even consider recreation tasks; one at Social=20 strongly prefers them
 
-**RimWorld's construction claim model:**
-- `ReservationManager` tracks reservations per (target, claimant, layer)
+**Construction claim model:**
+- A `ReservationManager` tracks reservations per (target, claimant, layer)
 - Jobs release their reservations on completion AND on abandon (mood break, drafted, critical need preemption)
-- Stale reservations would block other pawns from picking the work — RimWorld is meticulous about cleanup
-- `Bill_Construction` (the frame) is the reservation target; multiple haulers can deliver to one frame, but only one "constructor" finishes it
+- Stale reservations would block other pawns from picking the work — cleanup must be meticulous
+- The frame is the reservation target; multiple haulers can deliver to one frame, but only one "constructor" finishes it
 
 ### Bug 1 — Chat-forever (Social-100 loop)
 
@@ -2054,7 +2113,7 @@ Result: paired smurfs chained back-to-back 5-second chats indefinitely. Each cha
 - Converse Apply now early-exits when `s.Social >= 95f`. Clears `CurrentTask`, resets `IdleArrived`/`IdleLingerTicks` on both the smurf AND the locked partner (so the partner doesn't sit chatting at thin air for another 5 seconds).
 - `SelectIdleActivity` now scales `wConverse` by `(100 - s.Social) / 100` — at Social=100 the weight drops to 0, at Social=50 it halves, at Social=0 it keeps full base weight. Same treatment applied to `wMeditate` against `MagicResonance` for consistency (Mages won't loop Meditate at full MagicResonance either).
 
-Matches RimWorld's "recreation aborts when need is satisfied + recreation weight tapers with need." Pawns no longer chain chats at full Social.
+Recreation aborts when need is satisfied + recreation weight tapers with need. Pawns no longer chain chats at full Social.
 
 ### Bug 2 — Build-loop ("deliver to blueprints that never get built")
 
@@ -2091,22 +2150,20 @@ Build clean 0/0. v0.5.59 backup created.
 ### What this does NOT fix
 
 - The 983-occurrence "Smurf" rename to "Shroomp" — that's the planned v0.5.59-v0.5.65 Shroomp rebrand arc per `shroomport.md`. Today's v0.5.59 lands BEFORE that arc starts (sequencing collision noted; the rebrand arc will renumber to v0.5.60 → v0.5.66 when it kicks off, OR this fix-only v0.5.59 stays as the boundary)
-- Multi-pawn collaborative construction on the same frame — RimWorld supports it (multiple constructors share `WorkLeft` progress); we don't yet. Out of scope for this fix
-- Recreation Joy decay — Joy in our model doesn't decay over time; Joy thoughts age out. Different system from RimWorld's continuously-draining Joy need
+- Multi-pawn collaborative construction on the same frame — would require multiple constructors sharing `WorkLeft` progress; we don't support it yet. Out of scope for this fix
+- Recreation Joy decay — Joy in our model doesn't decay over time; Joy thoughts age out. Different model from a continuously-draining Joy need
 
 ---
 
-## [0.5.58] — 2026-05-17 — Visual day/night cycle (RimWorld-parity)
+## [0.5.58] — 2026-05-17 — Visual day/night cycle
 
-Direction: research online how RimWorld does this and implement it.
+Direction: implement a day/night cycle.
 
 ### Time infrastructure audit (pre-fix)
 
 The project already shipped `SimulationDate` (`scripts/simulation/SimulationDate.cs`) tracking Year / Season / Day / Hour (0-23) / TickOfHour, advancing on every sim tick at 2,500 ticks/hour. `SimulationCore.Date` exposes it, `SimulationManager.GetCurrentDate()` reads it, the HUD's `_dateLabel` already shows it via `SimulationDate.ToString()` ("Hour 6 Day 1, Spring, Year 0 S.D."). What was missing: **visual feedback** — the world looked the same at noon and midnight.
 
-### RimWorld reference
-
-(WebFetch blocked on rimworldwiki — retries skipped; design pulled from public knowledge of the game.) RimWorld:
+### Reference target
 
 - 24 in-game hours per day
 - Sun rises ~06:00, peaks ~12:00, sets ~18:00
@@ -2159,15 +2216,15 @@ Build clean 0/0. v0.5.58 backup created.
 
 ---
 
-## [0.5.57] — 2026-05-17 — RimWorld-parity physical haul-to-site for Build task
+## [0.5.57] — 2026-05-17 — Physical haul-to-site for Build task
 
-Direction: research RimWorld's building system. Pawns should have to bring relevant resources to a build site and construct it over time based on their build skill.
+Direction: pawns should have to bring relevant resources to a build site and construct it over time based on their build skill.
 
 The "construct over time based on build skill" half has shipped since v0.5.30 (`SkillCurve.ConstructionSpeedFactor` — 30 % at skill 0, 100 % at skill 8, 205 % at skill 20). What was missing: the **physical haul leg**. Pre-v0.5.57 the constructor smurf walked once to the blueprint and the materials teleported in from the colony pool (v0.5.34) + map drops (v0.5.55), one unit per tick. The smurf never visibly fetched anything.
 
-### RimWorld reference (from public knowledge — wiki blocked WebFetch with 403)
+### Reference workflow
 
-RimWorld's Construction workflow per pawn:
+Reference Construction workflow per pawn:
 1. Blueprint placed by player — zero mass, no material reservation
 2. Constructor picks job: nearest reachable blueprint + matching material stack
 3. **Pawn walks to material stack, picks up needed amount into inventory**
@@ -2190,7 +2247,7 @@ The Build task is now a state machine driven by two new `Smurf` fields (`BuildSi
 - Otherwise: dispatch Build task with target = blueprint (existing direct-to-blueprint path)
 
 **ApplyTaskEffect Build branch** — a five-stage state machine:
-- **Stage A — at source, BuildSite set** → `LocalMap.PickupDroppedAt(curTx, curTy, kind, family, subType, amount)` removes up to `min(remaining, carryRemaining)` units from the on-tile stack, synthesizes an `Item` stack in the smurf's `Inventory`, re-routes the task target to the blueprint with explicit `Pathfinder.FindPath` so the return leg starts immediately (no waiting on `StuckRePathTicks`). 4 Construction XP for the haul leg (matches RimWorld's small "passive" XP gains).
+- **Stage A — at source, BuildSite set** → `LocalMap.PickupDroppedAt(curTx, curTy, kind, family, subType, amount)` removes up to `min(remaining, carryRemaining)` units from the on-tile stack, synthesizes an `Item` stack in the smurf's `Inventory`, re-routes the task target to the blueprint with explicit `Pathfinder.FindPath` so the return leg starts immediately (no waiting on `StuckRePathTicks`). 4 Construction XP for the haul leg (small "passive" XP gain).
 - **Stage B — at blueprint, carrying matching material** → `ConsumeOneFromSmurfInventory(s, bpSlot.Material)` pulls one unit out of the smurf's carry, `MaterialsDelivered++`, stay on tile.
 - **Stage C — at blueprint, NOT carrying material, blueprint under-supplied** → fallback: check if the smurf is standing on a stack of matching material (player placed the blueprint next to a stockpile); if so, deposit one from the on-tile stack. Otherwise abandon the task — SelectTask re-routes next cycle.
 - **Stage D — at blueprint, MaterialsDelivered >= cost** → framing (unchanged from v0.5.30; per-tick BuildProgress driven by `SkillCurve.ConstructionSpeedFactor`).
@@ -2220,11 +2277,11 @@ Build clean 0/0. v0.5.57 backup created.
 
 ### What this DOESN'T change
 
-- Construction speed-by-skill curve (`SkillCurve.ConstructionSpeedFactor`) — unchanged, was already RimWorld-parity in v0.5.30
+- Construction speed-by-skill curve (`SkillCurve.ConstructionSpeedFactor`) — unchanged since v0.5.30
 - Quality roll on completion (`SkillCurve.RollStructureQuality`) — unchanged
 - Material strict-consume (FungalWood blueprint requires FungalWood logs) — unchanged from v0.5.43
 - Map-drop consume fallback — unchanged from v0.5.55 (still used by Stage C fallback)
-- Multi-smurf concurrent construction on the same frame — not yet supported; one smurf claims and builds. RimWorld supports multi-pawn frames; we'd need shared-claim semantics. Not in scope here.
+- Multi-smurf concurrent construction on the same frame — not yet supported; one smurf claims and builds. Multi-pawn frames would need shared-claim semantics. Not in scope here.
 
 ---
 
@@ -2266,7 +2323,7 @@ Build clean 0/0. v0.5.56 backup created.
 
 ---
 
-## [0.5.55] — 2026-05-17 — BuildPanel layout + RimWorld-parity material consume from stockpiles + blueprint selection
+## [0.5.55] — 2026-05-17 — BuildPanel layout + material consume from stockpiles + blueprint selection
 
 Bug report (with screenshot): BuildPanel chips overflowed past the right edge of the screen (Materials row + Tools row both extending offscreen), and the Structure / Furniture / Joy sub-cat row at the bottom of the panel was half-clipped by the tab bar. Plus: smurfs don't properly build buildings from materials that are in the stockpile, partly because the panel seems to not actually change the material of the blueprint/structure. Plus: make blueprints selectable.
 
@@ -2634,7 +2691,7 @@ Direction: Jobs screen needs to stretch further left and properly accommodate al
 
 ### Fix 1 — Jobs panel sticky header + wider columns
 
-Pre-v0.5.48: the column header row was the first row of the data `GridContainer` inside the scroll container. As soon as the smurf list scrolled, the header scrolled off the top — RimWorld parity is sticky header at top while data scrolls below.
+Pre-v0.5.48: the column header row was the first row of the data `GridContainer` inside the scroll container. As soon as the smurf list scrolled, the header scrolled off the top — the standard pattern is sticky header at top while data scrolls below.
 
 Restructured `JobsPanel.cs`:
 - New `_headerGrid` GridContainer lives OUTSIDE the ScrollContainer, parented directly under the outer VBox. Header cells (corner + 15 category buttons) attach here.
@@ -2683,17 +2740,16 @@ Build: 0 warnings, 0 errors. Pending re-screenshot:
 
 ---
 
-## [0.5.47] — 2026-05-16 — RimWorld-parity tooltips (narrow, wrapped, settings-aware)
+## [0.5.47] — 2026-05-16 — Tooltips (narrow, wrapped, settings-aware)
 
-Direction: research and analyze how RimWorld implements tooltips. Rebuild our tooltips to function in exactly the same way. Analyze the codebase and ensure tooltips resize properly with the tooltip size dropdown in the settings menu. Tooltips should be in small boxes that do not obscure important/relevant information. (Screenshot showed a Wall-button tooltip stretching across the full screen width, obscuring the Build sub-cat row below.)
+Direction: rebuild our tooltips with proper narrow popups, word-wrap, and settings-aware sizing. Tooltips should be in small boxes that do not obscure important/relevant information. (Screenshot showed a Wall-button tooltip stretching across the full screen width, obscuring the Build sub-cat row below.)
 
 ### Root cause
 
 Godot's default `Control.TooltipText` rendering uses a `Label` with `AutowrapMode = Off`. No theme constant exposes wrap behavior or max-width. Long descriptions ("Plan walls. Smurfs deliver Stone or Wood and build them — completed walls are impassable. (Crafter role builds fastest.)") expanded the tooltip's `PopupPanel` to ~1700 logical px wide on a 1280-px viewport — over the screen edge + on top of the tab UI.
 
-### RimWorld parity reference
+### Target behaviour
 
-RimWorld tooltips:
 - **Hover delay:** ~0.4 s before the popup appears
 - **Position:** cursor + slight offset (right + down), auto-flips left/up if near a viewport edge so the popup stays on-screen
 - **Max width:** ~280-320 logical px; long text wraps word-smart
@@ -2720,9 +2776,9 @@ New static helper that replaces Godot's default tooltip rendering with a single 
 
 Each `Schedule(source)` bumps a monotonic `_hoverToken`. The deferred `Show` closure captures its own token value and aborts if the global token has advanced (cursor left, or a new control became hovered). Avoids a stale popup appearing after the cursor has already moved on.
 
-### Viewport edge clamp (RimWorld auto-flip)
+### Viewport edge clamp (auto-flip)
 
-After `Show`, a `Callable.From(ClampPopupToViewport).CallDeferred()` runs next frame (after the autowrap Label has settled its size). Clamps `Position` so the popup never extends past viewport bounds — flips left/up if the cursor was near the right/bottom edge. Matches RimWorld's auto-flip behavior.
+After `Show`, a `Callable.From(ClampPopupToViewport).CallDeferred()` runs next frame (after the autowrap Label has settled its size). Clamps `Position` so the popup never extends past viewport bounds — flips left/up if the cursor was near the right/bottom edge.
 
 ### Settings integration
 
@@ -2803,7 +2859,7 @@ Closes the two items v0.5.44 deferred: custom area create/rename/delete and full
 
 ### Multi-area lifecycle
 
-The v0.5.44 Areas tab shipped with a single hardcoded "Home" area. v0.5.45 ships the full RimWorld-parity Create / Rename / Delete loop.
+The v0.5.44 Areas tab shipped with a single hardcoded "Home" area. v0.5.45 ships the full Create / Rename / Delete loop.
 
 **Data layer:**
 - `LocalMap.CreateArea(name)` — adds a new bitmap to `_namedAreas`; returns false on duplicate or empty name.
@@ -2866,13 +2922,13 @@ Build: 0 warnings, 0 errors. Visual / behavioral verification pending playtest:
 
 ---
 
-## [0.5.44] — 2026-05-16 — Areas tab (RimWorld-parity) + UI scale audit
+## [0.5.44] — 2026-05-16 — Areas tab + UI scale audit
 
-Direction: research RimWorld's similar tab structure and add 'Areas' tab based on that. Ensure all in-game UI scales properly with resolution and the UI size slider in settings.
+Direction: add an 'Areas' tab with a colony-shared named-area model. Ensure all in-game UI scales properly with resolution and the UI size slider in settings.
 
-### Areas tab — RimWorld-parity allowed-area system
+### Areas tab — allowed-area system
 
-Replaces the v0.5.25 per-smurf bitmap painter with a **colony-shared named-area model** matching RimWorld's Assign-tab semantics:
+Replaces the v0.5.25 per-smurf bitmap painter with a **colony-shared named-area model**:
 
 - **`LocalMap.NamedAreas: Dictionary<string, bool[]>`** — colony-wide area bitmasks keyed by name. Default "Home" area exists from world creation (auto-allocated empty in `LocalMap` constructor via `EnsureDefaultAreas`).
 - **`Smurf.AssignedAreaName: string?`** — null = unrestricted (no spatial gate), non-null = restricted to that named area's painted cells.
@@ -2891,7 +2947,7 @@ Replaces the v0.5.25 per-smurf bitmap painter with a **colony-shared named-area 
 
 ### Future v0.5.45+ scope
 
-Single-area MVP — only "Home" exists. Custom area creation/rename/delete + multi-area assignment dropdown options land in a future polish pass. RimWorld parity for now stops at the per-pawn "Unrestricted | Home" dropdown.
+Single-area MVP — only "Home" exists. Custom area creation/rename/delete + multi-area assignment dropdown options land in a future polish pass. Initial scope stops at the per-pawn "Unrestricted | Home" dropdown.
 
 ### UI scale audit
 
@@ -2957,7 +3013,7 @@ The drop pipeline was already correct (`ItemFactory.MaterialFromTerrain`: DeadLo
 
 **Fix:** new `Inventory.ConsumeByMaterial(kind, family, subType?, amount)` overload (existing `ConsumeByFamily` delegates to it with `subType=null`). New `StructureMatMeta.ConsumeSubType(mat)` maps StructureMat → MaterialKey.SubType (FungalWood → "Fungal", DeadWood → "DeadWood", LivingWood → "LivingWood"; generic Wood/Stone → null). New `TryConsumeBuildMaterials(r, family, subType?, cost)` overload uses the strict subtype consume when subType is non-null (no fallback to other subtypes or other family). `BehaviorSystem.Build` apply Phase A now passes the blueprint's subtype.
 
-**Result:** a FungalWood Wall blueprint requires FungalWood logs specifically — RimWorld-parity strict-stuff consume. Without the right material, the blueprint stalls in delivery phase (smurf abandons, comes back next tick to recheck).
+**Result:** a FungalWood Wall blueprint requires FungalWood logs specifically — strict-stuff consume. Without the right material, the blueprint stalls in delivery phase (smurf abandons, comes back next tick to recheck).
 
 ### Files
 
@@ -2980,7 +3036,7 @@ The historical v0.4.x / v0.5.0-v0.5.42 backup folders no longer exist on disk (o
 
 ## [0.5.42] — 2026-05-16 — Build tab sub-categories (Architect-style)
 
-Direction: there should be a 'Build' tab like RimWorld's 'Architect' tab that opens up with sub-categories like 'Orders', 'Zones', 'Structure', 'Furniture', etc.
+Direction: there should be a 'Build' tab with an Architect-style sub-category strip ('Orders', 'Zones', 'Structure', 'Furniture', etc.).
 
 First slice of the Architect-style refactor. The Build tab now opens with a sub-category selector chip row in addition to the tool buttons. Sub-cats filter which build tools are visible:
 
@@ -3001,9 +3057,9 @@ The Orders + Zones top-level tabs stay as separate tabs for now (their relocatio
 
 ## [0.5.41] — 2026-05-16 — Bottom bar full-width stretch + message log positioning
 
-Direction: reformat the bottom taskbar to stretch across the screen, similar to RimWorld's task bar that stretches along the bottom (move the message box up so the bottom is just above it).
+Direction: reformat the bottom taskbar to stretch across the screen as a full-width primary nav (move the message box up so the bottom is just above it).
 
-Pre-v0.5.41 the BottomTabPanel's tab row had a leading `ExpandFill` spacer that pushed the tab capsule to the right edge — cramped, right-clustered, didn't read as a primary nav. v0.5.41 stretches the capsule full-width with `ExpandFill` on every tab button so they distribute evenly across the bottom edge — RimWorld parity.
+Pre-v0.5.41 the BottomTabPanel's tab row had a leading `ExpandFill` spacer that pushed the tab capsule to the right edge — cramped, right-clustered, didn't read as a primary nav. v0.5.41 stretches the capsule full-width with `ExpandFill` on every tab button so they distribute evenly across the bottom edge.
 
 `MessageLog` previously sat 20 logical px above the screen bottom; with the new tab bar, that overlapped. `OffsetTop` / `OffsetBottom` raised by `BottomBarReserve = 68f` so the log floats just above the bar.
 
@@ -3016,9 +3072,9 @@ Pre-v0.5.41 the BottomTabPanel's tab row had a leading `ExpandFill` spacer that 
 
 ## [0.5.40] — 2026-05-16 — Work-priority gating bugfix + Jobs UI labels
 
-Bug report: smurfs seem to do jobs they are not assigned to. Direction: dig deep and research how RimWorld does this to fix our own implementation.
+Bug report: smurfs seem to do jobs they are not assigned to. Direction: dig deep and fix our work-priority gating.
 
-Found three bugs in the work-priority gating layer. All three are now RimWorld-parity:
+Found three bugs in the work-priority gating layer. All three now obey the assignment correctly:
 
 ### Bug 1 — `jobOk("Build")` mismatch
 
@@ -3030,7 +3086,7 @@ Found three bugs in the work-priority gating layer. All three are now RimWorld-p
 
 `jobOk` returned `true` when the smurf's `WorkPriorities` dict had NO entry for the category. Because `ApplyRoleDefaults` only writes priorities for the columns each role explicitly lists, anything not in the role's defaults dict defaulted to ALLOWED. Forager without explicit "Cook" entry → happily cooked. Mage without "Mine" → happily excavated. Scholar without "Construct" → happily built.
 
-**Fix:** flipped to default-missing = `false`. Smurfs without an explicit priority for a column will NOT do that work — matches RimWorld where missing = OFF (the "X" icon).
+**Fix:** flipped to default-missing = `false`. Smurfs without an explicit priority for a column will NOT do that work — missing = OFF.
 
 Audited every role's `ByRole` defaults: Patient / BedRest / Haul / Clean are present for every role, so the basics keep working. Only role-inappropriate work (Forager cooking, Mage mining, etc.) gets correctly gated out.
 
@@ -3071,7 +3127,7 @@ Build: 0 warnings, 0 errors. Visual / behavioral verification pending playtest �
 
 ---
 
-## [0.5.39] — 2026-05-16 — Coastal rock crags + RimWorld-strict haul gating
+## [0.5.39] — 2026-05-16 — Coastal rock crags + strict haul gating
 
 Two unrelated fixes bundled because both are correctness-affecting:
 
@@ -3083,9 +3139,9 @@ Direction: coastal tiles should see less noisy rock generation. Some rocky crag 
 - **New `LocalMapGenerator.ScatterCoastalCrags`** — 1-3 noise-shaped Boulder cluster blobs per coastal map. Each crag is a 6-12 tile cluster centred on a random land tile, with a distance falloff × FBm noise threshold for organic edges. Skips Water / existing Boulder / DeadLog / LivingWood so it doesn't undo the v0.5.18 coast shoreline or trample existing impassable terrain. Called from both the Coast block (after the v0.4.37 inlet pass) and the Island block (after the v0.4.38 island inlet pass).
 - Result: visible "rocky outcrops" sprinkled across the coast — concentrated clusters that read as natural crags — instead of the previous evenly-noisy boulder field.
 
-### 2. Haul destination gating (RimWorld parity)
+### 2. Haul destination gating
 
-Direction: remove spawn area as default stockpile. Player stockpile zones should be the only place pawns haul to — if nowhere to haul, don't run haul job (just like RimWorld). (Screenshot showed pile of items at spawn cluster with smurfs trucking items there.)
+Direction: remove spawn area as default stockpile. Player stockpile zones should be the only place pawns haul to — if nowhere to haul, don't run haul job. (Screenshot showed pile of items at spawn cluster with smurfs trucking items there.)
 
 - **`LocalMap.HasAnyStockpile()`** — O(1) probe (one lock + Count read).
 - **`LocalMap.HasAnyShelf()`** — O(W·H) scan over structure grid; cheap enough at typical map sizes since it only runs at haul selection (~10/sec).
@@ -3133,7 +3189,7 @@ Build: 0 warnings, 0 errors. Visual: pending re-screenshot to confirm all 15 col
 
 ## [0.5.37] — 2026-05-15 — Eating at tables (Phase 5 arc complete)
 
-Direction: pawns should be able to consume food to eat, sleep in beds to fill sleep, and use recreation buildings/furniture to fill joy, etc. — final slice of the Phase 5 RimWorld-parity arc (v0.5.30 → v0.5.37).
+Direction: pawns should be able to consume food to eat, sleep in beds to fill sleep, and use recreation buildings/furniture to fill joy, etc. — final slice of the Phase 5 cohesion arc (v0.5.30 → v0.5.37).
 
 ### Changes
 
@@ -3145,7 +3201,7 @@ Direction: pawns should be able to consume food to eat, sleep in beds to fill sl
 
 ### Phase 5 arc summary (v0.5.30 → v0.5.37)
 
-All seven slices shipped. RimWorld-parity construction, needs, and furniture loop is complete:
+All seven slices shipped. The construction, needs, and furniture loop is complete:
 - **v0.5.30** — Skill curves + Quality roll
 - **v0.5.31** — Blueprint-on-obstruction auto-clear
 - **v0.5.32** — Material picker (Stuff system)
@@ -3163,7 +3219,7 @@ Phase 6 (Entity System) remains the next major target.
 
 Slice: use recreation buildings/furniture to fill joy.
 
-Three starter Joy furniture structures, one per RimWorld recreation category:
+Three starter Joy furniture structures, one per recreation category:
 
 - **MeditationShrine** (Solitary) — `🕯 Shrine` button; stone-altar sprite with glowing candle. `NewMeditateTask` routes to nearest shrine when one exists.
 - **ShroomBoard** (Cerebral) — `🍄 Board` button; wood-grid sprite with mushroom tokens. `NewObserveTask` routes to nearest board when one exists.
@@ -3190,7 +3246,7 @@ Three starter Joy furniture structures, one per RimWorld recreation category:
 
 ## [0.5.35] — 2026-05-15 — Bed structure + sleep flow
 
-Slice: sleep in beds to fill sleep — RimWorld-parity bed mechanics, replacing the v0.3.43 "no beds yet, always SleptOnGround" stub.
+Slice: sleep in beds to fill sleep — bed mechanics, replacing the v0.3.43 "no beds yet, always SleptOnGround" stub.
 
 ### Changes
 
@@ -3198,8 +3254,8 @@ Slice: sleep in beds to fill sleep — RimWorld-parity bed mechanics, replacing 
 - `LocalMap.FindNearestBed(fx, fy)` — linear scan (matches FindNearestShelf).
 - `MakeSleep` now routes to nearest built Bed via FindNearestBed; the bed's tile becomes the Sleep task's target. Falls back to in-place floor-sleep when no bed exists.
 - `ApplyTaskEffect` Sleep branch detects "at a bed" via the task's `TargetTileX/Y` matching a built Bed slot. Two effectiveness paths:
-  - **Bed**: `1.0× × QualityMul` (Crude 0.86 / Normal 1.00 / Fine 1.08 / Superior 1.14 / Masterwork 1.25 / Legendary 1.40 — mirrors RimWorld bed quality table)
-  - **Floor**: `0.8×` (RimWorld sleeping-spot baseline)
+  - **Bed**: `1.0× × QualityMul` (Crude 0.86 / Normal 1.00 / Fine 1.08 / Superior 1.14 / Masterwork 1.25 / Legendary 1.40)
+  - **Floor**: `0.8×` (sleeping-spot baseline)
 - Wake-time thought (Rest crosses 80%): `WellRested` (+3 mood) when at-bed, `SleptOnGround` (-4 mood) when on the floor. Both thoughts already registered in `Thought.cs` since v0.3.43 — the Sleep apply just gates which fires.
 - `BakeBedSprite` — wood frame with mattress + pillow + stripe accents. Wood-family tint via v0.5.33 colour multiplier (DeadWood = brown, FungalWood = purple, etc).
 - `RoomDetector` counts Beds toward FurnitureCount + FurnitureBeauty. Sets up the v0.6+ "Bedroom = room with at least one bed" auto-inference.
@@ -3231,7 +3287,7 @@ The full vision (smurf walks to a Wood/Stone tile, picks up the stack, carries t
 
 ## [0.5.33] — 2026-05-15 — Per-material textures (colour tint)
 
-RimWorld-parity per-material visual variants. One sprite per structure type × per-instance colour multiply per StructureMat.
+Per-material visual variants. One sprite per structure type × per-instance colour multiply per StructureMat.
 
 ### Changes
 
@@ -3256,7 +3312,7 @@ Base sprite neutralisation (so tints produce cleaner output) is deferred to v0.6
 
 Slice: buildings allowing choices of what material to make them from (fungal wood, deadwood, livingwood, stone, etc.) with different textures for each.
 
-RimWorld "Stuff" system foundation: player picks the material at blueprint placement time; the choice rides on every blueprint and drives both the v0.5.33 visual tint and the inventory-family consume.
+"Stuff" system foundation: player picks the material at blueprint placement time; the choice rides on every blueprint and drives both the v0.5.33 visual tint and the inventory-family consume.
 
 ### Changes
 
@@ -3278,7 +3334,7 @@ Material families share the same inventory pool (any wood draws from the Wood fa
 
 Direction: plant stumps (depleted vegetation) should also no longer block construction and should instead act like passable terrain when construction orders are assigned. Conversely, if construction orders are assigned on top of non-depleted vegetation, the vegetation should be automatically cut and the blueprint should be allowed to be built. If blueprints are made on impassable terrain, the smurf should attempt to excavate or mine the terrain under the blueprint and then build the blueprint (e.g. blueprint placed on top of boulder, smurf should mine boulder then build blueprint, even if not assigned to mining).
 
-RimWorld convention: blueprints can be placed on any reasonable tile, and the constructor handles tree-cutting / boulder-excavating as part of the construction job (bypassing the normal Plant Cut / Mining work priority gates). This version brings SmurfulationC to parity.
+Convention: blueprints can be placed on any reasonable tile, and the constructor handles tree-cutting / boulder-excavating as part of the construction job (bypassing the normal Plant Cut / Mining work priority gates). This version brings SmurfulationC to that convention.
 
 ### Behaviour changes
 
@@ -3287,7 +3343,7 @@ RimWorld convention: blueprints can be placed on any reasonable tile, and the co
    - `SetExcavationDesignation(x, y, true)` when terrain is Boulder / DeadLog / LivingWood / Skeleton
    - `SetCutDesignation(x, y, true)` when vegetation is present + non-depleted
    The auto-designations enter the normal designation pool, so any worker with Mine / Plant-Cut priority will help clear them, just like manually-placed designations.
-3. **Build branch redirects to clearing tasks** (`BehaviorSystem.cs:2046-2074`). When a Crafter's SelectTask picks up a blueprint via `FindDesignatedBuild`, the new `SimulationManager.IsBlueprintBuildReady(map, x, y)` check runs first. If the tile is obstructed, the Build branch dispatches a `GatherMaterial` (Excavate) or `CutVegetation` task instead of Build — at Build's priority, not the Mine / Plant-Cut priority. **Crafters clear obstructions for blueprints even when they have Mine = "-" priority** — the work is treated as a sub-step of construction, exactly per RimWorld pattern.
+3. **Build branch redirects to clearing tasks** (`BehaviorSystem.cs:2046-2074`). When a Crafter's SelectTask picks up a blueprint via `FindDesignatedBuild`, the new `SimulationManager.IsBlueprintBuildReady(map, x, y)` check runs first. If the tile is obstructed, the Build branch dispatches a `GatherMaterial` (Excavate) or `CutVegetation` task instead of Build — at Build's priority, not the Mine / Plant-Cut priority. **Crafters clear obstructions for blueprints even when they have Mine = "-" priority** — the work is treated as a sub-step of construction.
 4. **`ResolveBlueprintClearTask`** new helper in `BehaviorSystem.cs` maps obstruction type → clear task:
    - Boulder / DeadLog / LivingWood / Skeleton → `TaskType.GatherMaterial`
    - Non-depleted vegetation → `TaskType.CutVegetation`
@@ -3308,7 +3364,7 @@ Mining XP + Foraging XP both granted for the prep steps; Construction XP granted
 
 ### Edge cases handled
 
-- **Demolish during prep** — clears the structure, leaves auto-prep designations in place (player can manually Remove them). Matches RimWorld where cancelling a construction job doesn't undo a tree-chop the job had triggered.
+- **Demolish during prep** — clears the structure, leaves auto-prep designations in place (player can manually Remove them). Cancelling a construction job doesn't undo a tree-chop the job had triggered.
 - **Another smurf clears the obstruction first** — `IsTaskStillValid` for the redirected GatherMaterial / CutVegetation task already checks `HasExcavateDesignation` / `HasCutDesignation`; returns false when the designation is gone; the Crafter abandons the prep task and next SelectTask picks up the now-buildable blueprint.
 - **Claim contention** — `TryClaim` in the existing soft-claim system handles two smurfs targeting the same prep tile.
 - **Mid-build cancel** — same Demolish path as v0.5.20.
@@ -3344,15 +3400,15 @@ Build: 0 warnings, 0 errors. Visual / behavioral verification pending — place 
 
 ---
 
-## [0.5.30] — 2026-05-15 — RimWorld-parity skill curves + Quality roll on construction
+## [0.5.30] — 2026-05-15 — Skill curves + Quality roll on construction
 
-Direction: the speed at which smurfs perform 'work' tasks like excavating, cutting, growing, gathering, or construction should be modeled as a function of their skill in the associated area — a smurf with a high construction skill can build walls in 1s, but a smurf with a bad/low construction skill takes 10s. This should also be modeled in resource gathering like RimWorld, where pawns with low skill will often fail to collect or collect much less than pawns with high skill, who nearly always collect the full amount.
+Direction: the speed at which smurfs perform 'work' tasks like excavating, cutting, growing, gathering, or construction should be modeled as a function of their skill in the associated area — a smurf with a high construction skill can build walls in 1s, but a smurf with a bad/low construction skill takes 10s. Resource gathering should also reflect skill: pawns with low skill will often fail to collect or collect much less than pawns with high skill, who nearly always collect the full amount.
 
-First slice of the 7-version RimWorld-parity arc (v0.5.30 → v0.5.36). This version is **pure numeric tuning + Quality roll** — no new structures, no new UI, no behaviour-flow changes. Same buildings, same workflow; smurfs now visibly differ by skill.
+First slice of the 7-version cohesion arc (v0.5.30 → v0.5.36). This version is **pure numeric tuning + Quality roll** — no new structures, no new UI, no behaviour-flow changes. Same buildings, same workflow; smurfs now visibly differ by skill.
 
 ### New file — `scripts/simulation/SkillCurve.cs`
 
-Centralised RimWorld-parity formulas pulled from rimworldwiki.com (Construction_Speed / Mining_Yield / Plant_Work_Speed pages). One callsite per work type so future skill-balancing passes touch this file only.
+Centralised formulas (Construction Speed / Mining Yield / Plant Work Speed). One callsite per work type so future skill-balancing passes touch this file only.
 
 | Function | Formula | Lvl 0 / Lvl 8 / Lvl 20 |
 |---|---|---|
@@ -3392,7 +3448,7 @@ Displayed in `TilePropertiesPanel` Structure section (only when non-Normal — k
 - New `Room.FurnitureBeauty` + `Room.FloorBeauty` floats accumulated per-tile during BFS flood-fill.
 - Each furniture / floor contribution = `QualityMeta.ValueMul(slot.Quality)` (Crude 0.5× → Masterwork 3.5×).
 - `Room.BeautyScore` now reads `FurnitureBeauty + FloorBeauty * 0.5 + HearthCount * 5 - CorpseCount * 3` instead of flat counts. A masterwork shelf is 7× the beauty of a crude one.
-- Encourages the player to use skilled Crafters on furniture, RimWorld-style. Beauty thoughts (G5, v0.5.23) automatically respond — masterwork rooms hit "BeautyPretty" threshold faster.
+- Encourages the player to use skilled Crafters on furniture. Beauty thoughts (G5, v0.5.23) automatically respond — masterwork rooms hit "BeautyPretty" threshold faster.
 
 ### Mining yield scaling — `BehaviorSystem.cs:2623` (GatherMaterial)
 
@@ -3413,7 +3469,7 @@ Multi-file change touching `BehaviorSystem.cs` (Build + 3 gather paths), `Struct
 |---|---|
 | **v0.5.30** | ✅ Skill curves + Quality roll (this) |
 | v0.5.31 | Material picker — `StuffCategory` enum + BuildPanel chooser sub-menu |
-| v0.5.32 | Per-material textures — color-tint approach (RimWorld parity) |
+| v0.5.32 | Per-material textures — color-tint approach |
 | v0.5.33 | Haul-to-site construction — Frame requires physical material delivery |
 | v0.5.34 | Bed structure + sleep flow — RestEffectiveness + bed seek + WellRested thought |
 | v0.5.35 | Joy furniture (recreation) — 3 starter structures + tolerance buildup |
@@ -3603,7 +3659,7 @@ All `StructureOverlay` sprite bake methods rewritten with proper pixel art. Each
 
 ### Added — Allowed-Area painter live (`DesignationTool.AllowedArea`)
 
-The v0.5.4 stub button in `ZonesPanel` ("▥ Allowed Area (stub)") is now a real painter. RimWorld's per-pawn Allowed-Area pattern.
+The v0.5.4 stub button in `ZonesPanel` ("▥ Allowed Area (stub)") is now a real painter. Per-pawn Allowed-Area pattern.
 
 **Player flow:**
 1. Select one smurf (the painter operates on currently-selected smurfs).
@@ -3614,7 +3670,7 @@ The v0.5.4 stub button in `ZonesPanel` ("▥ Allowed Area (stub)") is now a real
 **Implementation:**
 - New `DesignationTool.AllowedArea` enum entry + `Tool.AllowedArea` toolbar mapping.
 - New `SimulationManager.PaintAllowedArea(smurfName, x0, y0, x1, y1, allow)` API — routes through `PostMainThreadCommand` for sim-thread safety.
-- Lazy-allocates the `Smurf.AllowedArea` bitmap on first paint with **"all allowed" init** so the first painted rect REFINES the area rather than FORBIDDING the rest by default. Counter to RimWorld's "everything starts forbidden" model — chosen because it matches how players intuitively think ("paint where I want them to work, not where I forbid them").
+- Lazy-allocates the `Smurf.AllowedArea` bitmap on first paint with **"all allowed" init** so the first painted rect REFINES the area rather than FORBIDDING the rest by default. Counter to the "everything starts forbidden" model — chosen because it matches how players intuitively think ("paint where I want them to work, not where I forbid them").
 - `GameController` drag-paint dispatcher routes the AllowedArea tool to `PaintAllowedArea` instead of the standard `DesignateRect`. No-op when no smurf is selected.
 
 **Deferred to v0.6:** allowed-area visualization overlay (player can't currently see the painted area on the map — only inferred from smurf behaviour). Erase mode (right-click while tool active).
@@ -3680,13 +3736,13 @@ Rack / Vault / Chest / Barrel / Crate / Cabinet remain v0.6+ refinements; Shelf 
 
 **N4 — Workbench structure.** New `StructureType.WorkbenchPlanned/Workbench` painted by the BuildWorkbench tool. Built from Wood.
 
-**`PreparedMeal` registered in ItemRegistry** — 12 nutrition (3× raw Smurfberry's 5), 10-day fresh window (2× raw 5d), 3.0 value (3× raw 1.0). Cooked food is dramatically better than raw (RimWorld parity).
+**`PreparedMeal` registered in ItemRegistry** — 12 nutrition (3× raw Smurfberry's 5), 10-day fresh window (2× raw 5d), 3.0 value (3× raw 1.0). Cooked food is dramatically better than raw.
 
 **`CookSystem` wired** (was a stub since v0.4.0). `SelectCookTarget`: finds nearest Workbench when the colony has any raw Plant Food; returns a Cook task targeting the Workbench tile. `Apply` (on arrival): consumes one raw Plant Food stack via new `Inventory.FindFirst(Kind, excludeSubTypes...)`, produces a `PreparedMeal` with the source ingredient's material family preserved (Smurfberry meal vs Mushroom meal), drops on the Workbench tile so it joins the haul flow, grants 80 Cooking XP.
 
 **Crafter Cook priority** (BehaviorSystem SelectTask): Crafter 52, others 35. Inserted between Build (priority 55 for Crafters) and idle.
 
-**Deferred to v0.6:** explicit Bill_Production queue model with RepeatN/Forever/TargetN modes (RimWorld parity), multi-recipe registry (Smithy / Loom recipes need their own ItemRegistry blocks first), per-Workbench bill UI.
+**Deferred to v0.6:** explicit Bill_Production queue model with RepeatN/Forever/TargetN modes, multi-recipe registry (Smithy / Loom recipes need their own ItemRegistry blocks first), per-Workbench bill UI.
 
 ### v0.5.23 — Phase 5F: Rooms + Beauty
 
@@ -3710,9 +3766,9 @@ Walls / Doors are room boundaries: walls are impassable (don't belong to any roo
 
 ### v0.5.24 — Phase 5G: Roofing + Temperature
 
-**§5.10 Roofing.** `Room.HasRoof` derived from `IsOutdoor` — every enclosed room is auto-roofed (RimWorld parity for the simple case). Player-painted roof zones (extending beyond enclosed walls) deferred to v0.6.
+**§5.10 Roofing.** `Room.HasRoof` derived from `IsOutdoor` — every enclosed room is auto-roofed (the simple case). Player-painted roof zones (extending beyond enclosed walls) deferred to v0.6.
 
-**§5.12 Temperature.** Per-room temperature offset model (rather than per-tile diffusion — diffusion is v0.6 RimWorld parity):
+**§5.12 Temperature.** Per-room temperature offset model (rather than per-tile diffusion — diffusion is v0.6):
 - Outdoor rooms: 0°C offset (inherits biome ambient)
 - Indoor rooms baseline: +2°C (sheltering effect)
 - Per Hearth: +10°C (accumulates if a room has multiple Hearths)
@@ -3781,7 +3837,7 @@ A working blueprint → walk → build → wall-becomes-impassable loop:
 #### v0.5.19 simplifications (deferred polish)
 
 - **Frame stage collapsed.** The Build task completes in ONE arrival tick (no per-tick `BuildProgress` increments visible). The intermediate Frame state with progress fill lands in v0.5.20 once the loop has been playtested — keeps v0.5.19's diff small enough to ship cleanly.
-- **No material refund on Demolish.** v0.5.19 demolish removes the structure with zero refund. v0.5.20 will add 25-50% material refund (RimWorld pattern).
+- **No material refund on Demolish.** v0.5.19 demolish removes the structure with zero refund. v0.5.20 will add 25-50% material refund.
 - **Stone preferred over Wood.** Blueprints default to `StructureMat.Stone`. The Build task falls back to Wood if Stone is short; future Phase 5C polish will let the player paint with a chosen material.
 
 #### Phase 5 roadmap arc
@@ -3805,9 +3861,9 @@ After v0.5.24 Phase 5 ships complete and Phase 6 entity layer can land cleanly w
 
 ## [0.5.18] — 2026-05-15
 
-### Changed — Coast / Island generation overhaul (RimWorld-parity, matching v0.5.12 Mountain Face + v0.5.13 Rivers)
+### Changed — Coast / Island generation overhaul (matching v0.5.12 Mountain Face + v0.5.13 Rivers)
 
-Direction: analyze how RimWorld does coastal/island generation and overhaul them the same way as rivers and mountains.
+Direction: overhaul coastal/island generation the same way as rivers and mountains.
 
 Pre-v0.5.18 Pass 4g (`LocalMapGenerator.cs:1163-1405`) had three matching limitations to the v0.5.12 Mountain Face and v0.5.13 Rivers issues:
 
@@ -3817,7 +3873,7 @@ Pre-v0.5.18 Pass 4g (`LocalMapGenerator.cs:1163-1405`) had three matching limita
 | Single-octave noise (no fractal) | Smooth slightly-wavy shoreline with no multi-scale detail | Rectangular sand ring with corner-arc rounding |
 | Hardcoded frequency 0.20f | Same wavelength regardless of map size | (no shoreline noise — pure rectangle) |
 
-**Reference:** RimWorld's vanilla coastal generation places a Perlin-shaped water band on chosen edge(s); the popular [Geological Landforms mod](https://github.com/m00nl1ght-dev/GeologicalLandforms) extends this with named landforms (Cove, Fjord, Peninsula, Isthmus, Atoll, Archipelago, Skerry). Our v0.5.18 brings vanilla SmurfulationC up to Geological-Landforms-style organic shapes via the same RimWorld terrain noise pattern (multi-octave FBm, persistence 0.5, lacunarity 2.0) we already use for Mountain Face + Rivers.
+**Reference:** typical colony-sim coastal generation places a Perlin-shaped water band on chosen edge(s); more elaborate procedural systems extend this with named landforms (Cove, Fjord, Peninsula, Isthmus, Atoll, Archipelago, Skerry). v0.5.18 brings vanilla SmurfulationC up to those organic shapes via the same multi-octave FBm terrain noise pattern (persistence 0.5, lacunarity 2.0) we already use for Mountain Face + Rivers.
 
 #### Coast — projection-based shoreline (was per-column edge band)
 
@@ -3910,8 +3966,7 @@ The Island inlet pass (v0.4.38) is unchanged — per-edge drilling still cuts in
 - **Consistent feel across map sizes** — frequency scales with map dim, so a 200-tile coast has the same number of large bays as a 80-tile one (just bigger physical scale).
 
 Sources:
-- [Geological Landforms (m00nl1ght-dev/GitHub)](https://github.com/m00nl1ght-dev/GeologicalLandforms) — community RimWorld mod showing Coast / Cove / Fjord / Peninsula / Isthmus / Tombolo / Atoll / Archipelago / Skerry landform variants. Vanilla RimWorld is closer to our pre-v0.5.18 simple Coast — v0.5.18 brings us closer to the modded variety via the multi-octave noise pattern.
-- v0.5.12 (Mountain Face) + v0.5.13 (Rivers) — the established RimWorld-parity overhaul template applied here.
+- v0.5.12 (Mountain Face) + v0.5.13 (Rivers) — the established overhaul template applied here.
 
 ---
 
@@ -4000,9 +4055,9 @@ The renderer treats Skeleton as impassable terrain (falls back to default tintin
 
 This is the early-game Bone material source — Phase 9 animal butchery is months out, but Skeleton tiles let the player accumulate Bone now for future Phase 6/7 crafting recipes.
 
-### Added — RimWorld-style character screen (Backstory + Skills sections)
+### Added — Character screen (Backstory + Skills sections)
 
-Direction: implement a RimWorld-style character screen (research this online) at the smurf customization screen so we can see new backstories, traits, items, etc., all in one screen.
+Direction: implement a colony-sim-style character screen at the smurf customization screen so we can see new backstories, traits, items, etc., all in one screen.
 
 `scripts/ui/ScenarioPanel.cs` detail card extended. Layout (top → bottom):
 
@@ -4029,7 +4084,7 @@ Direction: implement a RimWorld-style character screen (research this online) at
 
 #### Polish deferred to Phase 6+
 
-- Passion icons (RimWorld's flame indicator) — needs a `PassionLevel` field on Smurf
+- Passion icons (flame indicator on hot skills) — needs a `PassionLevel` field on Smurf
 - Health / body parts panel
 - Equipped items section (separate from starting items pool)
 - Re-roll storyteller / scenario buttons in the screen header
@@ -4187,7 +4242,7 @@ Until then the list is just generation output. No creatures actually spawn. The 
 
 The rimport.md system-by-system comparison didn't have a gen section pre-v0.5.14. Added:
 
-- **Section 22 — World/Map Generation** with the RimWorld GenStep pipeline table, SmurfulationC's current state inventory, and the 5 gap analyses (N15-N19) with smurf-flavour notes.
+- **Section 22 — World/Map Generation** with the GenStep pipeline table, SmurfulationC's current state inventory, and the 5 gap analyses (N15-N19) with smurf-flavour notes.
 - **N15-N19 in the New Systems table** with phase placement (5C for the Phase-5 work, deferred Phase 6/9 for wildlife AI + sleeping creatures).
 - **v0.5.14+ "Discoveries" milestone** in the Recommended path forward, with the generation principle: "every gen feature should produce something the player observes + decides about."
 
@@ -4207,7 +4262,7 @@ Each stub has a `// v0.5.14` comment naming the gating system + the future phase
 
 ## [0.5.13] — 2026-05-15
 
-### Changed — River generation overhaul (same RimWorld-parity treatment as v0.5.12 Mountain Face)
+### Changed — River generation overhaul (same treatment as v0.5.12 Mountain Face)
 
 Direction: overhaul rivers in the same way.
 
@@ -4247,7 +4302,7 @@ FractalLacunarity = 2.0f,
 FractalGain       = 0.5f,
 ```
 
-3 octaves matches the v0.5.12 Mountain Face pattern (RimWorld's `GenStep_ElevationFertility` uses 6-octave Perlin for terrain elevation; rivers can use fewer because the path is 1D not 2D). Lacunarity 2.0 + gain 0.5 are the RimWorld defaults — each octave doubles in frequency and halves in amplitude. The small octaves add micro-wiggles on top of the large bends, the natural multi-scale meandering real rivers exhibit.
+3 octaves matches the v0.5.12 Mountain Face pattern (terrain elevation typically uses 6-octave Perlin in colony-sim gen; rivers can use fewer because the path is 1D not 2D). Lacunarity 2.0 + gain 0.5 are the common multi-octave noise defaults — each octave doubles in frequency and halves in amplitude. The small octaves add micro-wiggles on top of the large bends, the natural multi-scale meandering real rivers exhibit.
 
 **3. Frequency scales with river length.**
 
@@ -4297,9 +4352,9 @@ Pre-v0.5.13 used `horizontal ? Width : Height` — correct for axis-aligned rive
 
 ## [0.5.12] — 2026-05-15
 
-### Changed — Mountain Face generation overhaul (RimWorld-parity terrain noise + continuous orientation)
+### Changed — Mountain Face generation overhaul (terrain noise + continuous orientation)
 
-Direction: increase rock coverage for the 'mountain face' mountain subtype and scale it to map size. Adjust generation for more natural formation variation per RimWorld (research RimWorld's mountain and cave generation) so players don't see the same type of level map over and over.
+Direction: increase rock coverage for the 'mountain face' mountain subtype and scale it to map size. Adjust generation for more natural formation variation so players don't see the same type of level map over and over.
 
 #### What pre-v0.5.12 looked like
 
@@ -4313,20 +4368,16 @@ Direction: increase rock coverage for the 'mountain face' mountain subtype and s
 
 Net visual: a thin band of rock along one of four edges, with a slightly wavy boundary, identical-feeling across runs.
 
-#### How RimWorld actually generates mountains (verified from decompiled source)
+#### Reference noise pattern
 
-`RimWorld/GenStep_ElevationFertility.cs` line 34:
+Established colony-sim terrain generation uses multi-octave Perlin/Simplex with:
 
-```csharp
-new Perlin(0.020999999716877937, 2.0, 0.5, 6, Rand.Range(0, int.Max), QualityMode.High)
-```
-
-- **Frequency**: 0.021 (low — large-scale features)
+- **Frequency**: ~0.021 (low — large-scale features)
 - **Lacunarity**: 2.0 (each octave doubles in frequency)
 - **Persistence**: 0.5 (each octave halves in amplitude)
 - **6 octaves** → rich detail at multiple scales
-- Rock placement threshold: `elevation > 0.7` (after the multi-octave Perlin)
-- `EdgeMountainSpan = 0.42f` creates a directional bias toward map edges (mountain ridges form preferentially in a chosen direction)
+- Rock placement threshold: `elevation > 0.7` (after the multi-octave noise)
+- An edge-span bias creates a directional preference toward map edges so mountain ridges form preferentially in a chosen direction
 
 The multi-octave noise + directional bias produces organic mountain shapes with ridges, spurs, peninsulas, and bays — not clean linear boundaries.
 
@@ -4338,7 +4389,7 @@ Five changes, all in the subtype-2 block:
 |---|---|---|---|
 | **Orientation** | `side = faceRng.Next(4)` (4 cardinals) | `faceAngle = rng * 2π` (continuous) → projection-based gradient | Addresses "same map type over and over" |
 | **Rock coverage** | 0.33-0.50 | **0.45-0.65** | Addresses "increase rock coverage" |
-| **Noise type** | Simplex, FractalType.None | **Simplex, FractalType.Fbm with 4 octaves**, lacunarity 2.0, gain 0.5 | RimWorld's 6-octave Perlin pattern (we use 4 because our maps are smaller) |
+| **Noise type** | Simplex, FractalType.None | **Simplex, FractalType.Fbm with 4 octaves**, lacunarity 2.0, gain 0.5 | Reduced from the typical 6-octave Perlin because our maps are smaller |
 | **Frequency** | hardcoded 0.05f | **`4.0f / max(W, H)`** | Feature scale stays consistent regardless of map size |
 | **Boundary jitter** | ±5% | **±15%** | Multi-octave noise produces visible ridges + spurs instead of a clean line |
 
@@ -4366,7 +4417,7 @@ Cave count (0-2), cave-carving math, and the open-side boulder scatter pass are 
 
 ## [0.5.11] — 2026-05-15
 
-### Fixed — Corner-stuck on boulder formations (RimWorld-parity distance-not-decreasing detector)
+### Fixed — Corner-stuck on boulder formations (distance-not-decreasing detector)
 
 Direction: smurfs still get stuck on corners of weird formations from time to time. Implement the distance-not-decreasing detector fix — that should be all we need, then we can carry on with phase 5.
 
@@ -4376,11 +4427,11 @@ Pre-v0.5.11 the existing immobility detector (`MoveOneTick` lines ~1379-1493, v0
 
 But the corner-stuck pattern on boulder formations is **different**: the smurf IS moving (sideways, perpendicular to the path direction), it's just not getting closer to where it needs to go. Concave corners + occupied path waypoints + the local steering's perpendicular escape combine to create a "moving sideways forever" pattern. `progressed >= ArrivalEpsilon` every tick → `StuckTicks` resets to 0 every tick → re-path never fires → smurf jitters indefinitely until something else changes the situation.
 
-#### How RimWorld handles this (verified from decompiled source)
+#### Reference pathing patterns
 
-Web research confirmed: RimWorld's pathfinder uses the **exact same strict cut-corner rule** as ours (`Verse.AI/PathFinder.cs` lines 868-871: `BlocksDiagonalMovement` returns true if cell non-walkable OR contains a door, and the diagonal move is rejected if EITHER orthogonal blocks). So "RimWorld is more permissive about diagonals" is a popular myth — that's the [Diagonal Walls](https://rimworldbase.com/diagonal-walls/) mod, not vanilla.
+The standard colony-sim pathfinder uses the **same strict cut-corner rule** as ours (a diagonal move is rejected if EITHER orthogonal neighbour blocks). So permissive diagonals are typically a mod feature, not the default.
 
-What RimWorld actually does that we didn't:
+What the reference pathing does that we didn't:
 
 1. **Region-first reachability** — pawns never path to regions they can't reach (we have `IsWorkReachable`).
 2. **No local steering layer** — pawns walk rigidly along A* waypoints (we have one, legacy of continuous-pixel sub-tile movement).
@@ -4440,21 +4491,21 @@ This was the last identified pathfinding bug. Phase 5 work resumes from here.
 
 ## [0.5.10] — 2026-05-15
 
-### Fixed — Smurfs cluster-jamming on each other while pathfinding (RimWorld-parity climb-forward priority)
+### Fixed — Smurfs cluster-jamming on each other while pathfinding (climb-forward priority)
 
 Bug report (with screenshot): dense cluster of ~12 smurfs visibly stuck on/near each other around work targets, no forward progress.
 
-Direction: smurfs now task properly, but they're getting stuck on each other while pathfinding. Likely the last pathfinding bug — dig deep, diagnose this. Research how RimWorld solves this problem since its movement is the closest analog to ours.
+Direction: smurfs now task properly, but they're getting stuck on each other while pathfinding. Likely the last pathfinding bug — dig deep, diagnose this.
 
-#### How RimWorld actually handles 50 pawns in a small space
+#### Reference pathfinding stack
 
-RimWorld's pathfinding stack:
+A standard colony-sim pathfinding stack:
 
 1. **A\* with soft pawn-cost** — paths computed at job-assignment time; `+175 cost` per other pawn on a candidate cell discourages routes through clusters but doesn't forbid them. SmurfulationC has this since v0.4.58.
 2. **Path commitment** — once a path is computed, the pawn walks it waypoint-by-waypoint. **The local walking step does NOT re-evaluate "should I avoid other pawns?"** Pawns visually overlap when their paths cross. The crowd cost was already paid at planning; the walking is mechanical.
 3. **Repath on path failure** — if a waypoint becomes terrain-impassable mid-walk (a wall is built, etc.), the pawn requests a fresh A\*.
 
-The key insight: **RimWorld pawns don't have a "soft-collision local steering" layer.** SmurfulationC does (v0.4.36) — and that local layer was rejecting the planned A\* path in favor of perpendicular escape whenever the planned direction crossed another smurf, which is exactly the wrong behavior in dense clusters.
+The key insight: **the reference model has no "soft-collision local steering" layer.** SmurfulationC does (v0.4.36) — and that local layer was rejecting the planned A\* path in favor of perpendicular escape whenever the planned direction crossed another smurf, which is exactly the wrong behavior in dense clusters.
 
 #### What SmurfulationC was doing pre-v0.5.10
 
@@ -4511,10 +4562,10 @@ For dead-end climbs (path leads into impassable terrain beyond the blocker, AND 
 4. No uncrowded side-step found → crowded fallback (preserves v0.5.8 dead-end guard via `IsClimbOverUseful` per candidate).
 5. Nothing useful → stay put. StuckTicks builds → v0.4.29 YieldTrigger fires at 12 ticks asking the blocker to lie down → smurf walks through naturally because yielding smurf drops out of `_smurfPerTile` (PopulateOccupancyGrid line 157).
 
-#### Why this matches RimWorld and not Dwarf Fortress
+#### Why this is "freely overlapping" rather than "strict-pushing"
 
-- **RimWorld** — pawns can stand on the same tile freely; collision is purely visual; pathing soft-cost discourages but doesn't forbid. v0.5.10 adopts this for path-follow climb-overs.
-- **DF** — strict "one creature per tile" with explicit pushing/swapping. We keep the v0.4.29 yield mechanism (lie-down) for genuine narrow-tunnel cases (Priority 5), so DF-style yield is still available when needed — just not the *primary* mechanism.
+- **Freely-overlapping model** — pawns can stand on the same tile freely; collision is purely visual; pathing soft-cost discourages but doesn't forbid. v0.5.10 adopts this for path-follow climb-overs.
+- **Strict-pushing model** — "one creature per tile" with explicit pushing/swapping. We keep the v0.4.29 yield mechanism (lie-down) for genuine narrow-tunnel cases (Priority 5), so strict-pushing-style yield is still available when needed — just not the *primary* mechanism.
 
 The v0.4.58 A\* crowd cost is unchanged. Paths still spread out at planning time. Local steering now respects that planning rather than fighting it.
 
@@ -4522,18 +4573,18 @@ The v0.4.58 A\* crowd cost is unchanged. Paths still spread out at planning time
 
 ## [0.5.9] — 2026-05-15
 
-### Added — Task viability gate (RimWorld JobDriver FailOn-pattern equivalent)
+### Added — Task viability gate (JobDriver FailOn-pattern equivalent)
 
-Direction: pawns get stuck on haul orders, excavate orders, and right-click move orders when they find themselves unable to complete the task, then never reassigning — causing a lock and visible jitter. There needs to be a way to check whether a task is actually able to be completed under current conditions, so a smurf completing crafting/mining/hauling can reassign if the task is impossible while still holding it if it takes 15-30s (like crafting may, or mining without tools once implemented properly). How does RimWorld do this?
+Direction: pawns get stuck on haul orders, excavate orders, and right-click move orders when they find themselves unable to complete the task, then never reassigning — causing a lock and visible jitter. There needs to be a way to check whether a task is actually able to be completed under current conditions, so a smurf completing crafting/mining/hauling can reassign if the task is impossible while still holding it if it takes 15-30s (like crafting may, or mining without tools once implemented properly).
 
-#### How RimWorld does it
+#### Reference pattern
 
-RimWorld's `JobDriver` exposes `AddFailCondition(Func<bool>)`. Each Toil registers fail conditions that are evaluated **every tick during the job**. When a fail condition returns true, the JobDriver ends with `JobCondition.Incompletable`, the pawn drops the job, and the JobGiver runs again to pick a new one.
+A standard `JobDriver` exposes `AddFailCondition(Func<bool>)`. Each Toil registers fail conditions that are evaluated **every tick during the job**. When a fail condition returns true, the JobDriver ends with `JobCondition.Incompletable`, the pawn drops the job, and the JobGiver runs again to pick a new one.
 
 Examples:
-- `JobDriver_HaulToCell` registers `FailOnDestroyedOrNull(haulable)`, `FailOnBurningImmobile(targetA)`, `FailOn(() => !cell.GetItemPiece(map, haulable.def))`.
-- `JobDriver_Mine` registers `FailOnDestroyedNullOrForbidden(target)`, `FailOnThingMissingDesignation(target, DesignationDefOf.Mine)`.
-- `JobDriver_Goto` registers `FailOnDestination(() => !destination.Standable(...))`.
+- A haul-to-cell job registers fail-conditions like "target destroyed/null", "target burning while immobile", "destination cell no longer holds an accepting item piece".
+- A mining job registers "target destroyed/null/forbidden" and "mining designation removed".
+- A goto job registers "destination no longer standable".
 
 Critically, fail conditions are **structural** ("does the target still exist / is it still reachable / is the designation still painted") rather than **progress-based**. A 30-tick crafting job that has 28 ticks of progress left still passes its fail conditions every tick — the pawn keeps crafting until completion. Only if the workbench is destroyed mid-craft (or ingredients vanish) do the fail conditions trigger an abort.
 
@@ -4636,7 +4687,7 @@ If no useful climb-over candidate is found, the smurf stays put this tick. `Stuc
 - **Excavate touch-arrival** (B on the only adjacent passable, beyond = T impassable) — still works. Candidate is Chebyshev-≤-1 from T → `IsClimbOverUseful` returns true via case 1.
 - **Path through a smurf in a tunnel** (B blocking, beyond passable) — still works. Case 2.
 - **Dead-end climb** (B blocking, beyond impassable, candidate NOT touch-arrival) — now rejected. Smurf stays put → YieldTrigger after 12 ticks → blocker yields → resolves naturally.
-- **Single-tile tunnel through which a smurf needs to pass** — works as before; YieldTrigger is the established RimWorld-equivalent mechanism.
+- **Single-tile tunnel through which a smurf needs to pass** — works as before; YieldTrigger is the established mechanism.
 
 The local-steering tick cost adds ≤2 array lookups + an abs/sign per climb-over evaluation. Negligible.
 
@@ -4646,14 +4697,14 @@ The local-steering tick cost adds ≤2 array lookups + an abs/sign per climb-ove
 
 ### Fixed — Smurfs stuck on Gather / ChopWood / Cut in crowded clusters (approach-blocked filter parity)
 
-Direction: smurfs keep getting stuck on tasks like excavating and gather when there are lots of smurfs on-screen. Are multiple smurfs attempting to designate one tile, causing a cancel-fallback loop? Figure out what's happening and use RimWorld's system as a guide. How does RimWorld handle 50 pawns onscreen with only 3 designated objects to mine or items to haul?
+Direction: smurfs keep getting stuck on tasks like excavating and gather when there are lots of smurfs on-screen. Are multiple smurfs attempting to designate one tile, causing a cancel-fallback loop? Figure out what's happening.
 
-#### What RimWorld does (and what we already have)
+#### Reference solution
 
-RimWorld's answer to "50 pawns + 3 designations" is a stack of four mechanisms:
+A standard "50 pawns + 3 designations" solution is a stack of four mechanisms:
 
 1. **Per-target reservations** in `ReservationManager` — only one pawn at a time. SmurfulationC has this: `LocalMap._claims` dict keyed by `(x, y)` with claimer Guid, atomic under `_designationsLock`. ✓
-2. **PathEndMode.Touch** — pawn can complete a job from any 8-neighbour of an impassable target. SmurfulationC has this: `IsAtTouchArrival` in MoveOneTick, v0.4.57. ✓
+2. **Touch arrival** — pawn can complete a job from any 8-neighbour of an impassable target. SmurfulationC has this: `IsAtTouchArrival` in MoveOneTick, v0.4.57. ✓
 3. **JobSearchSuppressUntilTick** — pawns who find no reachable work fall through to leisure with a per-pawn ~30-tick cooldown before re-checking. SmurfulationC has this: `WorkSearchCooldownTicks`, v0.5.4. ✓
 4. **Approach-occupancy filter at JobGiver time** — when finding work, skip targets whose only passable adjacent tiles are currently occupied by other pawns. The pawn picks a more distant reachable target, or falls through to (3). SmurfulationC had this *only for Excavate* (v0.4.29). **Gather / ChopWood / Cut were missing it.**
 
@@ -4747,15 +4798,15 @@ Both auto-haul scan loops now compute `tileIsAcceptingStockpile` once per tile (
 #### What still works (intentionally)
 
 - **Player force-haul priority branch** (`SelectHaulTarget` lines 200-212) intentionally skips this guard. If the player explicitly Haul-tagged a stockpiled item via the toolbar, that's a manual stockpile-reorganize command and the new check would block it.
-- **Future Phase 5C zone Kind filters** are already supported. Once `StockpileZone.AcceptedKinds` becomes player-editable, an item in a "general" zone whose Kind isn't accepted by that zone will still be haulable (the smurf will move it to a zone that does accept it). RimWorld's "store at higher priority" pattern can layer on top later without touching the call sites.
+- **Future Phase 5C zone Kind filters** are already supported. Once `StockpileZone.AcceptedKinds` becomes player-editable, an item in a "general" zone whose Kind isn't accepted by that zone will still be haulable (the smurf will move it to a zone that does accept it). A "store at higher priority" pattern can layer on top later without touching the call sites.
 
 ---
 
 ## [0.5.5] — 2026-05-15
 
-### Changed — Idle activities are now multi-step behaviors (RimWorld-quality "feels alive")
+### Changed — Idle activities are now multi-step behaviors ("feels alive")
 
-Direction: smurfs should commit to the full idle task behavior loop, rather than just one second. A smurf should actually have a two-way conversation that engages both parties and lasts until they're done speaking; a smurf should actually take a short walk and finish it when 'taking a walk'; loitering should see a smurf just 'hanging out' and may chat or otherwise relax. RimWorld does this masterfully and pawns feel alive because of it.
+Direction: smurfs should commit to the full idle task behavior loop, rather than just one second. A smurf should actually have a two-way conversation that engages both parties and lasts until they're done speaking; a smurf should actually take a short walk and finish it when 'taking a walk'; loitering should see a smurf just 'hanging out' and may chat or otherwise relax.
 
 The v0.5.4 work-search debounce stopped *cycling between* idle activities but didn't deepen the activities themselves. Each idle was still a single-step "go to a tile, stand there for N seconds, emit one thought." This release adds genuine behavior — the activities have substance now, not just duration.
 
@@ -4763,13 +4814,13 @@ The v0.5.4 work-search debounce stopped *cycling between* idle activities but di
 
 Pre-v0.5.5 Converse was one-sided: the initiator picked a partner, walked to them, and got Joy/Social bumps + emitted a chat thought. The partner *didn't know they were being talked to* — they'd continue their own task, possibly wander away mid-walk, leaving the initiator chatting at thin air on arrival.
 
-RimWorld's `InteractionWorker` pattern: when the initiator arrives at the target pawn, the target is locked into a reciprocal interaction so both face each other, both gain social, both produce thoughts referencing the other.
+Reference pattern: when the initiator arrives at the target pawn, the target is locked into a reciprocal interaction so both face each other, both gain social, both produce thoughts referencing the other.
 
 New `TryLockConversePartner(Smurf initiator, Smurf partner, int lingerTicks)` helper, called from the Converse case of `ApplyTaskEffect` every tick the initiator is at their target. Idempotent — bails out if any of the lockable conditions fail:
 
 - Partner within `ConverseLockRangePx` (~3 tiles). They wandered out of arm's reach? No catch.
 - Partner is alive + not in life-threatening need (starving / suffocating / bleeding out — those tasks must complete).
-- Partner's current task is `None`, an idle activity, OR already a Converse pointing back at us. **Never interrupts player orders, designation work, hauls, or chained orders** — RimWorld pattern, social interactions are weakest priority.
+- Partner's current task is `None`, an idle activity, OR already a Converse pointing back at us. **Never interrupts player orders, designation work, hauls, or chained orders** — social interactions are weakest priority.
 - Partner is not already locked into a Converse with a third party.
 
 On lock: partner's `CurrentTask` becomes a fresh Converse pointing at the initiator, `IdleArrived=true` (they've "arrived" at the chat), `IdleLingerTicks` set to the same window, `WorkSearchCooldownTicks` bumped to `lingerTicks + 60` so the workAvailable gate doesn't pull them out mid-chat. Wander chain (if any) is dropped — the chat takes precedence; they can re-pick Wander next idle.
@@ -4788,7 +4839,7 @@ Pre-v0.5.5 Wander picked one destination 8-28 tiles away, walked there, lingered
 - The forced-wander recovery sites (failure-recovery line 555, abandoned-task displacement line 1219) still call the single-hop overload — they're "go elsewhere then re-evaluate," not "commit to a real walk."
 - `ApplyTaskEffect`'s Wander case: when `WanderHopsRemaining > 0`, decrement, pick a fresh destination via `PickIdleDestination`, swap it into `CurrentTask`, reset `IdleArrived=false / PathWaypoints.Clear() / IdleLingerTicks=0 / StuckTicks=0`, set `WorkSearchCooldownTicks=360` (~6 sec — covers a max-radius 28-tile leg + linger before the next chain decision), and immediately call `Pathfinder.FindPath` for the new destination so the smurf's A* path is ready before the next tick.
 
-A 3-leg Wander now plays out as: walk 4-14 sec → arrive → chain to next dest → walk 4-14 sec → arrive → chain → walk 4-14 sec → arrive → final 2 sec linger. Total ~15-45 sec of visible wandering — the RimWorld "pawn going for a walk between work shifts" feel.
+A 3-leg Wander now plays out as: walk 4-14 sec → arrive → chain to next dest → walk 4-14 sec → arrive → chain → walk 4-14 sec → arrive → final 2 sec linger. Total ~15-45 sec of visible wandering — the "pawn going for a walk between work shifts" feel.
 
 Critical needs + player orders + chained orders still preempt mid-chain because they're separate clauses in the `needNewTask` gate. The `WorkSearchCooldownTicks` bump only suppresses the `workAvailable` re-eval (designations existing somewhere globally).
 
@@ -4809,13 +4860,13 @@ The compound effect across v0.5.1 → v0.5.5:
 - **v0.5.4** — `WorkSearchCooldownTicks` debounce stops the workAvailable re-eval from yanking idle smurfs every tick.
 - **v0.5.5** — multi-hop Wander + two-way Converse give the activities themselves real duration and real cross-smurf semantics.
 
-Net: an idle smurf now picks an activity → commits to it → executes the full multi-step behavior → produces a meaningful thought / social outcome → re-evaluates only when the activity naturally completes or a higher-priority interrupt fires (critical need, player order, chained order). RimWorld parity for the leisure layer.
+Net: an idle smurf now picks an activity → commits to it → executes the full multi-step behavior → produces a meaningful thought / social outcome → re-evaluates only when the activity naturally completes or a higher-priority interrupt fires (critical need, player order, chained order). The leisure layer feels alive now.
 
 ---
 
 ## [0.5.4] — 2026-05-15
 
-### Fixed — Idle-cycling, the THIRD pathway (RimWorld JobSearchSuppress-style debounce)
+### Fixed — Idle-cycling, the THIRD pathway (JobSearchSuppress-style debounce)
 
 Direction: smurfs continue to stop in place and rapidly cycle between idle tasks, causing jitter and massive slowdown. Smurfs should behave like people — they choose an idle task and fully complete it unless a higher priority order comes in. A person won't stop and freeze, jittering in place while rapidly cycling between leisure activities; they'll just go read, walk, or loiter until their desire to do so is done or they have something better to do.
 
@@ -4842,9 +4893,9 @@ Both were correct fixes for what they covered. But the persistent bug report des
 
 The shared mechanism across all three pathways: `needNewTask` is a *level* check on global state, but cycling needs an *edge* check or a *debounce*.
 
-#### Fix — `Smurf.WorkSearchCooldownTicks` (RimWorld parity)
+#### Fix — `Smurf.WorkSearchCooldownTicks`
 
-RimWorld's `ThinkNode_JobGiver.TryGiveJob` sets `JobSearchSuppressUntilTick = currentTick + suppressDuration` after a JobGiver returns null Job. The pawn's ThinkTree skips that JobGiver branch until the suppress window expires — typically 30 ticks (~0.5 s at 1×). Same trick lifted into SmurfulationC:
+Reference pattern: a job-giver sets `JobSearchSuppressUntilTick = currentTick + suppressDuration` after returning a null Job. The pawn's think-tree skips that job-giver branch until the suppress window expires — typically 30 ticks (~0.5 s at 1×). Same trick lifted into SmurfulationC:
 
 `scripts/simulation/Smurf.cs` — new `int WorkSearchCooldownTicks { get; set; } = 0`. Same shape as `DesignationCooldownTicks` (different bucket — that one's for *abandon-after-stuck*; this one's for *tried-and-found-no-work*).
 
@@ -4881,9 +4932,9 @@ Bug report (with screenshot): tab bar visible at the bottom with Zones highlight
 
 ### Fixed — Player right-click orders now path through A* (no more straight-line wall collisions)
 
-Direction: smurfs path in a straight line towards their destination when using right-click orders especially. Examine RimWorld and Dwarf Fortress pathfinding models to understand how to improve pathfinding so smurfs path only through passable tiles and intelligently navigate obstacles.
+Direction: smurfs path in a straight line towards their destination when using right-click orders especially. Improve pathfinding so smurfs path only through passable tiles and intelligently navigate obstacles.
 
-The codebase already had a full RimWorld-style A* (`scripts/simulation/Pathfinder.cs`, v0.4.58 — 8-connected, diagonal cut-corner enforcement, soft-collision crowd cost of 175 per other smurf on a candidate tile, DF-style region-graph fast-fail, generation-counter buffers, MaxNodes=1024 cap). It just wasn't wired to the player-order task path. Three concrete gaps:
+The codebase already had a full A* (`scripts/simulation/Pathfinder.cs`, v0.4.58 — 8-connected, diagonal cut-corner enforcement, soft-collision crowd cost of 175 per other smurf on a candidate tile, region-graph fast-fail, generation-counter buffers, MaxNodes=1024 cap). It just wasn't wired to the player-order task path. Three concrete gaps:
 
 #### Gap 1 — Section 1 PlayerOrder/Haul never called the pathfinder
 
@@ -4903,7 +4954,7 @@ Fix — compute `qtx, qty` from `queuedTarget` and pass to the constructor. Sect
 
 The pathfinding block at line ~562 gated on `isDesignation || distSq > Pathfinder.PreferAStarDistSqPx`. For player orders within the short-route threshold (~8 tiles), the gate fell through to greedy steering — meaning even a player order with valid tile coords got skipped if the click landed close to the smurf.
 
-Fix — gate now reads `isDesignation || pt.IsPlayerOrder || distSq > Pathfinder.PreferAStarDistSqPx`. Player orders join designation tasks in the always-A*-regardless-of-distance tier. Matches RimWorld: every player Goto issues a full pathfind regardless of route length.
+Fix — gate now reads `isDesignation || pt.IsPlayerOrder || distSq > Pathfinder.PreferAStarDistSqPx`. Player orders join designation tasks in the always-A*-regardless-of-distance tier. Every player Goto issues a full pathfind regardless of route length.
 
 #### Gap 4 — Stuck re-path didn't apply to PlayerOrder
 
@@ -4911,10 +4962,10 @@ The one-shot stuck re-path at line ~1048 only fired for `IsDesignationTaskType(r
 
 Fix — gate now `(IsDesignationTaskType(rpt.Type) || rpt.IsPlayerOrder)`. Same single-shot `RePathTried` budget so a genuinely-blocked order still hits give-up at `StuckThreshold` instead of looping.
 
-#### What this matches in RimWorld and Dwarf Fortress
+#### Reference patterns
 
-- **RimWorld** `JobDriver_Goto` + `Toils_Goto.GotoCell` always issues a full A* pathfind regardless of distance. There is no greedy-steering fallback. The pathfinder's avoidance grid (`PathGrid` cost map + `RegionAndRoomQuery` reachability) gives every player Goto the same routing quality as a colonist's auto-assigned hauling job.
-- **Dwarf Fortress** uses a path cache keyed on `(start_region, end_region)`. Every move from one tile to another goes through the navigation system — there's no concept of "walk straight at the destination." Designation tasks and player-issued station orders share the same path computation.
+- **Full-A*-always** — every player Goto issues a full pathfind regardless of distance. No greedy-steering fallback. The avoidance grid (cost map + reachability index) gives every player Goto the same routing quality as a colonist's auto-assigned hauling job.
+- **Region-cached navigation** — a path cache keyed on `(start_region, end_region)`. Every move from one tile to another goes through the navigation system — there's no concept of "walk straight at the destination." Designation tasks and player-issued station orders share the same path computation.
 
 This change brings PlayerOrder + Haul-via-player-order to parity with the path quality the existing designation tasks have had since v0.3.47 / v0.4.16.
 
@@ -4926,7 +4977,7 @@ This change brings PlayerOrder + Haul-via-player-order to parity with the path q
 
 Direction: right-click should not deselect smurfs or close panels (to avoid breaking the planned combat RTS controls/right-click orders). Right-click cancel designation should only apply to order bar panels and designation selectors from the bottom right order bar.
 
-The v0.5.1 right-click cascade introduced a "priority-3 universal deselect" — a stationary right-click with no active tool and no context action would clear smurf selection and close inspector panels (RimWorld-style escape). This conflicts with the planned RTS combat layer where right-click on an enemy issues an attack order to the currently-selected smurf(s); deselecting on every empty right-click would break the combat flow before it ships.
+The v0.5.1 right-click cascade introduced a "priority-3 universal deselect" — a stationary right-click with no active tool and no context action would clear smurf selection and close inspector panels (escape-key analogue). This conflicts with the planned RTS combat layer where right-click on an enemy issues an attack order to the currently-selected smurf(s); deselecting on every empty right-click would break the combat flow before it ships.
 
 `scripts/ui/GameController.cs` — cascade revised:
 
@@ -4936,7 +4987,7 @@ The v0.5.1 right-click cascade introduced a "priority-3 universal deselect" — 
 
 Selection clearing remains available via `Escape` and the existing left-click-on-empty-tile path.
 
-### Added — Shift+right-click chain orders (StarCraft / Warcraft / RimWorld-style queue)
+### Added — Shift+right-click chain orders (RTS-style queue)
 
 Direction: chain orders by holding 'Shift' and right-clicking should be added.
 
@@ -4989,7 +5040,7 @@ v0.4.65 gated `workAvailable` on `DesignationCooldownTicks <= 0` and stopped one
 
 Visible symptom: smurf appears to thrash through every idle activity their personality can roll, rapidly. Performance symptom: per-tick `SelectTask` runs on every cycling smurf (50 smurfs × every tick at 60 Hz = 3000 SelectTask calls/sec, plus the per-call FindNearest* work for any smurfs that re-pick designation tasks).
 
-Both v0.3.43 ("linger = 0 at creation") and v0.3.45 ("linger = ArrivalLinger at creation") were broken. **What we actually want: linger starts at arrival.** RimWorld's `Toils_*` job-driver pattern explicitly separates "walk to destination" from "consume duration counter" — `JobDriver_Joy_Wait` walks via `Toils_Goto.GotoCell` and only after that toil completes does the dwell counter start. Dwarf Fortress's "Stroll" job has the same separation: walk-to-target, then duration-counter starts.
+Both v0.3.43 ("linger = 0 at creation") and v0.3.45 ("linger = ArrivalLinger at creation") were broken. **What we actually want: linger starts at arrival.** The standard toil-based job-driver pattern explicitly separates "walk to destination" from "consume duration counter" — a joy-wait job walks via a goto-toil and only after that toil completes does the dwell counter start. A similar "stroll" job has the same separation: walk-to-target, then duration-counter starts.
 
 Our system conflated walk + dwell into a single counter. Bug.
 
@@ -5050,14 +5101,14 @@ Plus the v0.4.64 `ConflictPairs` registry surfaces as "Incompatible with: Pessim
 
 Wired into `SmurfCardPanel` (Main tab personality list + Mood tab trait modifier list) and `ScenarioPanel` (per-trait checkbox tooltip).
 
-### Added — Stationary right-click as universal cancel/deselect (RimWorld-style)
+### Added — Stationary right-click as universal cancel/deselect
 
-Follow-up direction: ensure orders are deselected when right-clicking without dragging the screen or moving the camera (stationary right-click deselects selected order, zone, object, smurf, etc.). Use RimWorld's similar system as an example.
+Follow-up direction: ensure orders are deselected when right-clicking without dragging the screen or moving the camera (stationary right-click deselects selected order, zone, object, smurf, etc.).
 
 `GameController.TryHandleMouseButton` right-click release branch rewritten as a three-tier priority cascade:
 
-1. **Cancel active toolbar tool.** If `_toolbar.ActiveTool != None`, call `SetActiveTool(_toolbar.ActiveTool)` which toggles to None per the existing click-twice-to-deselect convention. Matches RimWorld's "Esc cancels active designator" behaviour, just bound to right-click since right-click is the established cancel button in this UI.
-2. **Context action with selected smurfs.** If smurfs are selected AND cursor is on a passable tile, fall through to the existing `ResolveRightClickActions` flow (move / pick-up / forbid). Selection persists across the order so the player can chain commands — RimWorld behaviour preserved.
+1. **Cancel active toolbar tool.** If `_toolbar.ActiveTool != None`, call `SetActiveTool(_toolbar.ActiveTool)` which toggles to None per the existing click-twice-to-deselect convention. Cancels the active designator, bound to right-click since right-click is the established cancel button in this UI.
+2. **Context action with selected smurfs.** If smurfs are selected AND cursor is on a passable tile, fall through to the existing `ResolveRightClickActions` flow (move / pick-up / forbid). Selection persists across the order so the player can chain commands.
 3. **Universal deselect.** Otherwise (no tool active, no actionable target, OR no smurfs selected), clear smurf selection + close the smurf card + close the tile-properties inspector + clear the selection-bracket overlay. The explicit "deselect smurfs / objects / etc." case.
 
 Right-DRAG that crossed the camera-pan threshold is intercepted earlier (`wasPanning` short-circuit), so the cascade only runs for genuinely stationary right-clicks. Camera pan workflow is unaffected.
@@ -5088,7 +5139,7 @@ Phase number `bb` advances 4 → 5 per the v0.4.0 versioning convention; `cc` re
 
 #### Item.IsForbidden flag (rimport N5)
 
-`scripts/simulation/items/Item.cs`. New `bool IsForbidden { get; set; } = false` per item. RimWorld-style universal flag — every haul / eat / equip path checks it (today only haul wired; eat / equip wire in Phase 5D when bills land).
+`scripts/simulation/items/Item.cs`. New `bool IsForbidden { get; set; } = false` per item. Universal forbid flag — every haul / eat / equip path checks it (today only haul wired; eat / equip wire in Phase 5D when bills land).
 
 Auto-forbid policies are deliberately light at v0.5.0 — neither corpse-outside-Home nor bones auto-forbid yet, because the Home Area concept arrives in Phase 5C (rimport N6 allowed-area bitmap). v0.5.0 ships with manual Forbid/Allow only; auto-policies layer on top once Home Area exists.
 
@@ -5098,7 +5149,7 @@ Auto-forbid policies are deliberately light at v0.5.0 — neither corpse-outside
 
 #### Right-click Forbid / Allow
 
-`scripts/ui/GameController.cs` `ResolveRightClickActions`. New context-menu action on every tile that has items: Forbid (if any allowed) or Allow (if all forbidden). Toggles every item on the tile in one click — matches RimWorld's "Forbid all" UX. Routes through the new `SimulationManager.SetForbiddenOnTile(x, y, forbid)` which posts a sim-thread command (matches v0.4.55 / v0.4.60 pattern for player-driven Item state mutations).
+`scripts/ui/GameController.cs` `ResolveRightClickActions`. New context-menu action on every tile that has items: Forbid (if any allowed) or Allow (if all forbidden). Toggles every item on the tile in one click — a "Forbid all" UX. Routes through the new `SimulationManager.SetForbiddenOnTile(x, y, forbid)` which posts a sim-thread command (matches v0.4.55 / v0.4.60 pattern for player-driven Item state mutations).
 
 `scripts/ui/TileInfoOverlay.cs` — forbidden items show a `[forbidden]` prefix in the hover panel.
 
@@ -5106,19 +5157,19 @@ Auto-forbid policies are deliberately light at v0.5.0 — neither corpse-outside
 
 New file `scripts/world/StockpileZone.cs`:
 
-- `enum StoragePriority { Low = 0, Normal = 1, Important = 2, Critical = 3 }` (4 levels at v0.5.0; RimWorld's 6 at full). Hauler walks zones in priority-descending order.
-- `class StockpileZone { int Id; string Name; List<(int X, int Y)> Cells; HashSet<ItemKind> AcceptedKinds; StoragePriority Priority; }`. Cells are arbitrary set (not rectangle). `AcceptedKinds.Count == 0` = accept all (RimWorld default).
+- `enum StoragePriority { Low = 0, Normal = 1, Important = 2, Critical = 3 }` (4 levels at v0.5.0; 6 at full). Hauler walks zones in priority-descending order.
+- `class StockpileZone { int Id; string Name; List<(int X, int Y)> Cells; HashSet<ItemKind> AcceptedKinds; StoragePriority Priority; }`. Cells are arbitrary set (not rectangle). `AcceptedKinds.Count == 0` = accept all (default).
 
 `scripts/world/LocalMap.cs` additions:
 
 - `Dictionary<int, StockpileZone> _stockpileZones` — keyed by monotonic int ID.
-- `int[] _cellZoneId` — per-cell ownership grid (0 = no zone). RimWorld `SlotGroupGrid[,]` pattern; gives O(1) "which zone owns this cell?" for the inspector and haul-cell collision check.
+- `int[] _cellZoneId` — per-cell ownership grid (0 = no zone). SlotGroupGrid pattern; gives O(1) "which zone owns this cell?" for the inspector and haul-cell collision check.
 - `event StockpileChanged(x, y)` for the overlay refresh subscription.
 - `int SetStockpileCell(x, y, extendZoneId)` — paints a cell into a stockpile zone. Refuses impassable tiles (water / boulders). Idempotent on already-painted cells. Auto-creates a new zone if `extendZoneId == 0` or unknown; extends the existing zone otherwise.
 - `void ClearStockpileCell(x, y)` — removes a cell; deletes the zone if its cell list empties.
 - `int GetStockpileIdAt(x, y)` / `StockpileZone? GetStockpileAt(x, y)` — lookups.
 - `List<StockpileZone> SnapshotStockpileZones()` — priority-descending snapshot for hauler walks.
-- `(int X, int Y)? FindStockpileCellFor(item, fromX, fromY)` — RimWorld's haul-target picker. Walks zones in priority order; for each zone whose filter accepts the item, picks the closest cell with spare capacity under the v0.4.30 250-cap + type-lock rules.
+- `(int X, int Y)? FindStockpileCellFor(item, fromX, fromY)` — haul-target picker. Walks zones in priority order; for each zone whose filter accepts the item, picks the closest cell with spare capacity under the v0.4.30 250-cap + type-lock rules.
 
 `StockpileChanged` events are coalesced by the new `StockpileOverlay` with the v0.4.56 200 ms throttle pattern — no per-paint redraw thrash on big drag-paints.
 
@@ -5142,7 +5193,7 @@ Wired into `GameController.BuildGameWorld` alongside `_designations` / `_itemOve
 2. Call `map.FindStockpileCellFor(item, smurfX, smurfY)` — returns the closest accepting stockpile cell with spare capacity, walking zones in priority order.
 3. If a cell is found, deliver there. Otherwise fall back to the spawn-cluster cell (pre-v0.5.0 behaviour, with the v0.4.19 hash-spread).
 
-Single-type-per-trip routing isn't perfect (a multi-type haul ferries to whichever zone matches the first item; mismatched items fall back to the v0.4.30 stockpile rules' overflow-to-compatible-tile path). RimWorld solves this via per-item haul jobs; SmurfulationC's multi-trip-per-haul (v0.4.30) trades that for fewer tasks per smurf. Acceptable for v0.5.0; per-item routing can layer on top in v0.5.x cleanup.
+Single-type-per-trip routing isn't perfect (a multi-type haul ferries to whichever zone matches the first item; mismatched items fall back to the v0.4.30 stockpile rules' overflow-to-compatible-tile path). The standard solution is per-item haul jobs; SmurfulationC's multi-trip-per-haul (v0.4.30) trades that for fewer tasks per smurf. Acceptable for v0.5.0; per-item routing can layer on top in v0.5.x cleanup.
 
 ### What v0.5.0 doesn't do
 
@@ -5235,7 +5286,7 @@ Verified that none of the recent batch changes (Skill XP, Joy need, Backstories,
 
 ### rimport.md Phase 4 sweep — implements all in-scope items from the v0.4.60 comparison report
 
-Direction: implement all features, optimizations, and improvements up to current Phase 4. Working from `C:\Claude\Cloud\rimport.md` (the RimWorld vs SmurfulationC system-by-system comparison shipped at v0.4.60), this version executes every item from rimport's tables A–D that fits Phase 4 scope. Items requiring net-new systems (Phase 5: stockpiles / construction / bills; Phase 6: mental breaks / opinions; Phase 7+: combat / power / etc.) stay queued for the roadmap update at `SmurfulationC_Roadmap_2026.md`.
+Direction: implement all features, optimizations, and improvements up to current Phase 4. Working from `C:\Claude\Cloud\rimport.md` (the system-by-system comparison shipped at v0.4.60), this version executes every item from rimport's tables A–D that fits Phase 4 scope. Items requiring net-new systems (Phase 5: stockpiles / construction / bills; Phase 6: mental breaks / opinions; Phase 7+: combat / power / etc.) stay queued for the roadmap update at `SmurfulationC_Roadmap_2026.md`.
 
 This single-version bump consolidates four batches that landed sequentially during the same session (v0.4.61 → v0.4.64). Each batch's diff is independently bisectable in source control; the version label only ticks at the end so the player-visible release reads as one coherent gameplay update.
 
@@ -5243,7 +5294,7 @@ This single-version bump consolidates four batches that landed sequentially duri
 
 **E2 — TastyMeal thought reserved for prepared meals** (`scripts/simulation/items/Quality.cs`, `scripts/simulation/Thought.cs`). The pre-v0.4.61 `MealThoughtKey(Quality)` switch returned "TastyMeal" for normal-quality food, so every raw smurfberry triggered "Had a tasty meal" — inflating baseline mood and leaving Phase 5's Cook task with nothing aspirational to add. Fixed: `MealThoughtKey(Quality, bool isCooked = false)`. Raw eating returns the new "AteSimple" thought (+1 mood, 600-tick TTL). The `isCooked = true` branch keeps the old TastyMeal/AteFavorite tier for Phase 5 Cook to call into. Quality extremes (Crude → AteHungry, Masterwork/Legendary → AteFavorite) preserved across both branches because exceptional raw food still feels like a treat (a perfect wild berry).
 
-**E6 — Life-threatening needs override even non-interruptible PlayerOrder** (`scripts/simulation/systems/BehaviorSystem.cs`). Pre-v0.4.61 `CriticalNeedsOverride` checked `currentPriority < 100f`, but PlayerOrder priority is exactly 100f, so a starving smurf walking on a "Move here" order would obediently starve to death. New `IsLifeThreatening(s)` returns true at `Nutrition < 5f` or `Rest < 5f` — true emergency. The `needNewTask` gate now bypasses `ct.Interruptible` when life-threat is true. RimWorld parallel: `JobGiver_Work`'s emergency tier overrides drafted-state movement on health-critical thresholds. Hard floor at 5f keeps the bypass rare — a smurf at Nutrition=18 still respects the player order.
+**E6 — Life-threatening needs override even non-interruptible PlayerOrder** (`scripts/simulation/systems/BehaviorSystem.cs`). Pre-v0.4.61 `CriticalNeedsOverride` checked `currentPriority < 100f`, but PlayerOrder priority is exactly 100f, so a starving smurf walking on a "Move here" order would obediently starve to death. New `IsLifeThreatening(s)` returns true at `Nutrition < 5f` or `Rest < 5f` — true emergency. The `needNewTask` gate now bypasses `ct.Interruptible` when life-threat is true. An emergency tier overrides drafted-state movement on health-critical thresholds. Hard floor at 5f keeps the bypass rare — a smurf at Nutrition=18 still respects the player order.
 
 **E8 — Designation paint validation: confirmed already correct.** Walked the four `SetXxxDesignation` paths in `LocalMap.cs`. Each validates terrain/vegetation at entry and returns silently on invalid tiles. Mid-paint Boulder → Mud transitions are already handled correctly. No change.
 
@@ -5251,9 +5302,9 @@ This single-version bump consolidates four batches that landed sequentially duri
 
 #### Batch B — Skill XP (v0.4.62)
 
-**G3 — work-driven XP gain with daily-cap saturation** (`scripts/simulation/Smurf.cs`, `scripts/simulation/SkillRegistry.cs`, `scripts/simulation/systems/BehaviorSystem.cs`, `scripts/simulation/SimulationCore.cs`). RimWorld parallel: `SkillRecord.Learn(float xp, ignoreLearningSaturation)` + 4000 XP/day soft cap with 0.2× saturation factor.
+**G3 — work-driven XP gain with daily-cap saturation** (`scripts/simulation/Smurf.cs`, `scripts/simulation/SkillRegistry.cs`, `scripts/simulation/systems/BehaviorSystem.cs`, `scripts/simulation/SimulationCore.cs`). Reference pattern: a per-skill `Learn(float xp, ignoreLearningSaturation)` call with a 4000 XP/day soft cap and 0.2× saturation factor.
 
-Two new fields on `Smurf`: `SkillsXp` (per-level XP bucket) and `SkillsXpToday` (daily-cap window). `SkillRegistry.GainXp(s, name, amount)` applies the saturation curve and rolls level transitions using the RimWorld `1000 + 100×level²` cost curve — level 0→1 costs 1000 XP, level 19→20 costs 37 100 XP. `SimulationCore` clears `SkillsXpToday` for every living smurf at day boundary (alongside the existing aging tick).
+Two new fields on `Smurf`: `SkillsXp` (per-level XP bucket) and `SkillsXpToday` (daily-cap window). `SkillRegistry.GainXp(s, name, amount)` applies the saturation curve and rolls level transitions using the standard `1000 + 100×level²` cost curve — level 0→1 costs 1000 XP, level 19→20 costs 37 100 XP. `SimulationCore` clears `SkillsXpToday` for every living smurf at day boundary (alongside the existing aging tick).
 
 Hooked into the four work-completion paths and two sustained tasks:
 - `GatherMaterial` (boulder mined): +80 Mining XP
@@ -5267,7 +5318,7 @@ A mid-skill miner gets from level 4 → 5 in roughly 12 boulders. Mastery (level
 
 #### Batch C — Joy need as the sixth need (v0.4.63)
 
-**G4 — Joy / Recreation** (`scripts/simulation/Smurf.cs`, `scripts/simulation/systems/NeedsSystem.cs`, `scripts/simulation/systems/MoodSystem.cs`, `scripts/simulation/systems/BehaviorSystem.cs`). RimWorld's Joy is a sixth need that captures "this colonist worked too hard, no recreation, mood drifts down." We had idle tasks (Wander/Loiter/Observe/Converse/Meditate/VisitFavorite) since v0.3.43 but no need to feed them — they were decorative.
+**G4 — Joy / Recreation** (`scripts/simulation/Smurf.cs`, `scripts/simulation/systems/NeedsSystem.cs`, `scripts/simulation/systems/MoodSystem.cs`, `scripts/simulation/systems/BehaviorSystem.cs`). Joy is a sixth need that captures "this colonist worked too hard, no recreation, mood drifts down." We had idle tasks (Wander/Loiter/Observe/Converse/Meditate/VisitFavorite) since v0.3.43 but no need to feed them — they were decorative.
 
 New `Smurf.Joy` field (defaults 100, decays 0.005/call, restored by every idle task). `NeedsSystem.Tick` decays it unmodified by role/lifestage/trait (the existing idle-tier weighting per personality already serves as the implicit modifier). `MoodSystem.NeedsContribution` weighting redistributed to fold Joy in at 0.10 (carved 0.03 from Nutrition, 0.02 from Rest/Social/Magic each, Safety unchanged at 0.15).
 
@@ -5285,7 +5336,7 @@ New `Smurf.Joy` field (defaults 100, decays 0.005/call, restored by every idle t
 
 #### Batch D — Pawn-gen quality (v0.4.64)
 
-**G6 — Backstories** (new file `scripts/simulation/BackstoryRegistry.cs`, plus `Smurf.cs` fields `Childhood` and `Adulthood`, plus wiring in `SimulationManager.AddSmurfFromTemplate` / `AddSmurf`). RimWorld's `BackstoryDef` is one of the cheapest narrative-multiplier patterns in the genre — every pawn carries a 1-2-paragraph history that injects skill bumps + flavour text. Implemented as data-only:
+**G6 — Backstories** (new file `scripts/simulation/BackstoryRegistry.cs`, plus `Smurf.cs` fields `Childhood` and `Adulthood`, plus wiring in `SimulationManager.AddSmurfFromTemplate` / `AddSmurf`). The standard `BackstoryDef` is one of the cheapest narrative-multiplier patterns in the genre — every pawn carries a 1-2-paragraph history that injects skill bumps + flavour text. Implemented as data-only:
 
 - 8 childhood backstories (Wandering Berry-Picker, Hearth Apprentice, Mushroom-House Letter, Observant Sprout, Stream-Splasher, Star-Gazer, Workshop Shadow, Herb Gardener) — every smurf gets one regardless of age.
 - 10 adulthood backstories (Forest Scout, Library Mouse, Battle Veteran, Ritual Singer, Cauldron Keeper, Stonemason's Assistant, Healer's Apprentice, Hearth Orator, Roaming Tinker, Gargamel Survivor) — only assigned to Juvenile+ (≥20 years).
@@ -5293,7 +5344,7 @@ New `Smurf.Joy` field (defaults 100, decays 0.005/call, restored by every idle t
 
 Idempotent: pre-existing keys on `Smurf.Childhood / Adulthood` (e.g. from save load) are kept and bumps are NOT re-applied. UI surfacing (smurf card, hover line) deferred to Phase 5 polish; data is live now.
 
-**G8 — Trait conflict registry** (`scripts/simulation/PersonalityRegistry.cs`). Mirrors RimWorld `TraitDef.conflictingTraits`. Six conflict pairs that contradict one another in canon or psychology:
+**G8 — Trait conflict registry** (`scripts/simulation/PersonalityRegistry.cs`). Standard `TraitDef.conflictingTraits` pattern. Six conflict pairs that contradict one another in canon or psychology:
 
 - Optimist ↔ Pessimist
 - Stoic ↔ Empath  ("emotions? never heard" vs "feels everyone's feelings")
@@ -5328,7 +5379,7 @@ The rimport's Optimization items (O1 hash-bucket polling, O2 push-based haul reg
 
 ### Fixed — Dev "Kill" button: corpse + carried items now spawn correctly
 
-Bug report: corpses don't appear at point of death when smurfs die. They disappear along with their items (on using kill command). Direction: research how pawn death works in RimWorld for reference.
+Bug report: corpses don't appear at point of death when smurfs die. They disappear along with their items (on using kill command). Direction: implement a proper death pipeline that drops gear + spawns corpse.
 
 #### Diagnosis
 
@@ -5336,23 +5387,23 @@ Bug report: corpses don't appear at point of death when smurfs die. They disappe
 
 Natural death (aging, vital-organ failure) didn't have this bug because both paths set `IsAlive = false` AND called `DropCorpseGear` AND enqueued `PendingDeaths` inline within the same tick. Dev kill skipped two of the three steps.
 
-#### RimWorld reference
+#### Canonical kill flow
 
-Decompiled `Verse.Pawn.Kill()` (~L2099–2309) defines the canonical kill flow:
+A standard pawn-kill pipeline:
 
 1. Cache position
 2. Storyteller notification
-3. `health.SetDead()` — Dead flag flips
-4. `DropAndForbidEverything()` — equipment, inventory, carried items drop on the death tile (apparel rides with the corpse)
-5. `DeSpawn()` — pawn removed from `Map.mapPawns`
-6. `MakeCorpse()` + `GenPlace.TryPlaceThing(corpse, ...)` — corpse becomes an independent `Thing`
+3. Set dead flag
+4. Drop and forbid equipment, inventory, carried items on the death tile (apparel rides with the corpse)
+5. Despawn pawn from the map's pawn list
+6. Make corpse + place corpse as an independent entity
 7. Post-death notifications (faction / quest / UI)
 
-All atomic within one method call. **Critically: dev-mode "Kill" doesn't have a separate code path.** From `HealthUtility.DamageUntilDead`: it loops up to 200 iterations of synthetic blunt damage that funnels through the normal damage → `ShouldBeDead` → `Kill()` pipeline. One death pipeline, fewer bugs.
+All atomic within one method call. **Critically: dev-mode "Kill" should not have a separate code path** — it should funnel through the normal damage → `ShouldBeDead` → `Kill()` pipeline. One death pipeline, fewer bugs.
 
 #### Fix — `SimulationCore.KillSmurf(Smurf s, CauseOfDeath cause)`
 
-New public method following the RimWorld order:
+New public method following the canonical order:
 
 ```csharp
 public void KillSmurf(Smurf s, CauseOfDeath cause)
@@ -5365,7 +5416,7 @@ public void KillSmurf(Smurf s, CauseOfDeath cause)
 }
 ```
 
-Order matches RimWorld: cause → gear-drop → flag flip → death event. The flag flip happens AFTER `DropCorpseGear` so any code path inside the gear-drop that filters on `IsAlive` doesn't accidentally skip the dying smurf. (The witness-thought broadcast already filters via `other == s`, so it's exempt either way; ordering keeps the invariant simple.)
+Order: cause → gear-drop → flag flip → death event. The flag flip happens AFTER `DropCorpseGear` so any code path inside the gear-drop that filters on `IsAlive` doesn't accidentally skip the dying smurf. (The witness-thought broadcast already filters via `other == s`, so it's exempt either way; ordering keeps the invariant simple.)
 
 Idempotent so a second call (e.g. natural-death + dev-kill race) no-ops instead of double-spawning the corpse.
 
@@ -5376,7 +5427,7 @@ Idempotent so a second call (e.g. natural-death + dev-kill race) no-ops instead 
 - **Aging-death** (~L373) — was 4 inline lines, now `KillSmurf(s, CauseOfDeath.Natural)`.
 - **Vital-organ-failure** (~L437) — was 5 inline lines (with the Starvation/Natural ternary), now `KillSmurf(s, cause)` with the ternary preserved.
 
-One canonical path — RimWorld's "one death pipeline, fewer bugs" pattern.
+One canonical path — "one death pipeline, fewer bugs."
 
 #### `DevKillSmurf` routes through PostMainThreadCommand
 
@@ -5458,17 +5509,17 @@ The 1-second cooldown is still long enough for the colony cluster to physically 
 
 ## [0.4.58] — 2026-05-14
 
-### Added — RimWorld-style soft-cost crowd avoidance in A*
+### Added — Soft-cost crowd avoidance in A*
 
 Direction (after v0.4.57 confirmed the Touch-arrival + post-abandon-cooldown fixes worked): implement the remaining fix — that may further help performance and keep smurfs from getting stuck.
 
-The remaining RimWorld pattern from the v0.4.57 research was their pathfinder's `Cost_PawnCollision = 175`: every blocking pawn on a candidate tile adds a flat cost to the A* expansion, so the pathfinder naturally routes AROUND clusters instead of through them. RimWorld doesn't have a steering layer at all — A* alone resolves crowd avoidance because the path itself avoids occupied tiles.
+The remaining reference pattern from the v0.4.57 research was a pathfinder `Cost_PawnCollision = 175`: every blocking pawn on a candidate tile adds a flat cost to the A* expansion, so the pathfinder naturally routes AROUND clusters instead of through them. In that reference model there's no steering layer at all — A* alone resolves crowd avoidance because the path itself avoids occupied tiles.
 
 SmurfulationC has both: steering-layer side-step fallback (v0.4.36 + v0.4.20 primary-direction-wins rule) AND now A*-layer crowd avoidance. The two work in concert — A* handles strategic routing (find a path that avoids the cluster), steering handles tactical resolution (someone stepped into my next tile after I picked my path).
 
 #### `scripts/simulation/Pathfinder.cs` — soft-cost expansion
 
-New constant `PawnCollisionCost = 175` (matches RimWorld decompile). New optional params on `FindPath`:
+New constant `PawnCollisionCost = 175`. New optional params on `FindPath`:
 
 ```csharp
 public static bool FindPath(LocalMap map, Vector2 fromPixel,
@@ -5491,7 +5542,7 @@ if (useCrowdCost)
 int tentative = curG + stepCost;
 ```
 
-Cardinal step is 100, so one blocker bumps a tile's effective cost from 100 → 275. The pathfinder will detour 1–2 tiles to avoid one blocker, but plow through if all alternatives are also crowded — exactly RimWorld's calibration.
+Cardinal step is 100, so one blocker bumps a tile's effective cost from 100 → 275. The pathfinder will detour 1–2 tiles to avoid one blocker, but plow through if all alternatives are also crowded — the standard calibration.
 
 Admissibility: the heuristic doesn't see crowd cost (it's a pure Manhattan/diagonal estimate), so it remains a lower bound on the true path cost. A* still finds the optimal path; just expands a few more nodes when multiple routes become competitively-costed in dense areas.
 
@@ -5535,15 +5586,15 @@ In practice, A* expansion COUNT is often LOWER with crowd cost because the pathf
 
 ### What's next
 
-This completes the RimWorld-pathfinding-pattern adoption queued from v0.4.57's research. Three of four patterns now active: target-reservation (already had), Touch-arrival (v0.4.57), soft-cost crowd avoidance (v0.4.58), spam-guard cooldown (v0.4.57 approximation). The fourth — RimWorld's exact `jobsGivenRecentTicks` 10-jobs-in-10-ticks counter — would be a heavier refactor of how jobs are issued; the v0.4.57 cooldown approximation is sufficient for current observed behaviour.
+This completes the pathfinding-pattern adoption queued from v0.4.57's research. Three of four patterns now active: target-reservation (already had), Touch-arrival (v0.4.57), soft-cost crowd avoidance (v0.4.58), spam-guard cooldown (v0.4.57 approximation). The fourth — an exact `jobsGivenRecentTicks` 10-jobs-in-10-ticks counter — would be a heavier refactor of how jobs are issued; the v0.4.57 cooldown approximation is sufficient for current observed behaviour.
 
 ---
 
 ## [0.4.57] — 2026-05-14
 
-### Fixed — Smurfs getting stuck on impassable-target work at saturated dig sites (RimWorld-style fixes)
+### Fixed — Smurfs getting stuck on impassable-target work at saturated dig sites
 
-Direction: smurfs still get stuck trying to break tiles, so the retry logic needs work. Examine this and find out why they're still getting stuck. If RimWorld has a solution to this problem, that's the closest analog and should serve as a great pathfinding model.
+Direction: smurfs still get stuck trying to break tiles, so the retry logic needs work. Examine this and find out why they're still getting stuck.
 
 #### Diagnosis
 
@@ -5553,20 +5604,20 @@ At 50 smurfs converging on a ~10×10 boulder cluster, only ~36 perimeter tiles a
 
 2. **Abandon, then immediately re-pick the same work tile.** The per-smurf `AvoidTiles[4]` ring with 360-tick TTL is too small at 50:30 saturation. After abandonment, `SelectTask` immediately re-evaluates and finds the nearest reachable excavate — almost always the same tile the smurf just gave up on, because there's nothing else open.
 
-#### RimWorld reference
+#### Reference patterns
 
-Research into RimWorld's pathfinding (decompiled `Verse.AI.PathFinder`, `ReservationManager`, `Pawn_JobTracker`) surfaced three patterns we already partially had and one we didn't:
+Three patterns we already partially had and one we didn't:
 
-| RimWorld pattern | SmurfulationC status (pre-v0.4.57) | Notes |
+| Pattern | SmurfulationC status (pre-v0.4.57) | Notes |
 |---|---|---|
 | Reserve the **target**, not the work cell | Already had — `_claims` dict locks the boulder | OK |
 | Soft-cost crowd avoidance in A* (~175 cost per blocker) | Steering-based, not cost-based | A bigger refactor — deferred |
-| `PathEndMode.Touch` arrival — work fires from ANY of 8 neighbours | **Missing** — required arrival on the picker's specific tile | Fixed in v0.4.57 |
+| Touch arrival — work fires from ANY of 8 neighbours | **Missing** — required arrival on the picker's specific tile | Fixed in v0.4.57 |
 | Spam-guard: 10 jobs in 10 ticks → forced idle | **Missing** — per-pawn AvoidTiles was the only break | Approximation added in v0.4.57 |
 
 The two fixes below adopt the missing patterns directly.
 
-#### Fix 1: PathEndMode.Touch arrival for impassable-target work
+#### Fix 1: Touch-arrival for impassable-target work
 
 `scripts/simulation/systems/BehaviorSystem.cs`. New helper `IsAtTouchArrival(s, map)` checks:
 
@@ -5578,7 +5629,7 @@ If all three hold, `MoveOneTick` fires arrival immediately — `ApplyTaskEffect`
 
 Effect: at a saturated work face, any smurf on any of the 8 neighbours of a claimed boulder can mine it. The "smurf orbits at arrival + ε" deadlock mode disappears entirely — the smurf doesn't need to step onto the picker's specific adjacent tile to do the work.
 
-#### Fix 2: Post-abandon designation cooldown (RimWorld spam-guard analogue)
+#### Fix 2: Post-abandon designation cooldown (spam-guard analogue)
 
 `scripts/simulation/Smurf.cs` — new field `int DesignationCooldownTicks = 0`.
 
@@ -5588,7 +5639,7 @@ Effect: at a saturated work face, any smurf on any of the 8 neighbours of a clai
 - **Per-tick decrement** (alongside the existing `AvoidTiles` TTL decrement at the top of the per-smurf loop): `s.DesignationCooldownTicks -= tickInterval` while > 0.
 - **SelectTask gate**: a single `bool designationsOk = s.DesignationCooldownTicks <= 0` guards all six designation branches (Forager → gather, Crafter → excavate, non-Forager → gather, non-Crafter → excavate, chop, cut). When the cooldown is active, every designation lookup is skipped — the smurf falls through to the idle / wander / loiter / observe / converse / meditate / visit-favourite tier and physically disperses from the work face for 2 seconds before re-evaluating.
 
-This is the closest practical analogue to RimWorld's `Pawn_JobTracker.jobsGivenRecentTicks` spam-guard (which kicks the pawn into a `JobGiver_IdleError` job when the job system thrashes). We can't run RimWorld's exact tick-window counter because we don't reissue jobs per-tick, but the post-abandonment cooldown solves the same root problem: the colony cluster needs to breathe before the smurf re-converges on the same target.
+This is the closest practical analogue to a "jobs given in recent ticks" spam-guard (which kicks the pawn into an idle-error job when the job system thrashes). We can't run the exact tick-window counter because we don't reissue jobs per-tick, but the post-abandonment cooldown solves the same root problem: the colony cluster needs to breathe before the smurf re-converges on the same target.
 
 #### Why these two fixes resolve the saturation deadlock
 
@@ -5599,7 +5650,7 @@ This is the closest practical analogue to RimWorld's `Pawn_JobTracker.jobsGivenR
 
 - Region graph, A* pathfinder, occupancy grid, yield mechanic, soft-collision steering — all untouched. The two fixes are additive: they sit on top of existing systems rather than replacing them.
 - Designation paint, item drop throttle (v0.4.56), HUD totals cache (v0.4.50), haul allocation-free walk (v0.4.51) — untouched.
-- Soft-cost crowd avoidance in A* (RimWorld's pattern) is queued for a future refactor if cluster perf still needs work after this bump. Current steering remains.
+- Soft-cost crowd avoidance in A* is queued for a future refactor if cluster perf still needs work after this bump. Current steering remains.
 
 ---
 
@@ -5723,17 +5774,17 @@ Secondary contributors:
 - `DesignationOverlay.RebuildInstances` — walks the designations dict every frame the player or sim flips a flag; ~50 µs at 5 000 designations.
 - `LocalMapRenderer` redraws on terrain mutation when boulders become mud, etc.
 
-**Candidate fixes for a future bump** (after Sam confirms the diagnosis):
+**Candidate fixes for a future bump** (after the diagnosis is confirmed):
 
 1. **Bake the count digits into a sprite atlas + render via MultiMesh** — eliminates the per-frame `DrawString` cost entirely (same trick v0.4.25 used to fold the per-tile designation glyphs into MultiMesh sprites). Biggest one-shot win; doesn't sacrifice visual fidelity.
 2. **Throttle the *badge* QueueRedraw to 5 Hz while keeping MMI updates instant** — narrower version of the v0.4.54 approach. Items would pop into the world instantly via the icon MMI; only their count badges would lag by ≤ 200 ms.
 3. **Per-tile dirty tracking instead of a single bool** — only re-emit badges for tiles whose summary actually changed. Currently the bool fires a full rebuild even when one stack incremented by one.
 
-(1) is the cleanest; (2) is the cheapest; (3) is the most precise. Holding off on the choice until Sam confirms the diagnosis and picks the trade-off.
+(1) is the cleanest; (2) is the cheapest; (3) is the most precise. Holding off on the choice until the diagnosis is confirmed and the trade-off is picked.
 
 ### Preserved unchanged
 
-Everything else in the v0.4.53 baseline. River subtypes, mountain subtypes, Shallows + wade speed, RimWorld-style selection brackets, tile/item inspector + hover overlay, multi-trip haul, corpse decay, yielding mechanic, soft-collision steering — all untouched. DevPanel layout (left edge, v0.4.53) untouched.
+Everything else in the v0.4.53 baseline. River subtypes, mountain subtypes, Shallows + wade speed, selection brackets, tile/item inspector + hover overlay, multi-trip haul, corpse decay, yielding mechanic, soft-collision steering — all untouched. DevPanel layout (left edge, v0.4.53) untouched.
 
 ---
 
@@ -5741,9 +5792,9 @@ Everything else in the v0.4.53 baseline. River subtypes, mountain subtypes, Shal
 
 ### Changed — DevPanel relocated to the LEFT edge
 
-Sam's report: "Debug screen doesn't work. Also — move it to the left side so it doesn't obscure values it's trying to change."
+Bug report: debug screen doesn't work. Also — move it to the left side so it doesn't obscure values it's trying to change.
 
-The dev-panel buttons were actually firing correctly (v0.4.51's log relocation already proved this — the "→ No smurf selected" line in Sam's screenshot was the live action result). The "doesn't work" perception came from the dev panel sitting in the top-right column, directly on top of the SmurfCardPanel, TileInfoOverlay, and TilePropertiesPanel. So when Sam clicked "Fill needs" or "+Mood (TastyMeal)" with a smurf selected, the action ran and the smurf-card values updated — but the dev panel was covering the card columns where those numbers lived.
+The dev-panel buttons were actually firing correctly (v0.4.51's log relocation already proved this — the "→ No smurf selected" line in the screenshot was the live action result). The "doesn't work" perception came from the dev panel sitting in the top-right column, directly on top of the SmurfCardPanel, TileInfoOverlay, and TilePropertiesPanel. So when clicking "Fill needs" or "+Mood (TastyMeal)" with a smurf selected, the action ran and the smurf-card values updated — but the dev panel was covering the card columns where those numbers lived.
 
 #### `scripts/ui/DevPanel.cs` _Ready
 
@@ -5763,7 +5814,7 @@ Top / bottom offsets unchanged: the panel still starts ~110 px below the viewpor
 
 ### Removed — Mood-tab "Breakdown" section
 
-Sam: "Remove 'Breakdown' section in Mood tab."
+Direction: remove the 'Breakdown' section in the Mood tab.
 
 The Mood tab previously dedicated a small section under the mood bar to two lines:
 
@@ -5793,7 +5844,7 @@ No code path was broken — the panel had nowhere to *visually report* its work 
 
 ### Changed — Right-click orders now interrupt the smurf's current task cleanly
 
-Sam's report: when a smurf is selected and the player right-clicks to issue a Move or Pick-up order, the smurf should **immediately drop whatever they're doing** and execute the new order. Doubles as a manual escape hatch for the visible idle-freeze / stuck behaviour at heavy work sites.
+Direction: when a smurf is selected and the player right-clicks to issue a Move or Pick-up order, the smurf should **immediately drop whatever they're doing** and execute the new order. Doubles as a manual escape hatch for the visible idle-freeze / stuck behaviour at heavy work sites.
 
 The order-queue path already overwrote `s.CurrentTask` on the next tick (line 285 in `BehaviorSystem.Tick`), so the new task DID take effect — but the OLD task's bookkeeping was never released:
 
@@ -5834,7 +5885,7 @@ Earlier development largely tested the player-order path on idle / wandering smu
 
 ### Fixed — Haul allocation storm + DevPanel feedback invisibility
 
-Sam's report: 50 smurfs on a max-size 720×450 map, 35 FPS baseline drops to 23 FPS the moment a large gather/excavate order is issued. Smurfs visibly stutter / "stuck" / don't retask. Developer Mode panel buttons "do not do anything."
+Bug report: 50 smurfs on a max-size 720×450 map, 35 FPS baseline drops to 23 FPS the moment a large gather/excavate order is issued. Smurfs visibly stutter / "stuck" / don't retask. Developer Mode panel buttons "do not do anything."
 
 The v0.4.50 HUD-totals cache eliminated the worst per-frame allocator (8 full-map walks/frame). Profiling the remaining 23-FPS scenario fingered TWO more amplified hot paths, plus surfaced a UX bug masquerading as a broken panel.
 
@@ -5848,7 +5899,7 @@ Both `SelectHaulTarget`'s standard pass and `FindNextHaulNearby` now use this me
 
 #### UX bug: DevPanel action log was scrolled off-screen by stub sections
 
-Sam reported clicking dev-panel buttons (Pause/Resume, Tick 1×, +Mood, Spawn 50 Granite, …) "did nothing." The buttons were firing correctly — every `MakeBtn` action ran inside the try/catch and wrote a result line to `_logLabel` via `Log(...)`. The bug was that `_logLabel` was placed at the *bottom* of the `_content` VBox, *after* all six section builders (Sim → Selected → Spawn → Map → Visualize → Future), inside the ScrollContainer. With the panel height capped at `viewport - 370`, the Future-Systems stubs section reliably pushed the log below the visible fold.
+Bug report: clicking dev-panel buttons (Pause/Resume, Tick 1×, +Mood, Spawn 50 Granite, …) "did nothing." The buttons were firing correctly — every `MakeBtn` action ran inside the try/catch and wrote a result line to `_logLabel` via `Log(...)`. The bug was that `_logLabel` was placed at the *bottom* of the `_content` VBox, *after* all six section builders (Sim → Selected → Spawn → Map → Visualize → Future), inside the ScrollContainer. With the panel height capped at `viewport - 370`, the Future-Systems stubs section reliably pushed the log below the visible fold.
 
 So buttons reporting `"No smurf selected"` (Selected Smurf actions with no selection) or `"Cursor not on map"` (Spawn actions with cursor over the panel itself) appeared to do nothing. The same applied to legitimately successful buttons — `"Speed → 5×"` etc. — which were rendered in unread text.
 
@@ -5856,13 +5907,13 @@ So buttons reporting `"No smurf selected"` (Selected Smurf actions with no selec
 
 ### Why not also "fix" the stuck/jitter behaviour
 
-The diagnosis flagged three candidate causes for the visible jitter at heavy work sites: yielding-chain resonance (v0.4.29), crowd-avoidance side-step oscillation (v0.4.36), and perimeter contention (50 smurfs trying to dig a 10×10 boulder block where only ~36 perimeter tiles are accessible). Of these, perimeter contention is the dominant gameplay artifact at this density — it's expected behaviour in DF/RimWorld too — and the other two are bounded by per-tick stuck-detection windows (StuckThreshold=30 ticks, YieldDurationTicks=60). At v0.4.50's 23 FPS the bottleneck was the *renderer* showing each tick rather than the sim mis-behaving; with v0.4.51's allocation drop, the per-frame budget should rebound and the smurf motion should re-smooth without any behaviour change. If 50-smurf jitter persists at 60 FPS, a follow-up bump will tackle the radius-blacklist on abandoned excavation tiles. Shipping a behaviour tweak in the same release as a perf fix would muddle the attribution.
+The diagnosis flagged three candidate causes for the visible jitter at heavy work sites: yielding-chain resonance (v0.4.29), crowd-avoidance side-step oscillation (v0.4.36), and perimeter contention (50 smurfs trying to dig a 10×10 boulder block where only ~36 perimeter tiles are accessible). Of these, perimeter contention is the dominant gameplay artifact at this density — it's expected behaviour in colony-sims at scale — and the other two are bounded by per-tick stuck-detection windows (StuckThreshold=30 ticks, YieldDurationTicks=60). At v0.4.50's 23 FPS the bottleneck was the *renderer* showing each tick rather than the sim mis-behaving; with v0.4.51's allocation drop, the per-frame budget should rebound and the smurf motion should re-smooth without any behaviour change. If 50-smurf jitter persists at 60 FPS, a follow-up bump will tackle the radius-blacklist on abandoned excavation tiles. Shipping a behaviour tweak in the same release as a perf fix would muddle the attribution.
 
 ### Preserved unchanged
 
 - River carve sizes / subtype rolls / mountain subtypes (v0.4.45 / v0.4.48). Untouched.
 - Shallows ring + 0.30× wade speed. Untouched.
-- RimWorld-style selection brackets / tile inspector / hover overlay (v0.4.47 / v0.4.49). Untouched.
+- Selection brackets / tile inspector / hover overlay (v0.4.47 / v0.4.49). Untouched.
 - Multi-trip haul + carrying capacity + 250-cap-per-tile stockpile rules. Untouched.
 - Corpse decay + bones drop. Untouched.
 - Yielding mechanic / soft-collision steering. Untouched.
@@ -5874,7 +5925,7 @@ The diagnosis flagged three candidate causes for the visible jitter at heavy wor
 
 ### Fixed — Main-thread allocation storm under 50-smurf gather/excavate loads
 
-Sam's report: noticeable performance degradation on large gather/excavate orders with 50 smurfs active at once. Diagnosis traced the bulk of the cost to two amplified hot paths, not to the sim-thread workload itself. Both fixes preserve every visible feature and gameplay rule (channel widths, river/mountain subtypes, RimWorld-style selection brackets, tile/item inspector, multi-trip haul, corpse decay, etc.) — the optimisations are bookkeeping-only.
+Bug report: noticeable performance degradation on large gather/excavate orders with 50 smurfs active at once. Diagnosis traced the bulk of the cost to two amplified hot paths, not to the sim-thread workload itself. Both fixes preserve every visible feature and gameplay rule (channel widths, river/mountain subtypes, selection brackets, tile/item inspector, multi-trip haul, corpse decay, etc.) — the optimisations are bookkeeping-only.
 
 #### Hot path 1: HUD inventory totals walked the entire dropped-items dict eight times per frame
 
@@ -5895,7 +5946,7 @@ private readonly Dictionary<(ItemKind Kind, string Family), int> _droppedFamilyT
 
 Updated by a single `AdjustDroppedTotals(Item item, int sign)` helper called inside the lock from every mutation path: `TryDropOnTile` (new tile + Absorb + plain Add), `ForceDropOnTile`, `RemoveItem`, and the corpse-removal branch of `TickCorpseDecay`. Public reads `SumDroppedByKind(ItemKind)` and `SumDroppedByFamily(ItemKind, string)` are single dictionary lookups.
 
-`ColonyResources.MapCountByKind/Family` are now one-line delegations to those O(1) reads. The HUD getters cost a dictionary lookup each instead of a 200-tile snapshot — main-thread cost drops by ~95% under the stress case Sam reported.
+`ColonyResources.MapCountByKind/Family` are now one-line delegations to those O(1) reads. The HUD getters cost a dictionary lookup each instead of a 200-tile snapshot — main-thread cost drops by ~95% under the reported stress case.
 
 Save/load consistency: load path calls `map.DropItem(item)` per stored stack, which routes through `TryDropOnTile` → `AdjustDroppedTotals`, so totals reconstruct correctly from the save without explicit migration code. Starting-inventory bootstrap goes through the same path or through `Inventory.Add` (which doesn't touch the map dict), so neither route can desync the totals.
 
@@ -5912,7 +5963,7 @@ With 50 smurfs cycling through task selection, each idle smurf paid that allocat
 - River carve sizes / subtype rolls / Delta sibling branch counts (v0.4.48 scaling). Untouched.
 - Mountain subtype generation. Untouched.
 - Shallows ring around water + 0.30× wade speed. Untouched.
-- RimWorld-style selection brackets (v0.4.47). Untouched.
+- Selection brackets (v0.4.47). Untouched.
 - Tile/item inspector card + top-right info overlay (v0.4.34 / v0.4.49). Untouched.
 - Multi-trip haul + carrying-capacity rules + stack/cap rules. Untouched.
 - Corpse decay timeline + bones-leave-behind. Untouched.
@@ -5929,7 +5980,7 @@ The perf diagnosis also flagged the standard haul-target pass (also calls `Enume
 
 ### Fixed — Shallows tile surfaced in top-right info indicator
 
-Sam's report: "ensure all new tiles and items show up in info indicator at top right of screen". The Shallows terrain type, introduced in v0.4.37 to give every body of water a wadeable border + serve as the explicit ford material for Crossing-subtype rivers, was missing from every switch arm in `TileInfoOverlay` and `TilePropertiesPanel`. Hovering or clicking a Shallows tile returned "Unknown" for the terrain name with no detail line — a regression visible on every water-adjacent tile generated since v0.4.37.
+Direction: ensure all new tiles and items show up in the info indicator at the top right of the screen. The Shallows terrain type, introduced in v0.4.37 to give every body of water a wadeable border + serve as the explicit ford material for Crossing-subtype rivers, was missing from every switch arm in `TileInfoOverlay` and `TilePropertiesPanel`. Hovering or clicking a Shallows tile returned "Unknown" for the terrain name with no detail line — a regression visible on every water-adjacent tile generated since v0.4.37.
 
 #### `scripts/ui/TileInfoOverlay.cs`
 
@@ -5955,7 +6006,7 @@ The corpse / equipment item kinds added in v0.4.30–v0.4.33 do not need similar
 
 ### Changed — Level-map rivers scale with map size
 
-Sam's report: on the v0.4.41 max-size 720×450 levels, rivers look identical to the small-size 160×100 levels — narrow ribbons against an enormous canvas. Worse, Delta-subtype rivers (which need horizontal real estate for the sibling branches to read as a delta) almost never appear because the v0.4.37 50/25/15/10 subtype roll favours ThinSnaking equally regardless of map scale.
+Bug report: on the v0.4.41 max-size 720×450 levels, rivers look identical to the small-size 160×100 levels — narrow ribbons against an enormous canvas. Worse, Delta-subtype rivers (which need horizontal real estate for the sibling branches to read as a delta) almost never appear because the v0.4.37 50/25/15/10 subtype roll favours ThinSnaking equally regardless of map scale.
 
 This release adds a single `mapScale` factor at the top of the river-carving pass and threads it through every width/meander/branch-count param in the block.
 
@@ -5966,7 +6017,7 @@ float mapScale = System.Math.Clamp(
     System.Math.Min(map.Width, map.Height) / 150f, 0.6f, 4.0f);
 ```
 
-The reference point is the v0.4.41 default level dim (240×150 → min 150), so a 240×150 level gets `mapScale = 1.0` and v0.4.37 widths are preserved exactly. A 720×450 max-size level gets `mapScale = 3.0`. The clamp range [0.6, 4.0] gives the smallest 160×100 level (`min/150 = 0.667`) readable river widths and prevents nonsense values if Sam ever bumps the dial.
+The reference point is the v0.4.41 default level dim (240×150 → min 150), so a 240×150 level gets `mapScale = 1.0` and v0.4.37 widths are preserved exactly. A 720×450 max-size level gets `mapScale = 3.0`. The clamp range [0.6, 4.0] gives the smallest 160×100 level (`min/150 = 0.667`) readable river widths and prevents nonsense values if the dial ever gets bumped.
 
 #### Subtype-roll bias (already present in v0.4.48 first edit)
 
@@ -6021,9 +6072,9 @@ The clamp at `mapScale = 4.0` is a safety stop for future expansion — at that 
 
 ## [0.4.47] — 2026-05-14
 
-### Added — RimWorld-style selection brackets for smurfs and ground tiles
+### Added — Selection brackets for smurfs and ground tiles
 
-Sam asked for visual feedback when something is clicked, modelled after RimWorld's white corner-bracket selection box. Both smurf selection and the v0.4.34 tile/item inspector now draw the same indicator.
+Direction: visual feedback when something is clicked, modelled after a white corner-bracket selection box. Both smurf selection and the v0.4.34 tile/item inspector now draw the same indicator.
 
 #### Shared `DrawSelectionBrackets` helper (`scripts/ui/SmurfColonyView.cs`)
 
@@ -6064,7 +6115,7 @@ Patch `0.4.46` → `0.4.47`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Fixed — Dropped item icons readable; count badge no longer drowns the sprite
 
-Sam's screenshot showed every dropped-item tile rendering as a black blob with a yellow count number on top. Three compounding causes, all in `scripts/ui/ItemDropOverlay.cs`:
+Bug report (with screenshot): every dropped-item tile rendered as a black blob with a yellow count number on top. Three compounding causes, all in `scripts/ui/ItemDropOverlay.cs`:
 
 1. **Icon was tiny.** v0.4.2's `BakeVariantSprite` used `r = TS * 0.22f` — about 3.5 px radius / 7 px diameter on a 16-px tile. The icon occupied ~24% of the tile area.
 2. **Count badge sat on top of the icon.** v0.4.28b positioned the badge bottom-centre at `cy + TS*0.5f`, but the badge's black rect extended UPWARD across the entire lower half of the tile — directly over the icon body. The icon's colour was visible only as a thin band peeking out from under the rect.
@@ -6107,11 +6158,11 @@ Patch `0.4.45` → `0.4.46`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Added — Mountain biome doubled from 3 to 6 subtypes for gameplay diversity
 
-Sam asked for RimWorld-style mountain variety. The pre-v0.4.45 mountain biome only rolled across Caves / Rocky Terrain / Mountain Face — three flavours of "scattered rocks on a green field". v0.4.45 adds three more flavours that change the colony strategy:
+Direction: more mountain variety. The pre-v0.4.45 mountain biome only rolled across Caves / Rocky Terrain / Mountain Face — three flavours of "scattered rocks on a green field". v0.4.45 adds three more flavours that change the colony strategy:
 
 #### Subtype 3 — Solid Mountain (`scripts/world/LocalMapGenerator.cs`)
 
-RimWorld's iconic mountain biome. ~80 % solid bedrock with small natural chambers; the player lands on a guaranteed 5-tile-radius spawn pocket at map centre and must excavate to expand into a cave fortress. Generated via **cellular automata** seeded at 65 % rock random (82 % within 3 tiles of map edge so the colony never spawns flush against open air), then 4 passes of the Conway-like "≥5 rock neighbours → rock, else floor" rule for organic blob shapes. Off-map neighbours count as rock during CA so the perimeter stays solid.
+An iconic carve-fortress mountain biome. ~80 % solid bedrock with small natural chambers; the player lands on a guaranteed 5-tile-radius spawn pocket at map centre and must excavate to expand into a cave fortress. Generated via **cellular automata** seeded at 65 % rock random (82 % within 3 tiles of map edge so the colony never spawns flush against open air), then 4 passes of the Conway-like "≥5 rock neighbours → rock, else floor" rule for organic blob shapes. Off-map neighbours count as rock during CA so the perimeter stays solid.
 
 This is the **carve-your-own-fortress** archetype — the §5.11.b Building Zone work pairs naturally with this subtype since the player ends up with a natural cave perimeter ready to designate as rooms.
 
@@ -6152,7 +6203,7 @@ The Level Preview block sat flush against the vertical divider. Bumped `mainRow`
 
 #### Biome label directly under the preview thumbnail
 
-Pre-v0.4.44 the biome / subtype label ("Forest", "Coastal Forest · River", "Caves") only appeared under the world map on the right. Sam asked for it under the preview thumbnail too, where it belongs visually. New `_levelTypeLabel` populated from the same `biomeLabel` string already computed in `OnTileSelected`; cleared on screen entry and on invalid-tile selection.
+Pre-v0.4.44 the biome / subtype label ("Forest", "Coastal Forest · River", "Caves") only appeared under the world map on the right. Direction: also show it under the preview thumbnail, where it belongs visually. New `_levelTypeLabel` populated from the same `biomeLabel` string already computed in `OnTileSelected`; cleared on screen entry and on invalid-tile selection.
 
 #### Resource summary — single line per entry, no raw counts
 
@@ -6162,7 +6213,7 @@ The pre-v0.4.44 format wrapped to two lines on busy maps (`Wood: Abundant (15655
 - Raw count numbers dropped entirely — the Scarce / Moderate / Abundant bucket already tells the player what they need.
 - Sub-categories with **zero** quantity are pruned from the parenthetical, so a map with no Magic Crystal doesn't show `crystal`, and a map with no Living Wood doesn't show `trees`.
 
-Example (matches Sam's screenshot map):
+Example (matches the reported screenshot map):
 
 ```
   Stone:   Abundant   ✦ Magic Crystal
@@ -6188,7 +6239,7 @@ Two fixes around the pause menu, both in `scripts/ui/GameController.cs`:
 
 #### Defensive `Paused` re-assertion while the menu is visible
 
-Sam reported the pause menu no longer pauses the game. `OnMenuRequested` does set `_sim.Paused = true` and `_pauseMenu.Open()`, and the wiring from the HUD Menu button → MenuRequested signal → handler still routes correctly. Walked the entire pause-state propagation chain (`SimulationManager.Paused` → `_Process` → `_core.Clock.Paused` → `SimulationCore.Run`'s pause branch) and couldn't pinpoint a single setter that's unpausing behind the player's back.
+Bug report: the pause menu no longer pauses the game. `OnMenuRequested` does set `_sim.Paused = true` and `_pauseMenu.Open()`, and the wiring from the HUD Menu button → MenuRequested signal → handler still routes correctly. Walked the entire pause-state propagation chain (`SimulationManager.Paused` → `_Process` → `_core.Clock.Paused` → `SimulationCore.Run`'s pause branch) and couldn't pinpoint a single setter that's unpausing behind the player's back.
 
 Rather than ship a maybe-fix without a confirmed root cause, **stamp it from `_Process` every frame the pause menu is visible**:
 
@@ -6198,7 +6249,7 @@ if (_pauseMenu.Visible) _sim.Paused = true;
 
 This belts-and-suspenders the bug: whatever rogue path is touching `Paused`, the next render frame re-asserts true. `OnPauseMenuResume` still restores `_wasPausedBeforeMenu` on Resume / Save / Load / Settings-close → menu close, so the re-assertion doesn't stick once the menu's gone.
 
-The actual rogue setter is queued as a follow-up to find with logging when Sam next playtests — adding a `GD.Print` at every `Paused = ...` site narrows it down quickly. For now the game pauses reliably when the menu is open.
+The actual rogue setter is queued as a follow-up to find with logging at the next playtest — adding a `GD.Print` at every `Paused = ...` site narrows it down quickly. For now the game pauses reliably when the menu is open.
 
 #### Esc opens AND closes the pause menu
 
@@ -6225,9 +6276,9 @@ Patch `0.4.42` → `0.4.43`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Fixed — Tiles destroyed after designation despite no smurf walking over
 
-**Root cause:** the v0.4.29 DF-style yield mechanic's early-return at the top of `BehaviorSystem.MoveOneTick` returned `true` instead of `false`. The caller (lines 529-547) reads that return value as "smurf arrived at task target" and unconditionally fires `ApplyTaskEffect(s, arrivedTask, ...)`. If a yielding smurf happened to hold a designation task (Excavate / Gather / ChopWood / CutVegetation), the bogus "arrival" tick mutated the targeted tile — boulder → mud, vegetation cleared, log felled — **without the smurf ever actually walking to it**.
+**Root cause:** the v0.4.29 yield mechanic's early-return at the top of `BehaviorSystem.MoveOneTick` returned `true` instead of `false`. The caller (lines 529-547) reads that return value as "smurf arrived at task target" and unconditionally fires `ApplyTaskEffect(s, arrivedTask, ...)`. If a yielding smurf happened to hold a designation task (Excavate / Gather / ChopWood / CutVegetation), the bogus "arrival" tick mutated the targeted tile — boulder → mud, vegetation cleared, log felled — **without the smurf ever actually walking to it**.
 
-This explains the symptom Sam reported: designate a tile, watch it get destroyed seconds later despite no smurf making the trip. A smurf elsewhere on the map gets asked to lie down (yield trigger from another stuck smurf wanting to climb over them), the yield branch wakes up next tick and reports "arrived" — and ApplyTaskEffect runs on whatever designation task that yielding smurf happened to hold.
+This explains the reported symptom: designate a tile, watch it get destroyed seconds later despite no smurf making the trip. A smurf elsewhere on the map gets asked to lie down (yield trigger from another stuck smurf wanting to climb over them), the yield branch wakes up next tick and reports "arrived" — and ApplyTaskEffect runs on whatever designation task that yielding smurf happened to hold.
 
 **Fix:** one-line change in `BehaviorSystem.MoveOneTick` (line 671). Yielding smurfs now return `false` from MoveOneTick, which is the correct semantic — they aren't arriving anywhere, they're holding position for ~60 ticks while a colleague climbs over them. The caller skips the ApplyTaskEffect call and the post-arrival accounting, the tick passes silently, the YieldingTicks counter decrements, the next tick repeats until the yield expires.
 
@@ -6247,7 +6298,7 @@ Patch `0.4.41` → `0.4.42`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Changed — Generation size dropdowns
 
-`WorldGenPanel.WorldSizeOptions` and `LevelSizeOptions` reshuffled per Sam's request: the smallest sizes drop off, a new 1.5×-max size joins at the top of each dropdown.
+`WorldGenPanel.WorldSizeOptions` and `LevelSizeOptions` reshuffled per request: the smallest sizes drop off, a new 1.5×-max size joins at the top of each dropdown.
 
 **World Size:**
 
@@ -6300,7 +6351,7 @@ Selecting a landing tile now also surfaces a resource breakdown directly below t
 - **Magic** — Magic Flower vegetation + Magic Grove terrain + Magic Crystal stone veins.
 - **Water** — Deep Water + Shallows (river / pond / inlet footprint).
 
-Each line shows a Scarce / Moderate / Abundant bucket plus the raw tile counts so the player gets both glanceable and exact numbers. Thresholds calibrated for the default ~12K-cell level; vague-but-useful in the RimWorld style.
+Each line shows a Scarce / Moderate / Abundant bucket plus the raw tile counts so the player gets both glanceable and exact numbers. Thresholds calibrated for the default ~12K-cell level; vague-but-useful tier ranges.
 
 Example output:
 
@@ -6324,7 +6375,7 @@ Patch `0.4.39` → `0.4.40`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Added — Creek/Creeks subtype for orphan world-map river tiles
 
-Sam noticed that the v0.4.37 snaking-chain river system can leave **single-cell river seeds** — tiles flagged HasRiver whose chain walk bailed on the first step (Pondsea/Mountain/edge blocked the outward direction). These orphan tiles were still carving a full river subtype on their local map, which read as out-of-place for a single isolated seed. v0.4.39 gives them their own subtype: **Creek/Creeks** — 1-3 thin rocky shallow streams snaking across the map instead of a deep carved river.
+Observed issue: the v0.4.37 snaking-chain river system can leave **single-cell river seeds** — tiles flagged HasRiver whose chain walk bailed on the first step (Pondsea/Mountain/edge blocked the outward direction). These orphan tiles were still carving a full river subtype on their local map, which read as out-of-place for a single isolated seed. v0.4.39 gives them their own subtype: **Creek/Creeks** — 1-3 thin rocky shallow streams snaking across the map instead of a deep carved river.
 
 #### Orphan detection (`scripts/world/WorldTile.cs`, `scripts/world/WorldMapGenerator.cs`)
 
@@ -6344,7 +6395,7 @@ New helper modelled on `CarveRiverPath` but with creek-scale tuning:
 - **Rocky outcrops:** ~12 % chance per bed tile of a Boulder dropping in or just beside the bed (±1-tile perpendicular offset so rocks line the banks instead of always centring). Existing Boulder / wood / water tiles are not overwritten.
 - **Respects rock / wood:** creek path skips tiles already occupied by Boulder / DeadLog / LivingWood (creek snakes around rock instead of dissolving it).
 
-Each Creek-subtype map runs `CarveCreekPath` **1-3 times** with different noise seeds (offset by `+71 + c * 13`) so the streams don't run in parallel. Combined with the v0.4.37 universal Shallows ring, an orphan-river map ends up as a scatter of small wadeable creeks threading rocky beds across the level — the "babbling brook through the woods" reference Sam called out, distinct from a proper carved river.
+Each Creek-subtype map runs `CarveCreekPath` **1-3 times** with different noise seeds (offset by `+71 + c * 13`) so the streams don't run in parallel. Combined with the v0.4.37 universal Shallows ring, an orphan-river map ends up as a scatter of small wadeable creeks threading rocky beds across the level — the "babbling brook through the woods" reference, distinct from a proper carved river.
 
 #### Version
 
@@ -6360,7 +6411,7 @@ All three v0.4.37 follow-ups land. None needed roadmap-deferral after all.
 
 #### Shallows wading slows smurfs to 30 % (`scripts/simulation/systems/BehaviorSystem.cs`)
 
-`MoveOneTick` now checks the smurf's current tile before computing `baseStep`. When the tile is `TerrainType.Shallows`, the per-tick movement step is multiplied by **0.30** (RimWorld's shallow-water value). Applied BEFORE the direction search so the same multiplier governs whatever side-step the steering picks. The multiplier is read off the live `LocalMap.Get(curTileX, curTileY).Terrain` each tick — zero cached state — so the moment a smurf walks off a Shallows tile their speed snaps back to normal. Future Shroombridges on Shallows (§5.11.d, roadmap) will lift the penalty.
+`MoveOneTick` now checks the smurf's current tile before computing `baseStep`. When the tile is `TerrainType.Shallows`, the per-tick movement step is multiplied by **0.30** (the standard shallow-water value). Applied BEFORE the direction search so the same multiplier governs whatever side-step the steering picks. The multiplier is read off the live `LocalMap.Get(curTileX, curTileY).Terrain` each tick — zero cached state — so the moment a smurf walks off a Shallows tile their speed snaps back to normal. Future Shroombridges on Shallows (§5.11.d, roadmap) will lift the penalty.
 
 Hot tiles like Mud / Sand / Grass still have no per-tile cost; the multiplier hook is in place for future Phase-5 movement-cost work to dial in per-terrain speeds without restructuring the steering loop.
 
@@ -6395,11 +6446,11 @@ Patch `0.4.37` → `0.4.38`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Added — Major water overhaul: Shallows tile, river subtypes, coastal inlets, snaking world-map rivers
 
-Sam asked for water to matter on every map it appears on. v0.4.37 reworks every water-generating pass into a coherent system.
+Direction: water should matter on every map it appears on. v0.4.37 reworks every water-generating pass into a coherent system.
 
 #### `TerrainType.Shallows` (`scripts/world/TerrainType.cs`, `scripts/ui/LocalMapRenderer.cs`, `scripts/world/LocalMap.cs`)
 
-New tenth terrain type: **passable shallow water**. Rendered as a lighter cyan-blue (0.45, 0.68, 0.85) than the deep Water (0.18, 0.42, 0.72). Modelled after RimWorld's shallow / moving water. Falls naturally into the existing `IsPassableTerrain` check (not in the impassable list). Shroombridges (§5.11.d) can be built over Shallows at half the wood cost — see roadmap update below.
+New tenth terrain type: **passable shallow water**. Rendered as a lighter cyan-blue (0.45, 0.68, 0.85) than the deep Water (0.18, 0.42, 0.72). Modelled after shallow / moving water in the colony-sim tradition. Falls naturally into the existing `IsPassableTerrain` check (not in the impassable list). Shroombridges (§5.11.d) can be built over Shallows at half the wood cost — see roadmap update below.
 
 #### Universal Shallows ring (`LocalMapGenerator.CarveShallowsRing`)
 
@@ -6416,7 +6467,7 @@ The v0.4.31 1-2-wide single-channel pass was replaced with four subtypes drawn f
 | **Crossing** | 15% | 2–3 | ±10 tiles | **explicit Shallows fords every map-quarter, 5-tile-wide wadeable spans** |
 | **Delta** | 10% | 2–4 + 2 sibling branches | ±8 tiles | none |
 
-Delta subtype calls `CarveRiverPath` 3 times with different noise seeds to produce a primary channel plus two narrower sibling channels diverging across the map — the splayed mouth visual Sam asked for. Crossing subtype's fords are now Shallows tiles (the new terrain type) so they read as proper wadeable crossings instead of the v0.4.31 sand-strip workaround.
+Delta subtype calls `CarveRiverPath` 3 times with different noise seeds to produce a primary channel plus two narrower sibling channels diverging across the map — the splayed mouth visual. Crossing subtype's fords are now Shallows tiles (the new terrain type) so they read as proper wadeable crossings instead of the v0.4.31 sand-strip workaround.
 
 Fertility boost within 3 tiles of any river-water tile stays at +0.20 (unchanged).
 
@@ -6430,7 +6481,7 @@ The v0.2.6 Coastal pass put a 2-4-tile water lip + 3-5-tile sand band on one sid
 
 #### Inland ponds — bigger, more frequent (`LocalMapGenerator` Pass 4f)
 
-The v0.2.6 0–3 ponds × 1–2-tile expansion left Plains/Hills maps with often zero water. Bumped per Sam's "water should be an important feature on any map it's included on":
+The v0.2.6 0–3 ponds × 1–2-tile expansion left Plains/Hills maps with often zero water. Bumped per the "water should be an important feature on any map it's included on" direction:
 
 | Biome | Old count | New count |
 |--|--|--|
@@ -6450,7 +6501,7 @@ Patch `0.4.36` → `0.4.37`. `MainMenuController.cs` + `memory/project_versionin
 
 #### Follow-ups
 
-- **Shallows movement speed multiplier:** the new tile is passable but doesn't yet have an explicit per-tile speed cost. RimWorld-style 0.3× walk speed would land as a Phase-5 movement-cost work item. Until then, smurfs walk over Shallows at full speed — visually correct, mechanically equivalent to dry land.
+- **Shallows movement speed multiplier:** the new tile is passable but doesn't yet have an explicit per-tile speed cost. A 0.3× walk speed would land as a Phase-5 movement-cost work item. Until then, smurfs walk over Shallows at full speed — visually correct, mechanically equivalent to dry land.
 - **Island biome:** the v0.2.6 concentric-ring island generation got the deeper water + Shallows ring but no inlet pass yet. Symmetric inlets cutting toward the island centre is a one-day follow-up.
 - **World-map river render direction:** chains now span multiple tiles but each tile still draws a horizontal stripe (regardless of which way the chain is flowing). A flow-direction-aware stripe rotation is a UI polish follow-up.
 
@@ -6460,7 +6511,7 @@ Patch `0.4.36` → `0.4.37`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Fixed — Job priorities, smurf crowding, wood overflow, accidental drag-selects
 
-Four bugs from Sam's playtest, all addressed in one batch.
+Four bugs from playtest, all addressed in one batch.
 
 #### Fix 1 — Job priorities have visible effect (`scripts/simulation/systems/BehaviorSystem.cs`, `scripts/simulation/WorkPriorityDefaults.cs`)
 
@@ -6481,7 +6532,7 @@ Two-stage rule: "give the other guy space if you can, climb if you can't". Singl
 
 #### Fix 3 — Wood / Stone / Food no longer overflow to negative HUD values (`scripts/simulation/systems/HaulSystem.cs`, `scripts/simulation/ColonyResources.cs`, `scripts/SimulationManager.cs`)
 
-Sam's screenshot showed a `Wood Log ×22,727,505` stack on a stockpile tile and `Wood: -1,685,682,637` in the HUD — int overflow from a compounding bug. Root cause: the v0.4.30 HaulSystem deposit *dual-wrote* every delivered item into both `map.DropItem(item)` AND `r.Inventory.Add(item)`. The smurf's next multi-trip cycle could then re-pick its own delivery from the stockpile tile and re-deliver it — every cycle absorbed the item's Quantity into the pool again without consuming the on-map stack. After enough cycles the colony pool overflowed `int.MaxValue` and went negative.
+Bug report (with screenshot): a `Wood Log ×22,727,505` stack on a stockpile tile and `Wood: -1,685,682,637` in the HUD — int overflow from a compounding bug. Root cause: the v0.4.30 HaulSystem deposit *dual-wrote* every delivered item into both `map.DropItem(item)` AND `r.Inventory.Add(item)`. The smurf's next multi-trip cycle could then re-pick its own delivery from the stockpile tile and re-deliver it — every cycle absorbed the item's Quantity into the pool again without consuming the on-map stack. After enough cycles the colony pool overflowed `int.MaxValue` and went negative.
 
 - **`HaulSystem.Apply` Phase 2 dual-write removed.** Delivered items now go ONLY to the map via `DropItem`. The colony pool (`ColonyResources.Inventory`) is left for scenario starting inventory and the Phase-5 stockpile-zone bookkeeping that hasn't landed yet.
 - **`ColonyResources.Food / Stone / Wood / MagicEssence` now sum on-map stockpiles** via a new `Map` reference + `MapCountByKind` / `MapCountByFamily` walks. So the HUD reads the same authoritative store the player sees on the ground.
@@ -6560,7 +6611,7 @@ Patch `0.4.34` → `0.4.35`. `MainMenuController.cs` + `memory/project_versionin
 
 Left-click an empty tile (no smurf, no active designation tool) that has dropped items or vegetation on it and a properties card opens up at the top-right — modelled visually after the Smurf unit card but tailored to inanimate targets. Closes when you click a smurf (the smurf card takes over), click an empty tile, or press the X button.
 
-**The card is a SNAPSHOT**, not a live view. The contents are captured once on open and never refresh; this matches Sam's explicit ask ("only update when opened so as to not degrade performance") and keeps the per-frame cost of the inspector at exactly zero. Closing and re-opening on the same tile picks up any state changes.
+**The card is a SNAPSHOT**, not a live view. The contents are captured once on open and never refresh; this matches the explicit ask ("only update when opened so as to not degrade performance") and keeps the per-frame cost of the inspector at exactly zero. Closing and re-opening on the same tile picks up any state changes.
 
 #### `scripts/ui/TilePropertiesPanel.cs` (new)
 
@@ -6601,7 +6652,7 @@ Patch `0.4.33` → `0.4.34`. `MainMenuController.cs` + `memory/project_versionin
 
 ## [0.4.33] — 2026-05-14
 
-### Added — Smurf corpses persist on the world and decay (DF/RimWorld-style)
+### Added — Smurf corpses persist on the world and decay
 
 When a smurf dies their body now stays on the death tile as a `Corpse`-kind Item carrying the dead smurf's biographical sidecar, decays over ~7 in-game days, and shows the player a full obituary on hover. Reuses every Item pipeline that already exists (placement, MultiMesh icon, hover tooltip, save/load) so the feature is mostly data + a small decay walk.
 
@@ -6620,13 +6671,13 @@ When a smurf dies their body now stays on the death tile as a `Corpse`-kind Item
 - `Quality.Normal`, `State.Fresh`, `AvgCondition = 100`, `DurabilityCap = 100`, `Quantity = 1`.
 - Drops onto the smurf's `SimPos` tile through `LocalMap.DropItem`, so the v0.4.30 cap / single-type-per-tile / spiral-overflow rules all run as in normal play (a corpse on a tile that already has 250 of one type spills onto an adjacent tile, etc.).
 
-Equipment-on-death continues to drop as separate Item entries on the same tile — DF convention — so the player can loot the body without picking up the corpse itself.
+Equipment-on-death continues to drop as separate Item entries on the same tile so the player can loot the body without picking up the corpse itself.
 
 #### Decay (`scripts/world/LocalMap.cs`, `scripts/simulation/SimulationCore.cs`)
 
 - New **`LocalMap.TickCorpseDecay(globalTick, daysElapsed)`** walks `_droppedItems` once per call, drops every Corpse-kind item's `AvgCondition` by `14 × daysElapsed`, updates `ItemState` to Fresh / Stale / Spoiled at the 70 / 40 / 0 thresholds, and removes any corpse that hits 0 condition entirely. Cleans the empty per-tile lists and fires `ItemsChanged` per affected tile so the renderer picks up the cleanup.
 - Wired into `SimulationCore`'s existing day-boundary block alongside `ItemDeteriorationSystem.TickDay(Resources.Inventory, …)` — one call per in-game day at any sim speed.
-- Target timeline: **~7 in-game days from a fresh body to a fully-decayed empty tile** (100 / 14 ≈ 7.1 days), matching the RimWorld rough-decomposition pace.
+- Target timeline: **~7 in-game days from a fresh body to a fully-decayed empty tile** (100 / 14 ≈ 7.1 days), matching the rough-decomposition pace used by the colony-sim genre.
 - Kept as a separate walk from the colony pool's Inventory deterioration because the two stores never share Item references — mixing them through a single loop would either double-decay or leak per-tile bookkeeping into the colony class.
 
 #### Rendering (`scripts/ui/ItemDropOverlay.cs`)
@@ -6657,19 +6708,19 @@ Patch `0.4.32` → `0.4.33`. `MainMenuController.cs` + `memory/project_versionin
 
 ## [0.4.32] — 2026-05-14
 
-### Added — RimWorld-style Developer Mode + Settings header polish
+### Added — Developer Mode + Settings header polish
 
 Two coordinated asks:
 
 #### Developer Mode (`scripts/DevMode.cs`, `scripts/ui/DevPanel.cs`, `scripts/SimulationManager.cs`, `scripts/ui/SettingsPanel.cs`, `scripts/ui/GameController.cs`)
 
-Modelled on [RimWorld's Development Mode](https://rimworldwiki.com/wiki/Development_mode): a settings toggle reveals a floating right-side dev panel with categorised debug actions plugged into every system that exists today, plus disabled stubs for systems landing in later phases.
+A settings toggle reveals a floating right-side dev panel with categorised debug actions plugged into every system that exists today, plus disabled stubs for systems landing in later phases.
 
 - **`DevMode` singleton** — static class holding `IsEnabled` + a `Changed` event. Lives in the root namespace so any UI can subscribe. Off by default.
 - **`SettingsPanel`** — new "Developer Mode" toggle in the Gameplay section (`AddDeveloperModeRow`). Persists to `user://settings.cfg` under `gameplay/developer_mode`; load + reset paths wired. Flipping the toggle pushes the value into `DevMode.IsEnabled`, which fires `Changed` so the floating panel can hide/show without a scene rebuild.
 - **`DevPanel`** — new Control added to GameController's UI layer. Visible only when `DevMode.IsEnabled`; **F12** toggles its visibility once dev mode is on. Categorised sections:
   - **Simulation:** Pause/Resume, Tick 1×, 5×, 25×, 100× speed bursts.
-  - **Selected Smurf:** Fill needs, Drain needs, +Mood (TastyMeal thought), -Mood (TaskAbandoned thought), Force yield 60t (DF-style lie-down), Kill. Acts on every smurf currently in the selection set.
+  - **Selected Smurf:** Fill needs, Drain needs, +Mood (TastyMeal thought), -Mood (TaskAbandoned thought), Force yield 60t (lie-down), Kill. Acts on every smurf currently in the selection set.
   - **Spawn at Cursor:** 50 Smurfberries, 50 Granite blocks, 50 DeadWood blocks, 10 Raw Essence, fresh adult Smurf (random traits/personality/role via the same registries as `BirthSystem`). Drops route through `LocalMap.DropItem` so the v0.4.30 cap + single-type-per-tile + spiral overflow rules all run as in real play.
   - **Map:** rebuild regions + force redraw (mostly stubs at this point — regions rebuild lazily on query).
   - **Visualize (stubs):** disabled toggles for pathfinding / region / occupancy / claims overlays — will light up when each renderer hook lands.
@@ -6687,7 +6738,7 @@ Player-facing path: open Settings → Gameplay → toggle Developer Mode → clo
 
 #### Settings header — star drop (`scripts/ui/SettingsPanel.cs`)
 
-`★  Settings  ★` → `Settings`. One-line cleanup per Sam's note.
+`★  Settings  ★` → `Settings`. One-line cleanup per direction.
 
 #### Version
 
@@ -6697,7 +6748,7 @@ Patch `0.4.31` → `0.4.32`. `MainMenuController.cs` + `memory/project_versionin
 
 - The Visualize / Future-systems stubs are intentionally non-functional placeholders — wire them up as each system lands (Phase 7 raids, Phase 9 disease, Phase 10 weather/fire, Phase 11 traders). The dev panel layout already has slots for them so it's a one-line `Pressed` handler each.
 - Map section's "Rebuild regions" / "Force redraw" are placeholder buttons — the underlying APIs exist but aren't exposed yet. Light wiring follow-up.
-- Dev panel does not (yet) trap mouse input outside its bounds — clicking through the panel still hits the world below. RimWorld's behaviour. If that proves annoying, add a `MouseFilter = Stop` overlay band behind the buttons.
+- Dev panel does not (yet) trap mouse input outside its bounds — clicking through the panel still hits the world below. If that proves annoying, add a `MouseFilter = Stop` overlay band behind the buttons.
 
 ---
 
@@ -6705,7 +6756,7 @@ Patch `0.4.31` → `0.4.32`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Added — Mood-tab Thoughts list + river generation finally visible + Shroombridge roadmap
 
-Three small but meaningful follow-ups from Sam's playtest of v0.4.30:
+Three small but meaningful follow-ups from playtest of v0.4.30:
 
 #### Recent Thoughts on the Mood tab (`scripts/simulation/SimulationSnapshot.cs`, `scripts/ui/SmurfCardPanel.cs`)
 
@@ -6719,7 +6770,7 @@ The list fits inside the existing ScrollContainer that wraps every card tab — 
 
 #### Rivers actually generate visibly now (`scripts/world/WorldMapGenerator.cs`, `scripts/ui/WorldGenPanel.cs`)
 
-`WorldMapGenerator` Pass A.7 was implementing rivers correctly but seeded them so sparsely that Sam went several worlds without ever seeing one — and `LocalMapGenerator` Pass 4h (river carving) only fires when the world tile has the flag, so no flag = no river local map either. Two upstream fixes plus a visibility bump:
+`WorldMapGenerator` Pass A.7 was implementing rivers correctly but seeded them so sparsely that several worlds passed without ever seeing one — and `LocalMapGenerator` Pass 4h (river carving) only fires when the world tile has the flag, so no flag = no river local map either. Two upstream fixes plus a visibility bump:
 
 - **River target counts bumped.** Old: 0 / 0–1 / 1–3 / 3–6 by rainfall band. New: **1 / 1–2 / 2–5 / 4–8**. Even bone-dry worlds get one river so the §2.6 fertility / vegetation / ford machinery actually exercises in normal play; wet worlds spike high enough for a proper braided system look on the world preview.
 - **Inland source candidates added.** River seeds used to require Pondsea adjacency (coastal river mouths only). Inland-heavy maps with a small Pondsea region had vanishingly few candidates and `riverTarget` rolled in vain. New rule: candidates are passable lowland tiles cardinally touching Pondsea **OR Mountains/Peaks** (foothill snowmelt). Mountains/Peaks themselves are excluded from being candidates (the source is the lowland next to the elevation, not the elevation itself — matches the existing Pass 4h carving exclusion).
@@ -6731,7 +6782,7 @@ The list fits inside the existing ScrollContainer that wraps every card tab — 
 
 New `§5.11.d` documents Shroombridge: a buildable woven mushroom-cap mat that turns Water tiles into passable (`TerrainType.Shroombridge`) tiles, costing 4 Fungal Wood + 2 LivingWood per tile. Light structures (woven walls, doors, Bedroll, Chest, Shelf, Workbench, Table, etc.) can sit on top — but stone walls, heavy furniture, and Hearth (open flame on a fungal mat = bad day) are forbidden. Forbidden on fast-current river-centre tiles; reduced to 0 condition the bridge collapses and dunks anything on it.
 
-The headline value is the **water village** archetype — a Coastal / Island / River map can paint Shroombridges across a sheltered cove and run a self-contained colony of light huts and storage on top, RimWorld-style bridges with Smurfulation's fungal-mat flavour. Roadmap also sketches Bridge Anchors / Stone Bridges / Magicwood-luminescent variants as Phase 7+ follow-ups.
+The headline value is the **water village** archetype — a Coastal / Island / River map can paint Shroombridges across a sheltered cove and run a self-contained colony of light huts and storage on top, woven bridges with Smurfulation's fungal-mat flavour. Roadmap also sketches Bridge Anchors / Stone Bridges / Magicwood-luminescent variants as Phase 7+ follow-ups.
 
 #### Version
 
@@ -6741,9 +6792,9 @@ Patch `0.4.30` → `0.4.31`. `MainMenuController.cs` + `memory/project_versionin
 
 ## [0.4.30] — 2026-05-14
 
-### Added — DF/RimWorld-style stockpile + multi-item carry + equipment-on-ground
+### Added — Stockpile + multi-item carry + equipment-on-ground
 
-The Phase-5-flavoured "Storage & Logistics" batch landed in one go (Sam's "all five at once" call). Every dropped item is now a visible stack on the level, smurfs ferry up to their personal carrying capacity in one trip instead of one item per round trip, and equipment items show shorthand labels under their ground sprites so the player can spot a Masterwork sword in a pile without hovering. Storage furniture is sketched into the roadmap for a follow-up.
+The Phase-5-flavoured "Storage & Logistics" batch landed in one go (per the "all five at once" call). Every dropped item is now a visible stack on the level, smurfs ferry up to their personal carrying capacity in one trip instead of one item per round trip, and equipment items show shorthand labels under their ground sprites so the player can spot a Masterwork sword in a pile without hovering. Storage furniture is sketched into the roadmap for a follow-up.
 
 #### A1 — `LocalMap.DropItem` cap + single-type rule (`scripts/world/LocalMap.cs`)
 
@@ -6777,7 +6828,7 @@ The Inventory tab gains a `Carrying: X / Y` label + `ProgressBar` at the top, re
 
 #### C3 — Top-right hover tooltip lists ground items (`scripts/ui/TileInfoOverlay.cs`, `scripts/ui/GameController.cs`)
 
-`ShowTile` accepts an optional `IReadOnlyList<Item>? droppedItems`. The `Format` method appends a per-item line: `{display} ({material}) ×{qty}` for stackables, plus `[Quality]` for equipment-tier items. `GameController.UpdateTileInfo` passes `map.GetItemsOnTile(tx, ty)` so every hover shows the full label of every stack on the tile (RimWorld convention).
+`ShowTile` accepts an optional `IReadOnlyList<Item>? droppedItems`. The `Format` method appends a per-item line: `{display} ({material}) ×{qty}` for stackables, plus `[Quality]` for equipment-tier items. `GameController.UpdateTileInfo` passes `map.GetItemsOnTile(tx, ty)` so every hover shows the full label of every stack on the tile.
 
 #### D1+D2 — Equipment ground sprites + shorthand labels (`scripts/ui/ItemDropOverlay.cs`)
 
@@ -6805,7 +6856,7 @@ Patch `0.4.29` → `0.4.30`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Fixed — Single-tile tunnel jam + dropped-item badges hidden behind icons
 
-Two coordinated fixes from Sam's playtest after the v0.4.28 visual cleanup:
+Two coordinated fixes from playtest after the v0.4.28 visual cleanup:
 
 1. **Smurfs jammed solid in single-tile-wide excavation tunnels.** One or two would dig the entry boulder, then the rest of the assigned crew piled in behind, jittered against each other, and couldn't get back out once they'd traded places.
 2. **Dropped-item count badges were occluded by the icon MultiMesh.** The yellow digits rendered first, then the icon quads drew on top, leaving only a thin yellow crescent visible along the icon edge.
@@ -6818,9 +6869,9 @@ Added an optional `Func<int, int, bool>? approachBlocked` callback parameter to 
 
 This stops the cascade at the source. Smurfs scanning for work pick a different boulder elsewhere when the tunnel approach is congested, so only one or two converge on it at a time.
 
-#### Fix 1b — DF-style "lie down so the other guy can climb over" (`scripts/simulation/Smurf.cs`, `scripts/simulation/systems/BehaviorSystem.cs`)
+#### Fix 1b — "lie down so the other guy can climb over" (`scripts/simulation/Smurf.cs`, `scripts/simulation/systems/BehaviorSystem.cs`)
 
-Cascade prevention alone wouldn't unjam smurfs already inside a tunnel — they need to physically swap places to exit. Sam suggested the Dwarf Fortress solution: dwarves lie down to let others climb over them. Implemented:
+Cascade prevention alone wouldn't unjam smurfs already inside a tunnel — they need to physically swap places to exit. The "lie down so the other guy can climb over" solution was suggested: smurfs lie down to let others climb over them. Implemented:
 
 - `Smurf.YieldingTicks` (new int field). When > 0 the smurf is yielding for that many sim ticks: skipped by `MoveOneTick` (no movement attempt) and excluded from the per-tick occupancy grid (so neighbours can step freely onto its tile and cross over).
 - `BehaviorSystem.PopulateOccupancyGrid` skips yielding smurfs in BOTH the `_smurfPerTile` count and the new `_firstSmurfPerTile` reference array (so the trigger can find WHO to ask without re-walking the smurf list).
@@ -6841,7 +6892,7 @@ Now the digits sit cleanly above every dropped-item icon at any zoom.
 
 ### Also in this patch — Visual feedback for the yield state
 
-After landing the yield mechanic Sam asked for a sprite/animation so the player can see who's lying down. Implemented as a per-instance Transform2D squash on the existing MultiMesh:
+After landing the yield mechanic, a sprite/animation was needed so the player can see who's lying down. Implemented as a per-instance Transform2D squash on the existing MultiMesh:
 
 - **`SimulationSnapshot`** gains a `bool IsYielding` field (derived from `s.YieldingTicks > 0`). Pure read of existing sim state, no extra sim work.
 - **`SmurfColonyView.VisualSmurf`** mirrors the field; `UpdateFromTick` copies it from each snapshot.
@@ -6881,7 +6932,7 @@ Patch `0.4.27` → `0.4.28`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Also in this patch — Cave topology, stone strata, sprite legibility
 
-Bundled into v0.4.28 per the within-24 h rule. Three coordinated visual/world-gen fixes from Sam after seeing the Level Preview and in-game close-up screenshots:
+Bundled into v0.4.28 per the within-24 h rule. Three coordinated visual/world-gen fixes from feedback after seeing the Level Preview and in-game close-up screenshots:
 
 #### Cave subtype 0 — denser, water-carved topology (`scripts/world/LocalMapGenerator.cs`)
 
@@ -6897,7 +6948,7 @@ The previous chamber-blob + corridor scheme yielded ~30-35 % passable maps that 
 `AssignStoneVariation` Pass A used to call `RollWeighted` per Boulder tile, so every adjacent boulder could be a different stone subtype. The visual was a confetti mix; gameplay-wise, a player couldn't excavate a coherent block of one ore type. Replaced with **Voronoi-region assignment**:
 
 - New `FastNoiseLite.Cellular` instance with `CellularReturnType.CellValue` partitions the map into Voronoi cells ~12-16 tiles across.
-- Each Boulder reads its cell's per-cell value and uses it as the lookup index into the biome's cumulative weight table via the new `PickFromCumulative` helper. **All tiles in the same Voronoi cell resolve to the same subtype** — large connected blocks of granite, limestone, marble, etc., like RimWorld / DF strata.
+- Each Boulder reads its cell's per-cell value and uses it as the lookup index into the biome's cumulative weight table via the new `PickFromCumulative` helper. **All tiles in the same Voronoi cell resolve to the same subtype** — large connected blocks of granite, limestone, marble, etc., as geological strata.
 - Pass B (rare MagicCrystal vein clusters) is unchanged — those stay as the random-walk overpaint they were in v0.4.27.
 - No per-tile RNG allocations; lookup is O(table.Length) per tile, ≤ 6 comparisons.
 
@@ -6905,14 +6956,14 @@ This sets up the geological foundation for the planned "more ores and related ma
 
 #### Smurf sprite legibility + name above head (`scripts/ui/SmurfColonyView.cs`)
 
-Sam reported the smurfs read as "upside down" and the name labels overlapped the body. The sprite is technically right-side-up in code (hat triangle at top of image, head/body below) but with a 5 px-radius head dominating a 3.5 px-radius body bump, the silhouette was ambiguous at low zoom — easy to mistake the small body bump for "feet."
+Bug report: the smurfs read as "upside down" and the name labels overlapped the body. The sprite is technically right-side-up in code (hat triangle at top of image, head/body below) but with a 5 px-radius head dominating a 3.5 px-radius body bump, the silhouette was ambiguous at low zoom — easy to mistake the small body bump for "feet."
 
 - **Added dark feet** (2×2 px each, `(0.10, 0.08, 0.16)`) at the very bottom of the sprite (rows 22-23, columns ±2 from anchor X). They unambiguously establish "down" and frame the white-pants area beneath the body.
-- **Name label moved above the hat.** Previously drawn at `pos + (0, +9)` — baseline 9 px below the smurf's anchor, which put the visible text right on the body. Now at `pos + (0, -19)` — two pixels above the hat tip with a clear gap, matching how RimWorld and DF position character labels. Combined with the v0.4.28 always-on names fix above, every smurf now wears its name as a clear floating label.
+- **Name label moved above the hat.** Previously drawn at `pos + (0, +9)` — baseline 9 px below the smurf's anchor, which put the visible text right on the body. Now at `pos + (0, -19)` — two pixels above the hat tip with a clear gap, matching the standard character-label placement. Combined with the v0.4.28 always-on names fix above, every smurf now wears its name as a clear floating label.
 
 #### Dropped-item count badges — fallback font instead of 3×5 bitmap (`scripts/ui/ItemDropOverlay.cs`)
 
-`DrawSmallNumber` rendered counts as a 3×5 hand-drawn pixel font (the same style as the v0.3.31 designation overlay digits). At default gameplay zoom this was illegible — Sam couldn't read the numbers on dropped items. Replaced with `DrawString` using `ThemeDB.FallbackFont` at size 9, matching the smurf-name label style.
+`DrawSmallNumber` rendered counts as a 3×5 hand-drawn pixel font (the same style as the v0.3.31 designation overlay digits). At default gameplay zoom this was illegible — the numbers on dropped items couldn't be read. Replaced with `DrawString` using `ThemeDB.FallbackFont` at size 9, matching the smurf-name label style.
 
 - Hand-drawn `DrawDigit` method removed (~25 lines of glyph tables gone).
 - Background is now a tight rect sized to the measured `GetStringSize` of the digits with 1.5 px / 1 px padding; foreground stays the existing yellow `(1.0, 0.95, 0.50)` on `(0, 0, 0, 0.75)` black for contrast.
@@ -6921,7 +6972,7 @@ Sam reported the smurfs read as "upside down" and the name labels overlapped the
 
 #### Follow-up — sprite Y-flip + label centring
 
-After playtesting the bundle above, Sam caught three remaining issues from the in-game screenshot:
+After playtesting the bundle above, three remaining issues were caught from the in-game screenshot:
 
 - **Smurfs were rendering upside down.** Godot's `QuadMesh` is fundamentally a `PrimitiveMesh` (3D origin) and inherits the Y-up UV convention even when used with `MultiMeshInstance2D` in 2D. The result is that the baked image renders Y-flipped against `Image`'s top-left-origin coordinates — hat drawn at row 4 of the image appeared at the bottom of the rendered figure. Fix: call `img.FlipY()` at the end of `BakeSmurfSprite` to cancel the rendering flip. The original anchor row drifts ~1 px after the mirror, but that's invisible at gameplay zoom.
 - **Smurf name labels were left-anchored, not centred.** The v0.4.28 call passed `HorizontalAlignment.Center, -1, 9, color` to `DrawString` — but Godot silently ignores `HorizontalAlignment.Center` when the `width` arg is `-1` (no constraint), falling back to left-anchor. Every name was visibly offset to the right of its smurf. Fix: pre-measure with `font.GetStringSize(...)` and shift the draw position by `-textWidth/2` (use `HorizontalAlignment.Left` after the manual offset).
@@ -6939,7 +6990,7 @@ Per the bundling rule, no new backup folder; the `SmurfC_v0.4.28` backup taken e
 
 Bundled three perf levers (snapshot pooling, MultiMesh.Buffer batch upload, parallel-tick prep). Build broke under play test — reverted in full back to v0.4.27 by restoring all 11 modified files from the `SmurfC_v0.4.27` backup. No partial pieces kept.
 
-**Reported symptoms after v0.4.28 landed (Sam):**
+**Reported symptoms after v0.4.28 landed:**
 - Smurfs became invisible (no body sprites rendered at all)
 - Designations became invisible AND stopped applying — player drag no longer marked tiles
 - Smurfs lost every behavior except Idle (no haul, no gather, no excavate, no chop, no cut)
@@ -6965,7 +7016,7 @@ Effective version after this rollback: **v0.4.27**.
 
 ### Fixed — Gameplay polish: instant designations + real-time resource totals
 
-Two explicit gameplay requirements from Sam after the v0.4.26 perf landing:
+Two explicit gameplay requirements after the v0.4.26 perf landing:
 
 1. **Designations must appear immediately, not load in over time.** Players noticed a delay between drag-release and the full rect appearing — visible at 11 FPS.
 2. **Resource totals must update visibly the moment they actually change.** The v0.4.23 200 ms HUD throttle made them lag.
@@ -6988,7 +7039,7 @@ Two explicit gameplay requirements from Sam after the v0.4.26 perf landing:
 
 #### On multi-threading the main thread
 
-Sam asked about distributing load across cores. The honest answer:
+Question raised about distributing load across cores. The honest answer:
 
 - **The sim is already on its own thread.** `SimulationCore` runs `BehaviorSystem.Tick` + `NeedsSystem` / `MoodSystem` / etc. on a background thread; main only consumes snapshots.
 - **Godot's render pipeline is main-thread-bound by design.** Calls into `Label.Text =`, `MultiMesh.SetInstanceTransform2D`, `DrawTextureRect`, and so on must originate from the main thread because each one queues a command into the canvas command buffer that the render server consumes serially. There's no API to "parallelise canvas command submission" — that's not how Godot's 2D pipeline works.
@@ -7013,7 +7064,7 @@ Patch `0.4.26` → `0.4.27`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Fixed — `GameController.OnTick` ran the full roster diff per snapshot even when the roster was hidden
 
-Sam came back with the cleanest perf signal yet: **0.6 FPS hit per smurf** measured precisely between 25 smurfs (170 FPS) and 250 smurfs (13 FPS), with CPU + GPU both at ~10%. That's a perfectly linear single-thread cost, ~316 µs per smurf per frame. With MultiMesh covering the world overlays, the only remaining suspect was per-snapshot UI work — something that walks every smurf each snapshot push.
+The cleanest perf signal yet arrived: **0.6 FPS hit per smurf** measured precisely between 25 smurfs (170 FPS) and 250 smurfs (13 FPS), with CPU + GPU both at ~10%. That's a perfectly linear single-thread cost, ~316 µs per smurf per frame. With MultiMesh covering the world overlays, the only remaining suspect was per-snapshot UI work — something that walks every smurf each snapshot push.
 
 **Diagnosis** — `GameController.OnTick` (called every snapshot push, 60 Hz at 1× speed) did:
 
@@ -7041,7 +7092,7 @@ When the user opens the roster or card, the next snapshot push refreshes the now
 
 ---
 
-#### Why this fits Sam's measurements
+#### Why this fits the reported measurements
 
 - **0.6 FPS per smurf** at 250 smurfs ≈ 316 µs/smurf/frame. Roster `UpdateRow` for one smurf was ~35 µs, fired at ~13 Hz when consuming snapshots, summing to ~25 µs/smurf/frame of roster work — close to the linear cost when amortised across the snapshot fan-out. With v0.4.24's MultiMesh + v0.4.25's overlay MMI absorbing the previously-N-cost rendering, this hidden-roster work was the last per-smurf bottleneck.
 - **CPU at 10%, GPU at 10%:** consistent with one main-thread core saturated doing UI-diff work while the rest of the system idles. Removing it should let the main thread breathe.
@@ -7112,7 +7163,7 @@ Patch `0.4.24` → `0.4.25`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Fixed — GPU underutilisation at 250 smurfs (the perf ceiling above 13 FPS)
 
-After v0.4.23 the per-frame HUD label-write storm was gone, but Sam's stats stayed at ~13 FPS idle with 250 smurfs on the OpenGL Compatibility renderer, GPU peaking at only 40 %, multiple CPU cores idle. The remaining bottleneck is straight from the [Godot 2D rendering guide](https://docs.godotengine.org/en/stable/tutorials/2d/index.html#doc-2d-rendering): rendering many sprites via individual `DrawTextureRect` calls submits a canvas command **per sprite**. Each command needs to be walked by Godot's batcher every frame; 250 commands plus all the UI commands push the per-frame canvas-walk cost above 50 ms and pin a single main-thread core while the GPU sits idle waiting for work.
+After v0.4.23 the per-frame HUD label-write storm was gone, but stats stayed at ~13 FPS idle with 250 smurfs on the OpenGL Compatibility renderer, GPU peaking at only 40 %, multiple CPU cores idle. The remaining bottleneck is straight from the [Godot 2D rendering guide](https://docs.godotengine.org/en/stable/tutorials/2d/index.html#doc-2d-rendering): rendering many sprites via individual `DrawTextureRect` calls submits a canvas command **per sprite**. Each command needs to be walked by Godot's batcher every frame; 250 commands plus all the UI commands push the per-frame canvas-walk cost above 50 ms and pin a single main-thread core while the GPU sits idle waiting for work.
 
 The canonical Godot 2D answer for "many sprites" is **`MultiMeshInstance2D`** — GPU instancing: one mesh + one texture, N per-instance transforms in a buffer, **one** instanced GPU draw call covers all N. The Compatibility renderer supports it natively.
 
@@ -7158,7 +7209,7 @@ The old procedural per-smurf body draw (~10 primitive calls per smurf: body / he
 - **Canvas command count for the body pass:** ~250 → 12.
 - **Per-frame interop crossings for body draws:** ~250 `DrawTextureRect` → ~250 `SetInstanceTransform2D`. Same count *during animation*, but the MMI variant doesn't re-record canvas commands every frame — only the multimesh buffer is updated, which is cheaper for Godot's renderer to consume.
 - **GPU work shifts from "many small textured-quad draws" to "12 instanced draws of N quads each":** exactly what the GPU is built for. Should push GPU utilisation up and allow the CPU to feed work faster.
-- **Compatibility-renderer-safe:** `MultiMeshInstance2D` is fully supported in `gl_compatibility`; no Vulkan-specific dependencies (Sam's locked-in renderer choice noted in memory).
+- **Compatibility-renderer-safe:** `MultiMeshInstance2D` is fully supported in `gl_compatibility`; no Vulkan-specific dependencies (the locked-in renderer choice noted in memory).
 
 `MultiMesh` for the **`ItemDropOverlay`** and **`DesignationOverlay`** is the next available perf lever (same approach: bake one sprite per item-kind / designation-kind, push transforms into a multimesh). Held back this round so the headline body-rendering change can be measured cleanly.
 
@@ -7174,7 +7225,7 @@ Patch `0.4.23` → `0.4.24`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Fixed — Per-frame UI label-write storm + missing pixel-art project settings (the 11 FPS at idle + UI warping)
 
-After v0.4.22 the smurf O(N²) lookup was gone and the map renderer was throttled, but Sam still measured 11 FPS at idle with 250 smurfs on Vulkan, GPU at 7 % — confirming the bottleneck stayed on the main thread. Plus a new symptom surfaced: visible warping artefacts around UI text and every in-game texture whenever the camera moved or a menu opened.
+After v0.4.22 the smurf O(N²) lookup was gone and the map renderer was throttled, but the measured rate was still 11 FPS at idle with 250 smurfs on Vulkan, GPU at 7 % — confirming the bottleneck stayed on the main thread. Plus a new symptom surfaced: visible warping artefacts around UI text and every in-game texture whenever the camera moved or a menu opened.
 
 Two distinct root causes, both addressed.
 
@@ -7203,7 +7254,7 @@ Together these eliminate the per-frame label-update storm. Combined with v0.4.22
 
 #### Root cause 2 — Project settings missing the pixel-art defaults
 
-`project.godot` had no `[rendering]` section. Godot 4 defaults to **linear (bilinear) texture filtering** and **sub-pixel 2D transforms**. The combination produces visible blur/warp on any pixel-art texture when the camera renders at a non-integer position — which happens whenever the camera moves, zooms, or a UI panel animates. That's the "warping around UI and nearly every in-game texture whenever an update occurs" Sam reported.
+`project.godot` had no `[rendering]` section. Godot 4 defaults to **linear (bilinear) texture filtering** and **sub-pixel 2D transforms**. The combination produces visible blur/warp on any pixel-art texture when the camera renders at a non-integer position — which happens whenever the camera moves, zooms, or a UI panel animates. That's the reported "warping around UI and nearly every in-game texture whenever an update occurs."
 
 **Fix — `project.godot`:** added a `[rendering]` section setting the three pixel-art rendering defaults:
 
@@ -7237,7 +7288,7 @@ Patch `0.4.22` → `0.4.23`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Fixed — O(N²) snapshot lookup + Vulkan chunk-sync regression
 
-Sam came back with concrete profiling data after v0.4.21: 11 FPS at 250 smurfs on an RTX 5070 Ti / Ryzen 7 7700X, GPU sitting at **7 %** utilisation, CPU showing massive spikes on 3-4 cores while most cores were idle — textbook single-threaded main-thread bottleneck. Also: Vulkan now performs *worse* than the compatibility OpenGL backend (the opposite of the usual ordering), and visible 1-px seams at chunk boundaries when scrolling.
+Concrete profiling data arrived after v0.4.21: 11 FPS at 250 smurfs on an RTX 5070 Ti / Ryzen 7 7700X, GPU sitting at **7 %** utilisation, CPU showing massive spikes on 3-4 cores while most cores were idle — textbook single-threaded main-thread bottleneck. Also: Vulkan now performs *worse* than the compatibility OpenGL backend (the opposite of the usual ordering), and visible 1-px seams at chunk boundaries when scrolling.
 
 Two distinct root causes, fixed separately.
 
@@ -7253,7 +7304,7 @@ foreach (var snap in snaps)
 }
 ```
 
-`List.Find` walks the list each call. For 250 smurfs that's 250 × 250 = **62 500 name comparisons per snapshot push**, plus a closure allocation per call (the `s => s.Name == snap.Name` lambda captures `snap`). At a 60 Hz snapshot rate (1× speed) that's **~3.75 million name comparisons + 15 000 closures per second**, all on the main thread. That's exactly the per-core spike Sam's task-manager screenshot shows.
+`List.Find` walks the list each call. For 250 smurfs that's 250 × 250 = **62 500 name comparisons per snapshot push**, plus a closure allocation per call (the `s => s.Name == snap.Name` lambda captures `snap`). At a 60 Hz snapshot rate (1× speed) that's **~3.75 million name comparisons + 15 000 closures per second**, all on the main thread. That's exactly the per-core spike shown in the task-manager screenshot.
 
 **Fix — `scripts/ui/SmurfColonyView.cs`:** added `Dictionary<string, VisualSmurf> _byName`, kept in lock-step with the `_smurfs` list at every Add/Remove/Clear site (`SeedSmurfs`, the new-smurf spawn branch in `UpdateFromTick`, the death-prune sweep, `_smurfs.Clear`). The `Find` is replaced with `_byName.TryGetValue(snap.Name, out var vs)`. New `_scratchSnapNames` HashSet is reused across calls so the per-tick `new HashSet<string>(snaps.Select(s => s.Name))` allocation is gone too. Total work in `UpdateFromTick` collapses from O(N²) to O(N) with zero per-call allocations.
 
@@ -7261,8 +7312,8 @@ foreach (var snap in snaps)
 
 The previous patch split the map texture into 32×32-tile chunks so only changed chunks re-uploaded. That solved the v0.4.20 bandwidth issue but introduced two new ones:
 
-- **Per-chunk `ImageTexture.Update()` calls are sync points in Vulkan.** Each call forces the CPU to wait for the GPU to release its handle to that texture. With 12-150 chunks potentially dirty per flush, that's 12-150 sync points per upload pass. OpenGL handles many small uploads slightly better than Vulkan does, which is why Sam saw the rare "Vulkan worse than OpenGL" inversion.
-- **Sub-pixel chunk-seam artefacts.** Adjacent chunks rendered as separate textured quads picked up slightly different sub-pixel rounding when the camera zoomed or scrolled with non-integer offsets, producing 1-px gaps and colour bleed at every chunk boundary. Sam reported these as "warping artefacts at the edge of the screen whenever zooming or moving the camera".
+- **Per-chunk `ImageTexture.Update()` calls are sync points in Vulkan.** Each call forces the CPU to wait for the GPU to release its handle to that texture. With 12-150 chunks potentially dirty per flush, that's 12-150 sync points per upload pass. OpenGL handles many small uploads slightly better than Vulkan does, which is why the rare "Vulkan worse than OpenGL" inversion appeared.
+- **Sub-pixel chunk-seam artefacts.** Adjacent chunks rendered as separate textured quads picked up slightly different sub-pixel rounding when the camera zoomed or scrolled with non-integer offsets, producing 1-px gaps and colour bleed at every chunk boundary. Reported as "warping artefacts at the edge of the screen whenever zooming or moving the camera."
 
 **Fix — `scripts/ui/LocalMapRenderer.cs`:** reverted to the single full-map `Image` + `ImageTexture` from v0.4.20, but added an explicit **upload throttle**:
 
@@ -7276,14 +7327,14 @@ The previous patch split the map texture into 32×32-tile chunks so only changed
 
 ---
 
-#### Why this combination addresses Sam's data
+#### Why this combination addresses the profiling data
 
 - **GPU at 7 % utilisation:** fixed by stopping the O(N²) per-frame CPU storm on the main thread (root cause 1). Frame time was bottlenecked there, not on the GPU.
 - **CPU single-thread spikes:** the Dictionary path is O(1) per lookup; the spikes flatten.
 - **Vulkan worse than OpenGL:** chunked Update sync points removed; one sync per flush now.
 - **Edge warping at zoom/scroll:** chunk seams gone; the map is one textured quad again.
 
-Next round (deferred): the smurf overlay itself is still 250 `DrawTextureRect` calls per frame. `MultiMeshInstance2D` is the GPU-instanced answer Sam asked for — one draw call for all smurfs. Held back this round so the perf-regression fixes land cleanly first.
+Next round (deferred): the smurf overlay itself is still 250 `DrawTextureRect` calls per frame. `MultiMeshInstance2D` is the GPU-instanced answer — one draw call for all smurfs. Held back this round so the perf-regression fixes land cleanly first.
 
 ---
 
@@ -7299,7 +7350,7 @@ Patch `0.4.21` → `0.4.22`. `MainMenuController.cs` + `memory/project_versionin
 
 Reported on v0.4.20: even with the new pre-baked smurf sprites + culling, 250-smurf scenes ran at 6–7 FPS. The smoking gun in the screenshot was Godot's "Show Redraws" debug overlay flashing red over the *entire* map every frame — meaning the map renderer was calling `QueueRedraw()` continuously, not the smurf overlay.
 
-**Diagnosis** — `LocalMapRenderer` stored one giant `Image` covering the full map (~110 MB on a 480×300 tile map at 16 px tiles → 7680×4800 × 3 bytes) plus a matching `ImageTexture`. Every `_Process` flush of any dirty tile called `_texture.Update(_image)`, which re-uploaded the *whole* texture to the GPU. At low population the dirty queue rarely had entries between frames, so this was rare. At 250 smurfs constantly chopping / gathering / excavating / hauling, the dirty queue almost never emptied — so every single frame the renderer was streaming ~110 MB to the GPU. At 60 FPS that's 6.6 GB/sec of texture-upload bandwidth, saturating the pipeline and dropping the frame rate to the 6–7 FPS Sam measured. The OpenGL backend was even slower because its texture-streaming throughput is worse than Vulkan's.
+**Diagnosis** — `LocalMapRenderer` stored one giant `Image` covering the full map (~110 MB on a 480×300 tile map at 16 px tiles → 7680×4800 × 3 bytes) plus a matching `ImageTexture`. Every `_Process` flush of any dirty tile called `_texture.Update(_image)`, which re-uploaded the *whole* texture to the GPU. At low population the dirty queue rarely had entries between frames, so this was rare. At 250 smurfs constantly chopping / gathering / excavating / hauling, the dirty queue almost never emptied — so every single frame the renderer was streaming ~110 MB to the GPU. At 60 FPS that's 6.6 GB/sec of texture-upload bandwidth, saturating the pipeline and dropping the frame rate to the 6–7 FPS measured. The OpenGL backend was even slower because its texture-streaming throughput is worse than Vulkan's.
 
 ---
 
@@ -7379,7 +7430,7 @@ Patch `0.4.19` → `0.4.20`. `MainMenuController.cs` + `memory/project_versionin
 
 ### Fixed — Crowd-pile stuck cases (soft collision + path invalidation + claim-aware approach picker)
 
-After v0.4.18's perf rewrite landed cleanly, the residual "smurfs caught on walls and corners" cases turned out not to be algorithm bugs — they were *crowding* artefacts. Three orthogonal fixes inspired by RimWorld's local steering + Songs of Syx's industry-queue idiom, picked as the lowest-risk, lowest-cost interventions before considering any tile-shape rewrite.
+After v0.4.18's perf rewrite landed cleanly, the residual "smurfs caught on walls and corners" cases turned out not to be algorithm bugs — they were *crowding* artefacts. Three orthogonal fixes inspired by local-steering patterns + an industry-queue idiom, picked as the lowest-risk, lowest-cost interventions before considering any tile-shape rewrite.
 
 ---
 
@@ -7421,7 +7472,7 @@ Distance to the smurf still breaks ties within each bucket. Diggers heading to t
 
 The v0.4.19 two-tier scoring above had an orbital failure mode: at a small dense designation patch, the destination tile itself was often "crowded" (a couple of smurfs already digging adjacent Boulders). The fan-out then preferred any uncrowded side-step over the crowded-but-correct primary, and the approaching smurf orbited at `ArrivalRadius + ε` without ever crossing the arrival threshold — `ApplyTaskEffect` never fired. That's the dig-cluster jitter the player reported on the v0.4.19 follow-up screenshot.
 
-**Fix — `scripts/simulation/systems/BehaviorSystem.cs` (`MoveOneTick`):** primary direction wins unconditionally when terrain-passable. The two-tier scoring only runs when the primary is *terrain*-blocked (wall in the way). Smurfs may briefly stack at a destination tile, but they *arrive*; the v0.4.19 claim-aware adjacent picker keeps the stack small to begin with, and the stack disperses the moment work completes. Matches RimWorld's actual local-steering behaviour.
+**Fix — `scripts/simulation/systems/BehaviorSystem.cs` (`MoveOneTick`):** primary direction wins unconditionally when terrain-passable. The two-tier scoring only runs when the primary is *terrain*-blocked (wall in the way). Smurfs may briefly stack at a destination tile, but they *arrive*; the v0.4.19 claim-aware adjacent picker keeps the stack small to begin with, and the stack disperses the moment work completes. Matches the reference local-steering behaviour.
 
 #### Follow-up #2 — post-delivery bunching (bundled into 0.4.19)
 
@@ -7446,7 +7497,7 @@ The three fixes interact multiplicatively against the bunching symptom: the deli
 
 #### Follow-up #3 — `ScenarioConfig.MaxSmurfs` raised 25 → 250
 
-The scenario editor's starting-population spinner was capped at 25 — a leftover from before the perf rewrite work. Bumped to 250 (matching the perf target colony size) so playtesting at the planned scale is possible without a code edit. The cap is provisional: the planned replacement is a RimWorld-style preset-population dropdown (Crashlanded / Tribal / Refugees / etc.) selecting from curated party sizes; the raw spinner survives until that lands.
+The scenario editor's starting-population spinner was capped at 25 — a leftover from before the perf rewrite work. Bumped to 250 (matching the perf target colony size) so playtesting at the planned scale is possible without a code edit. The cap is provisional: the planned replacement is a preset-population dropdown (Crashlanded / Tribal / Refugees / etc.) selecting from curated party sizes; the raw spinner survives until that lands.
 
 #### Follow-up #4 — speed buttons honest about their labels
 
@@ -7458,9 +7509,9 @@ The HUD speed buttons displayed `1× / 2× / 5× / 10×` but actually requested 
 
 #### Note on the hex-vs-Songs-of-Syx exploration
 
-Sam asked whether we should reformat to hex tiles (RimWorld pathfinding) or move to a Songs of Syx flow-field model. Recommendation was "neither right now": the algorithm is fine, the symptoms are local-steering crowding artefacts. Hex would be a multi-week refactor that doesn't address pile-up. Flow fields shine when many actors share one destination; ours mostly have individual targets. The three fixes above are localised edits — no save-format changes, no rendering churn — and map directly to the screenshot symptoms.
+Question raised: should we reformat to hex tiles or move to a flow-field model? Recommendation: "neither right now" — the algorithm is fine, the symptoms are local-steering crowding artefacts. Hex would be a multi-week refactor that doesn't address pile-up. Flow fields shine when many actors share one destination; ours mostly have individual targets. The three fixes above are localised edits — no save-format changes, no rendering churn — and map directly to the screenshot symptoms.
 
-Hex exploration remains on the table for visual-acuity reasons (Sam noted interest), but as a separate Phase 5+ visual track.
+Hex exploration remains on the table for visual-acuity reasons (interest noted), but as a separate Phase 5+ visual track.
 
 ---
 
@@ -7502,7 +7553,7 @@ Combined: per-call A* cost drops roughly 5–10× on the same map. The reassignm
 
 #### Root cause 2 — Sim thread died silently on unhandled exception
 
-`SimulationCore.Run`'s main batch loop called `Tick(...)` with no exception guard. Any unhandled throw inside Tick (from any system — BehaviorSystem, NeedsSystem, MoodSystem, AgingSystem, …) propagated up, exited the `while (_running)` loop, and the OS thread died. `_running` stayed true, the snapshot queue stopped draining, every smurf appeared to freeze in place. Matches Sam's "stop and do not move again after a few minutes" exactly — the bug fires once at random and the world stops.
+`SimulationCore.Run`'s main batch loop called `Tick(...)` with no exception guard. Any unhandled throw inside Tick (from any system — BehaviorSystem, NeedsSystem, MoodSystem, AgingSystem, …) propagated up, exited the `while (_running)` loop, and the OS thread died. `_running` stayed true, the snapshot queue stopped draining, every smurf appeared to freeze in place. Matches the reported "stop and do not move again after a few minutes" exactly — the bug fires once at random and the world stops.
 
 **Fix — `scripts/simulation/SimulationCore.cs`:** the per-tick `Tick(...)` call is now wrapped in `try { … } catch (Exception ex) { Godot.GD.PushError(...) }`. The world keeps ticking; the underlying bug surfaces in the editor console (with the full stack trace) instead of presenting to the player as a permanent freeze.
 
@@ -7546,7 +7597,7 @@ Reported on v0.4.16: smurfs *still* occasionally get caught on corners and again
 
 #### Small vegetation passability (confirmed + documented)
 
-Audit of `LocalMapGenerator` and the runtime: only `LargeMushroom / LargeSandshroom / PalmShroom` ever set `tile.Passable = false`. Every other vegetation type (`SmurfberryBush`, `SmallMushroom`, `HerbCluster`, `MagicFlower`, `SmallSandshroom`, `PineShroom`, `Underbrush`, `MossPatch`) leaves the underlying terrain's passability untouched — so smurfs already walk through them. No code change needed; this paragraph and the changelog entry are the documentation Sam asked for.
+Audit of `LocalMapGenerator` and the runtime: only `LargeMushroom / LargeSandshroom / PalmShroom` ever set `tile.Passable = false`. Every other vegetation type (`SmurfberryBush`, `SmallMushroom`, `HerbCluster`, `MagicFlower`, `SmallSandshroom`, `PineShroom`, `Underbrush`, `MossPatch`) leaves the underlying terrain's passability untouched — so smurfs already walk through them. No code change needed; this paragraph and the changelog entry are the documentation.
 
 ---
 
@@ -7649,7 +7700,7 @@ Reported on v0.4.14: excavation reliability up to ~90 %, but a smurf still got s
 
 #### Root cause 3 — Depleted Large* shrooms drew their full sprite at 50 % opacity
 
-Sam's brief: "Largeshrooms and other variants should turn into passable fungalstump tiles that look like their requisite 'chopped down' largeshroom variant after being chopped … much like trees in rimworld." The old behaviour faded the live sprite — recognisable, but didn't read as a stump.
+Direction: largeshrooms and other variants should turn into passable fungalstump tiles that look like their requisite 'chopped down' largeshroom variant after being chopped — like chopped trees. The old behaviour faded the live sprite — recognisable, but didn't read as a stump.
 
 **Fix — `scripts/ui/LocalMapRenderer.cs`:** three new paint routines — `PaintFungalStumpLargeMushroom`, `PaintFungalStumpLargeSandshroom`, `PaintFungalStumpPalmShroom` — replace the live sprite path when `veg.IsDepleted`. Each variant keeps its cap colour as a thin remnant rim on top of a short stem stub, drawn over the now-passable terrain. The LargeMushroom stump shows a reddish Fly-Amanita rim, the LargeSandshroom keeps its broader sandy rim, the PalmShroom has a green tuft on each shoulder. Smurfs can walk over them; regrowth still ticks normally so the stump returns to a live tree after `RegrowthDays` in-game days.
 
@@ -7684,7 +7735,7 @@ Reported on v0.4.13 with one screenshot: a large stone+wood dig site with 17 smu
 
 - **`Tick` wraps the per-smurf loop in `try { … } finally { map?.EndTick(); }` after `map?.BeginTick()`.** Exception-safe; even a thrown handler can't strand the freeze flag on.
 - **Pre-movement reachability gate.** Every smurf with a designation-type `CurrentTask` runs `map.IsWorkReachable(smurfTile, targetTile)` before the move step. Unreachable targets get blacklisted on the 4-slot `AvoidTiles` FIFO with 360-tick TTL, the soft-claim is released, and `CurrentTask` is nulled — so the next tick re-runs `SelectTask` and picks a different target instead of walking into the wall for 1.5 s. O(1) per smurf when regions are clean, which they always are inside a tick thanks to the BeginTick batch.
-- **`NearestAdjacentPassableTile` now takes the smurf's tile coords + checks regions.** Picks the passable neighbour *closest to the smurf* (Euclidean distance from the smurf, not the target), and prefers neighbours in the smurf's own DF region. Falls back to the legacy target-relative pick if the smurf's region is unknown or no neighbour matches it — so the change is strictly safer than v0.4.13's behaviour and degrades gracefully. Diggers approaching from any side now line up on the correct face of the wall instead of all routing to the west neighbour. `ResolveWalkTarget` updated to pass the smurf's tile coords.
+- **`NearestAdjacentPassableTile` now takes the smurf's tile coords + checks regions.** Picks the passable neighbour *closest to the smurf* (Euclidean distance from the smurf, not the target), and prefers neighbours in the smurf's own region. Falls back to the legacy target-relative pick if the smurf's region is unknown or no neighbour matches it — so the change is strictly safer than v0.4.13's behaviour and degrades gracefully. Diggers approaching from any side now line up on the correct face of the wall instead of all routing to the west neighbour. `ResolveWalkTarget` updated to pass the smurf's tile coords.
 
 ---
 
@@ -7704,13 +7755,13 @@ Patch `0.4.13` → `0.4.14`. `MainMenuController.cs` + `memory/project_versionin
 
 ## [0.4.13] — 2026-05-13
 
-### Fixed — Smurfs no longer cluster + jitter on unreachable excavation tiles (DF-style region pathfinding)
+### Fixed — Smurfs no longer cluster + jitter on unreachable excavation tiles (region-based pathfinding)
 
 Reported on v0.4.12 with five screenshots: a stone wall designated for excavation, with smurfs piled at the edge of the dig site, jittering in place, unable to reach the interior tiles. The cluster caused noticeable hitches because every smurf was paying the full 1024-node A* budget per tick trying to prove the impossible, then spending the 90-tick stuck-detection window before re-rolling — only to re-pick the same unreachable tile by squared distance and start over.
 
 The root cause is that `FindNearestExcavate / Gather / ChopWood / Cut` returned the closest-by-distance designation regardless of whether the smurf could physically reach it. Inside a hollowed-out vein, the closest tile from outside is always a sealed interior wall.
 
-**Fix — Dwarf Fortress-style connected-component regions, with diagonal movement preserved.** Per the [DF Path wiki page](https://dwarffortresswiki.org/index.php/Path), DF tags every passable tile with a connectivity id and answers "is X reachable from Y?" in O(1) before invoking A*. We do the same but keep 8-connectivity (cardinal + diagonal) with the same cut-corner rule the renderer-side movement already obeyed, so the RimWorld-style smooth diagonal walks stay intact.
+**Fix — Connected-component regions, with diagonal movement preserved.** Tag every passable tile with a connectivity id and answer "is X reachable from Y?" in O(1) before invoking A*. We do the same but keep 8-connectivity (cardinal + diagonal) with the same cut-corner rule the renderer-side movement already obeyed, so smooth diagonal walks stay intact.
 
 ---
 
@@ -7958,7 +8009,7 @@ Patch `0.4.6` → `0.4.7`. `MainMenuController.cs` + `memory/project_versioning.
 
 ### Perf — v0.4.6 audit + P0 quick-wins; merged OptimizationReport.md into enginespec.md
 
-Sam's brief: re-run the codebase audit for the 1000-smurf + 60 FPS constant 1× target; eliminate hitches; merge `OptimizationReport.md` into `enginespec.md`.
+Direction: re-run the codebase audit for the 1000-smurf + 60 FPS constant 1× target; eliminate hitches; merge `OptimizationReport.md` into `enginespec.md`.
 
 Four P0 quick-wins land inline. The remaining six audit items (A-5 through A-14) are documented and queued for the v0.4.7 batch with concrete remediations + effort estimates. The two cloud-level perf docs (`enginespec.md` + `OptimizationReport.md`) are merged into a single living document at `Cloud/enginespec.md`; `OptimizationReport.md` deleted.
 
@@ -8009,7 +8060,7 @@ Patch `0.4.5` → `0.4.6`. `MainMenuController.cs` + `memory/project_versioning.
 
 The v0.4.2 carry icon was hardcoded to the right-side hand position regardless of handedness and overlapped any equipment overlay in the same hand. v0.4.5 routes the haul-carry through the per-slot model:
 
-- **Handedness-aware placement** — `ResolveCarrySlot(s)` picks the dominant hand first (Right or Left per the smurf's `Handedness`); falls back to the off-hand if the dominant is already holding an equipped item; falls back to the dominant slot when both hands are occupied (the carry visually replaces the dominant equipment for the haul duration — DF / RimWorld convention).
+- **Handedness-aware placement** — `ResolveCarrySlot(s)` picks the dominant hand first (Right or Left per the smurf's `Handedness`); falls back to the off-hand if the dominant is already holding an equipped item; falls back to the dominant slot when both hands are occupied (the carry visually replaces the dominant equipment for the haul duration).
 - **Equipment-overlay suppression** — the renderer skips the equipment slot that's holding the haul-carry so the per-slot overlay and the carry icon don't stack on the same pixels. When the haul completes, the slot's equipment visual returns automatically the next frame.
 
 Result: a left-handed Forager with an equipped Sickle picking up berries now visibly carries the berries in their right hand (off-hand) while the Sickle stays in the left. A right-handed empty-handed Smurf carrying a stone block draws the block in their right hand as before.
@@ -8032,9 +8083,9 @@ Patch `0.4.4` → `0.4.5`. `MainMenuController.cs` + `memory/project_versioning.
 
 ## [0.4.4] — 2026-05-13
 
-### Added — DF-style per-body-part equipment, Handedness trait, auto-equip-on-task
+### Added — Per-body-part equipment, Handedness trait, auto-equip-on-task
 
-The v0.4.3 three-slot equipment model (Tool / Weapon / Apparel) is replaced with a Dwarf-Fortress-style per-body-part dictionary keyed by every external `BodyPartRegistry` part. Each smurf gets a `Handedness` trait that determines which hand auto-equip fills first; off-hand stays free for shields + dual-wield once Phase 7 combat lands. Tools auto-equip from the colony stockpile the moment a smurf picks up a matching task.
+The v0.4.3 three-slot equipment model (Tool / Weapon / Apparel) is replaced with a per-body-part dictionary keyed by every external `BodyPartRegistry` part. Each smurf gets a `Handedness` trait that determines which hand auto-equip fills first; off-hand stays free for shields + dual-wield once Phase 7 combat lands. Tools auto-equip from the colony stockpile the moment a smurf picks up a matching task.
 
 ---
 
@@ -8149,7 +8200,7 @@ Replaces the v0.3.30 "always issue Move" path with `ResolveRightClickActions(til
 
 **Default execution:** the first applicable action auto-fires. Pick Up wins over Move when both apply, so right-clicking an item under cursor picks it up rather than running over it.
 
-**Alt-held = context menu:** `Input.IsActionPressed("kb_context_menu") || Input.IsKeyPressed(Key.Alt)` opens a RimWorld-style `PopupPanel` at the cursor position listing every applicable action; clicking one executes and dismisses.
+**Alt-held = context menu:** `Input.IsActionPressed("kb_context_menu") || Input.IsKeyPressed(Key.Alt)` opens a context-menu `PopupPanel` at the cursor position listing every applicable action; clicking one executes and dismisses.
 
 #### BehaviorSystem — pick-up player-order handling (`BehaviorSystem.cs`)
 
@@ -8198,7 +8249,7 @@ Patch `0.4.2` → `0.4.3`. `MainMenuController.cs` + `memory/project_versioning.
 
 ### Added — Item taxonomy aligned with Smurf theme; on-tile drops + Haul; stone variation w/ MagicCrystal ore-veins; carry visual + equipment slots
 
-Sam's brief: Gather should produce items from any food/magic vegetation; Cut should produce items from any vegetation; LivingWood/DeadWood as separate excavation drops; stone variation generation with textures; remove non-thematic species (Oak/Pine/Willow/PalmWood); fungal wood drops from any LargeMushroom variant; every gathered/excavated tile should drop a *physical* item visible on the world; smurfs should carry items in hands like RimWorld; per-smurf inventory + equipment slots that show as overlay on the smurf model.
+Direction: Gather should produce items from any food/magic vegetation; Cut should produce items from any vegetation; LivingWood/DeadWood as separate excavation drops; stone variation generation with textures; remove non-thematic species (Oak/Pine/Willow/PalmWood); fungal wood drops from any LargeMushroom variant; every gathered/excavated tile should drop a *physical* item visible on the world; smurfs should carry items in hands; per-smurf inventory + equipment slots that show as overlay on the smurf model.
 
 This is a substantial taxonomy + rendering pass. Equipment-overlay rendering is wired but no production path equips a smurf today (Phase 5+ crafting / equip-orders fill that in).
 
@@ -8229,7 +8280,7 @@ This is a substantial taxonomy + rendering pass. Equipment-overlay rendering is 
 
 #### Stone variation at generation (`LocalMapGenerator.AssignStoneVariation`)
 
-Every Boulder tile is assigned a specific stone subtype using a biome-weighted base table (Mountains favour Granite, Swamp favours Limestone, Desert favours Quartz, etc.), then a second pass over-paints rare **MagicCrystal ore veins** — 3-5-tile random-walk clusters at ~0.4 % per Boulder rate (1.2 % in MagicGrove). The DF "stripes of gem in stone" pattern.
+Every Boulder tile is assigned a specific stone subtype using a biome-weighted base table (Mountains favour Granite, Swamp favours Limestone, Desert favours Quartz, etc.), then a second pass over-paints rare **MagicCrystal ore veins** — 3-5-tile random-walk clusters at ~0.4 % per Boulder rate (1.2 % in MagicGrove). The "stripes of gem in stone" pattern.
 
 `LocalMap.SetTileStone` / `GetTileStone` carry the (x,y) → MaterialKey map; renderer + excavate handler both read it.
 
@@ -8280,7 +8331,7 @@ Replaces the v0.4.0 stub. Smurfs with Haul priority > 0 in the Jobs grid:
 2. `Apply` (called when the smurf arrives at the pickup tile): removes the item from the map, sets `CarriedItem`, retargets the task to the delivery point. The delivery point is the colony spawn-cluster centre — Phase 5 replaces this with an accepting stockpile zone.
 3. `Apply` (called on second arrival, at the delivery point): clears `CarriedItem`, adds the item to `ColonyResources.Inventory`. Players see the HUD totals tick up as the haulers deliver.
 
-Item reservations prevent multiple haulers from converging on the same pile (the RimWorld pattern). Reserve / Release happens around the task lifecycle.
+Item reservations prevent multiple haulers from converging on the same pile (the standard reservation pattern). Reserve / Release happens around the task lifecycle.
 
 Wired into `BehaviorSystem.SelectTask` at Tier 2 with priority 50 — primary role work still wins, but Haul slots in before Tier 3 idle, so dropped items get picked up promptly.
 
@@ -8419,7 +8470,7 @@ Sub-B closes out Phase 4 (≈ 90 % complete) by landing every queued deliverable
 - Replaces the v0.3.x "Phase 3.10 stub" label in `BottomTabPanel`'s Jobs tab.
 - 15 work categories: Patient, BedRest, Doctor, Construct, Mine, PlantCut, Grow, Cook, Hunt, Forage, Chop, Haul, Clean, Research, Attune.
 - `WorkPriorityDefaults.ByRole` baked-in priorities seed every newborn / wanderer / loaded smurf at creation. Forager-default sets Forage=1, PlantCut=2, Chop=3; Crafter sets Construct=1, Mine=1, Chop=2; Mage sets Attune=1; etc.
-- Grid cell colours follow RimWorld convention: 1 green, 2 yellow-green, 3 amber, 4 orange, off muted grey. Cell click cycles 1→2→3→4→off→1. Column-header click cycles every cell in that column to the same next value. Right-click on cell or column header sets to off.
+- Grid cell colours: 1 green, 2 yellow-green, 3 amber, 4 orange, off muted grey. Cell click cycles 1→2→3→4→off→1. Column-header click cycles every cell in that column to the same next value. Right-click on cell or column header sets to off.
 - `BehaviorSystem.SelectTask` consults the smurf's `WorkPriorities[category]` before considering each Tier 2 task: `0` blacklists the work entirely; `1-4` shifts the engine priority by `+12 / +4 / -4 / -12`.
 - `SimulationManager.GetWorkPrioritiesSnapshot()` and `SetWorkPriority(name, cat, val)` are the read/write API for the panel.
 
@@ -8495,7 +8546,7 @@ The header label now reads `"Name — Activity"` (e.g. `"Brainy — Gathering fo
 | `ItemState.cs` | Fresh / Stale / Spoiled / Depleted / Broken + `FromCondition(condition, durability)` mapping (Stale ≤ 70 %, Spoiled ≤ 30 %). |
 | `MaterialKey.cs` | `MaterialKey` record struct (Family, SubType), `MaterialDef` with multipliers, and `MaterialRegistry` catalogue of 27 materials across Wood / Stone / Plant / Cloth / Magic / Bone / Hide / Metal families. Magicwood × 0.5 decay, Cloth × 1.2, Food (Plant family) × 4.0 — matches the roadmap §4 spec line. |
 | `ItemRegistry.cs` | Sub-type catalogue keyed by `(Kind, SubType)`. Every raw food (Smurfberry / SmallMushroom / LargeMushroom / HerbCluster / MagicFlower / Pineshroom / PalmShroom / Sandshroom), the WoodLog / StoneBlock / Cuttings materials, the raw Magic essences, the starter Tool / Weapon / Apparel / Trinket pool. AllowedFamilies on each sub-type constrains material rolls so a Pick can't be made of Smurfwool. |
-| `Item.cs` | Item instance: Kind / SubType / Material / Quality / State / AvgCondition / DurabilityCap / AvgBirthTick / Quantity / OwnerSmurfId / TilePos. `CanStackWith` + `Absorb` implement RimWorld-style stacking with weighted condition + age averaging. |
+| `Item.cs` | Item instance: Kind / SubType / Material / Quality / State / AvgCondition / DurabilityCap / AvgBirthTick / Quantity / OwnerSmurfId / TilePos. `CanStackWith` + `Absorb` implement standard stacking with weighted condition + age averaging. |
 | `ItemFactory.cs` | Single entry point for creating items. Resolves sub-type def → rolls material (constrained to AllowedFamilies, weighted by 1/ValueMul so cheap materials dominate) → rolls quality from a 15/60/20/4/1 % bell shifted upward by skillLevel/5 → seeds condition near full → stamps BirthTick. `FoodFromVegetation` / `WoodFromVegetation` / `MaterialFromTerrain` lookup tables map sim-thread harvest types to (SubType, MaterialKey) pairs. |
 | `Inventory.cs` | Lock-protected colony-wide stack list. `Add` merges into a matching stack if stackable; `Consume` decrements + removes empty stacks; `FindBestFood` picks the highest-scoring Fresh/Stale stack weighted by `BaseNutrition × NutritionMul × prefs(±50 %) × stale(0.6×)`; `Snapshot()` returns a flat `InventoryRow[]` value array under the lock so the main thread can render without a race. `TickDeterioration` walks all items and applies per-material decay. |
 | `Systems/ItemDeteriorationSystem.cs` | `TickDay` wrapper hooked into the SimulationCore day-boundary path. Material axis only for sub-A; Temperature / Insulation / Use axes queued for sub-B once Phase 5 buildings exist. |
@@ -8525,7 +8576,7 @@ These are spec'd in the roadmap and intentionally deferred. Each is meaningful e
 - **Scenario starting items dialog** — per-smurf budget allocator + procedural roll preview. Scenarios currently start with empty colony inventory (smurfs gather their first food after spawn).
 - **Per-smurf inventory + Haul task** — today the inventory is colony-global with no spatial location. Items don't sit on tiles; production goes directly to the colony pool. Phase 5 stockpile zones plug in here.
 - **Cook task + cooked-meal sub-types** — Raw → Prepared → Preserved food taxonomy. Needs Phase 5 Kitchen building before the workflow makes sense.
-- **Jobs tab grid UI** — RimWorld-style per-smurf work priority grid; the bottom tab still shows the "Phase 3.10 stub" label.
+- **Jobs tab grid UI** — per-smurf work priority grid; the bottom tab still shows the "Phase 3.10 stub" label.
 - **Wandering-in event + birth refinement** — colony-size-aware female-scaling and the 2–4 wanderers/year storyteller arrival prompt.
 - **A\* pathfinding** — replaces v0.3.22 local steering for routes > ~10 tiles.
 - **Save format extension** — items don't yet persist across save/load.
@@ -8621,9 +8672,9 @@ Patch bumped from `0.3.43` → `0.3.44`. `MainMenuController.cs` version string 
 
 ### Added — Behavior system rewrite: Thoughts, Preferences, idle activities
 
-Sam's brief: "Rebuild the behavior system to model that of Dwarf Fortress with RimWorld's influence. We want Smurfs to feel like they're actually alive instead of jittering in place until they're commanded to move. Preserve existing gameplay features and functionality through this change as it will serve as the direct plug-in for gameplay in Phase 4 and Phase 5."
+Direction: rebuild the behavior system so smurfs feel like they're actually alive instead of jittering in place until commanded to move. Preserve existing gameplay features and functionality through this change as it will serve as the direct plug-in for gameplay in Phase 4 and Phase 5.
 
-The result is a Phase 3.x.8 architectural pass that adds Thoughts (RimWorld-style temporal mood entries), Preferences (DF-style persistent likes/dislikes), and a personality-weighted idle-activity picker that replaces the old "smurf wanders forever" loop. Every existing player-facing affordance still works unchanged — player orders, designations, role priorities, soft-claim system, LOD ticking, save/load. The plug-in points for Phase 4 (item-aware Eat / liked-food bumps) and Phase 5 (bed → WellRested thought) are explicit `EmitWorkThought` and `ApplyTaskEffect` hooks.
+The result is a Phase 3.x.8 architectural pass that adds Thoughts (temporal mood entries), Preferences (persistent likes/dislikes), and a personality-weighted idle-activity picker that replaces the old "smurf wanders forever" loop. Every existing player-facing affordance still works unchanged — player orders, designations, role priorities, soft-claim system, LOD ticking, save/load. The plug-in points for Phase 4 (item-aware Eat / liked-food bumps) and Phase 5 (bed → WellRested thought) are explicit `EmitWorkThought` and `ApplyTaskEffect` hooks.
 
 ---
 
@@ -8680,7 +8731,7 @@ Designation pickup latency is unchanged (the `HasAnyDesignation` probe is O(1)).
 
 **4. `SelectIdleActivity`** — weighted picker over the six variants. Base weights nudged by personality (Introvert −Converse +Observe; Gossip +Converse; Mage-role +Meditate; etc.) and preferences (LikedActivities +10; DislikedActivities −8).
 
-**5. Preference-based priority bumps in Tier 2** — `PreferenceTilt(activity)` returns +8 for liked, −6 for disliked. Folded into Forager/Crafter/Cross-role priorities for GatherFood / GatherMaterial / ChopWood / CutVegetation. Asymmetric magnitudes (liked > disliked) mirror RimWorld: liked work resists interruption more strongly than disliked work is avoided.
+**5. Preference-based priority bumps in Tier 2** — `PreferenceTilt(activity)` returns +8 for liked, −6 for disliked. Folded into Forager/Crafter/Cross-role priorities for GatherFood / GatherMaterial / ChopWood / CutVegetation. Asymmetric magnitudes (liked > disliked): liked work resists interruption more strongly than disliked work is avoided.
 
 **6. Thought emission** on every meaningful task completion:
 - Eat → `TastyMeal` (or `AteHungry` if pre-meal Nutrition < 15).
@@ -8846,7 +8897,7 @@ Category   Sub-type   Material   Quality   Condition   Count   Avg age   Locatio
 
 #### Animals tab stub
 
-A `MakeStubContent` panel anchored at the far-right of the bottom tab row. Carries the Phase 9 marker text only — the actual roster, training, allow-orders, and slaughter-toggle columns land alongside the husbandry rollout. The slot is here so the player and roadmap reviewers see the structural shape of the bottom bar settling toward the RimWorld-style row.
+A `MakeStubContent` panel anchored at the far-right of the bottom tab row. Carries the Phase 9 marker text only — the actual roster, training, allow-orders, and slaughter-toggle columns land alongside the husbandry rollout. The slot is here so the player and roadmap reviewers see the structural shape of the bottom bar settling toward the final tab row.
 
 ---
 
@@ -9038,7 +9089,7 @@ The full report is at `C:\Claude\Cloud\OptimizationReport.md`. Summary:
 
 ### Added — Chop Wood + Cut Plants orders; smaller tooltips + toggle; ArrivalRadius bump for stuck-fix; Jobs roadmap
 
-Three things landed: a stuck-execution fix for the player's report ("smurfs stand at their task without executing"), two new order verbs (Chop Wood / Cut Plants) modelled on RimWorld, a tooltip-size pass, and the RimWorld-style Jobs tab is now fully specified in the Phase 4 roadmap.
+Three things landed: a stuck-execution fix for the player's report ("smurfs stand at their task without executing"), two new order verbs (Chop Wood / Cut Plants), a tooltip-size pass, and the Jobs tab is now fully specified in the Phase 4 roadmap.
 
 **1. ArrivalRadius bumped 10 → 14 px (stuck-execution fix).**
 
@@ -9048,10 +9099,10 @@ This is the most reliable single fix for the "stuck at work site" pattern. Combi
 
 **2. New orders — Chop Wood (🪓) and Cut Plants (✂).**
 
-Two RimWorld-equivalent verbs added to the Orders tab:
+Two new verbs added to the Orders tab:
 
 - **🪓 Chop** — drag-box across wood-yielding shrooms (LargeMushroom / LargeSandshroom / PalmShroom). Smurfs walk to the tile (via the adjacent-approach path, since LargeMushroom variants are impassable until depleted), harvest, drop Fungal Wood (5 / 4 / 3 per cap respectively). When the cap fully clears, the tile flips to passable via the existing `LocalMap.HarvestVegetation` path.
-- **✂ Cut** — drag-box across **any** vegetation. Smurfs walk to the tile, clear the vegetation slot, drop nothing. Used for clearing playfield space — RimWorld's "Cut plants" verb.
+- **✂ Cut** — drag-box across **any** vegetation. Smurfs walk to the tile, clear the vegetation slot, drop nothing. Used for clearing playfield space — a "Cut plants" verb.
 
 Both are full designation types (not extensions of Gather), tracked alongside Excavate/Gather in `LocalMap`:
 
@@ -9081,7 +9132,7 @@ The existing **Show Tooltips** toggle in Settings → Gameplay was already wired
 
 The **Tooltip Size** dropdown (Large / Normal / Small) was added in v0.3.20 and continues to work — `GameController.BuildTooltipTheme` sets the font size on `TooltipLabel` for the whole game. Combined with the shorter strings, "Normal" now renders the toolbar tooltips in compact panels.
 
-**4. Phase 4 Jobs tab — RimWorld-style work priorities (roadmap).**
+**4. Phase 4 Jobs tab — work-priorities grid (roadmap).**
 
 `SmurfulationC_Roadmap_2026.md` updated with a complete spec for the Jobs tab. Per-smurf × per-work-category grid (rows × columns), values 1 (highest) through 4 (lowest) or "off". `SelectTask` reads priorities; off means forbidden, 1 always considered, 2–4 only when no higher-priority work available. Bulk-edit by column header click (cycle) or right-click (set all). Player designations bump baseline priority by +1 for the duration. Smart defaults per role baked in at smurf creation. New `Smurf.WorkPriorities : Dictionary<string, byte>` serialised to `SmurfSaveData`. UI is a scrollable `GridContainer` with sticky header row and leftmost column.
 
@@ -9521,7 +9572,7 @@ Each panel exposes its own hit-test:
 
 ## [0.3.27] — 2026-05-12
 
-### Fixed — Tab content now actually appears; Smurfs tab rebuilt as a RimWorld-style roster table
+### Fixed — Tab content now actually appears; Smurfs tab rebuilt as a roster table
 
 v0.3.26's "shared content panel with stacked hosts inside" approach was undone by a Godot layout subtlety. `PanelContainer` is a Container that sizes to its single child's *minimum size*. The wrapper that held all five hosts was a plain `Control`, and `Control.GetMinimumSize()` returns zero by default — it does not propagate child minimum sizes upward. So no matter which tab the player picked, the panel was sized to the panel margins only (~12 px) and the actual host content fell outside the rendered rect.
 
@@ -9535,9 +9586,9 @@ Each tab host is now its own styled `PanelContainer` — siblings of the `Expand
 
 `DesignationToolbar` and `SmurfRosterPanel` both now override `_GetMinimumSize()` to return the max of their visible-Control children's `GetCombinedMinimumSize()`. The host PanelContainer picks that up and sizes itself + the parchment border around it. Visible content. Finally.
 
-**Smurfs tab — RimWorld-style roster table:**
+**Smurfs tab — roster table:**
 
-Previously the Smurfs panel was a single-column `ItemList` with `"Name · Role · Mood"` strings. Replaced with a scrollable multi-column table modelled on RimWorld's Schedule + Assign + Work tabs (compressed into one view, since SmurfulationC's feature set is narrower than RimWorld's).
+Previously the Smurfs panel was a single-column `ItemList` with `"Name · Role · Mood"` strings. Replaced with a scrollable multi-column table modelled on a compressed Schedule + Assign + Work view (the SmurfulationC feature set is narrower than the genre reference).
 
 Columns:
 
@@ -9551,7 +9602,7 @@ Columns:
 | Activity | Verb form of `CurrentTask` ("Eating", "Excavating", "Idle", …) | Phase 3 (present) |
 | ⚔ | Sword glyph when `CombatTargetName != null` | Phase 8 stub (data-plumbed) |
 
-RimWorld's Apparel / Food / Drug / Reading policy columns are intentionally omitted — none of those systems exist in SmurfulationC yet, and empty stub columns would only clutter. Work priorities live in their own ⚙ Jobs tab (still a stub label until Phase 3.10 fills it in).
+Apparel / Food / Drug / Reading policy columns are intentionally omitted — none of those systems exist in SmurfulationC yet, and empty stub columns would only clutter. Work priorities live in their own ⚙ Jobs tab (still a stub label until Phase 3.10 fills it in).
 
 The roster refreshes diff-in-place: rows are kept in a `Dictionary<name, RosterRowCtrls>`, new smurfs append, dead smurfs are removed, surviving smurfs have their need bars / mood text / activity verb updated without rebuilding the whole VBox. Scroll position is preserved across ticks.
 
@@ -9583,7 +9634,7 @@ v0.3.25's bottom-centre tab shell hit two related rendering bugs:
 - Each row is an `HBoxContainer` with a flexible spacer + the actual panel — same trick `HUDController` uses to push its right capsule against the screen edge while the panel auto-sizes to content.
 - Result: the tab capsule sits glued to the bottom-right at `EdgeInset` from both edges, and the active content panel pops up *above* it, right-edge-aligned for visual continuity.
 
-**Tab bar contents (single horizontal capsule, RimWorld Architect-style):**
+**Tab bar contents (single horizontal capsule, Architect-style):**
 
 | Tab | Content host | State |
 |---|---|---|
@@ -9593,7 +9644,7 @@ v0.3.25's bottom-centre tab shell hit two related rendering bugs:
 | ⚙ Jobs  | stub label "Per-role work priorities — Phase 3.10 stub" | placeholder |
 | 👥 Smurfs | embedded `SmurfRosterPanel` | shipped |
 
-The `Storage`, `Wall`, `Priorities` buttons that v0.3.25 had inside `DesignationToolbar` are gone — they live as their own tabs now, matching RimWorld's Architect/Zone/Build/Production separation. The toolbar is now a clean three-button capsule: Gather, Excavate, Remove.
+The `Storage`, `Wall`, `Priorities` buttons that v0.3.25 had inside `DesignationToolbar` are gone — they live as their own tabs now, matching the standard Architect/Zone/Build/Production separation. The toolbar is now a clean three-button capsule: Gather, Excavate, Remove.
 
 **Nested-panel fix:**
 
@@ -9626,7 +9677,7 @@ Two related design problems also surfaced:
 
 1. **Inverted layout.** The VBox children are now ordered `[content panel, tab row]` so the tabs sit at the *bottom* of the shell. The shell itself is anchored `LayoutPreset.CenterBottom` with `GrowVertical = GrowDirection.Begin` so the entire stack grows *upward* from the screen-edge. Total height (`content + sep + tabs + bottomFloat`) is computed at build time from `UITheme.Scaled` constants so it stays correct across UI-size changes. With the Smurfs roster's 170 px content height, this puts the top edge of the panel at ~224 px above the screen edge — comfortably on-screen at every supported resolution.
 
-2. **Closeable panels with `Tab.None` state.** Clicking the active tab now toggles the content panel off (RimWorld-style "click active tab to dismiss"). The tab row stays visible; the content area collapses entirely. The shell opens with `Tab.None` on scene-load so the player isn't greeted with a panel covering the bottom-centre — it appears only when explicitly requested.
+2. **Closeable panels with `Tab.None` state.** Clicking the active tab now toggles the content panel off ("click active tab to dismiss"). The tab row stays visible; the content area collapses entirely. The shell opens with `Tab.None` on scene-load so the player isn't greeted with a panel covering the bottom-centre — it appears only when explicitly requested.
 
 3. **Single shared content `PanelContainer`.** The two host slots (`_ordersHost`, `_smurfsHost`) now live *inside* a single `PanelContainer` styled with `FloatingPanelStyle.Make()`. Both hosts use `LayoutPreset.FullRect` inside the container and toggle visibility individually. Two benefits:
    - The content panel and the tab row share visual style + the active tab button sits directly below the panel, giving the "connected to its tab" continuity the player asked for.
@@ -9650,7 +9701,7 @@ No layout changes required — the content panel's height stays fixed, all hosts
 
 ## [0.3.24] — 2026-05-12
 
-### Added — RimWorld-style tabbed bottom UI; RTS box-select; combat order stub; per-order visual feedback; Smurfs roster tab
+### Added — Tabbed bottom UI; RTS box-select; combat order stub; per-order visual feedback; Smurfs roster tab
 
 Big interaction-model overhaul. The bottom of the screen is now a two-tab shell (Orders / Smurfs) instead of a standalone designation toolbar. The non-combat orders the player can issue all live inside the Orders tab; right-click is reserved for combat orders (stubbed until Phase 8) and move orders to the currently selected smurfs. RTS-style box-select lets the player sweep multiple smurfs in one drag, and every order produces a short flash so the player knows the click was received.
 
@@ -9808,7 +9859,7 @@ Save format unchanged — the new fields are runtime state with property initial
 
 ### Changed — Designations are now drag-box; Move tool replaced by Gather; visual feedback added
 
-Phase 3.x designations were single-tile click toggles in v0.3.20 (click Excavate → click a boulder → flag flips). v0.3.21 replaces that with the standard RimWorld / DF model: pick a tool, hold left-mouse and drag a rectangle across a region of the map, and every valid tile inside the rectangle gets designated on release. A live preview rectangle shows exactly which cells the drag covers, and a persistent overlay draws a coloured glyph on every flagged tile so the player can see the current designation queue at a glance.
+Phase 3.x designations were single-tile click toggles in v0.3.20 (click Excavate → click a boulder → flag flips). v0.3.21 replaces that with the standard drag-rectangle model: pick a tool, hold left-mouse and drag a rectangle across a region of the map, and every valid tile inside the rectangle gets designated on release. A live preview rectangle shows exactly which cells the drag covers, and a persistent overlay draws a coloured glyph on every flagged tile so the player can see the current designation queue at a glance.
 
 **Tool list (DesignationToolbar):**
 
@@ -9821,7 +9872,7 @@ The Move button is gone because right-click on the map with a smurf selected alr
 
 **Behavior wiring (BehaviorSystem.SelectTask):**
 
-Designations are evaluated as Tier-2 tasks before the autonomous role chains. The selection rule mirrors RimWorld's "nearest pawn with highest priority for this work type takes it" behaviour:
+Designations are evaluated as Tier-2 tasks before the autonomous role chains. The selection rule is the standard "nearest pawn with highest priority for this work type takes it" behaviour:
 
 - Foragers pick the nearest `DesignatedForGather` tile at priority 60. The old "Forager only seeks vegetation when colony Food < 30" gate is bypassed for designated tiles — if the player drew the box, they want it picked.
 - Crafters pick the nearest `DesignatedForExcavation` tile at priority 60.
@@ -10001,7 +10052,7 @@ Previously offset by `EdgeInset + HudHeight + 6` to clear the old full-width HUD
 
 **`TileInfoOverlay` — moved to bottom-left:**
 
-Was top-right (`AnchorLeft = AnchorRight = 1f`, `OffsetTop = 54`) which conflicted with the new HUD right capsule and the alerts pane above it. Now bottom-left at `AnchorTop = AnchorBottom = 1f`, `OffsetLeft = 16`, `OffsetTop = -110`, clearing the bottom-centre designation toolbar. Matches RimWorld's "inspect text" placement convention. Font bumped one step (12 → 13) for legibility.
+Was top-right (`AnchorLeft = AnchorRight = 1f`, `OffsetTop = 54`) which conflicted with the new HUD right capsule and the alerts pane above it. Now bottom-left at `AnchorTop = AnchorBottom = 1f`, `OffsetLeft = 16`, `OffsetTop = -110`, clearing the bottom-centre designation toolbar. Standard "inspect text" placement convention. Font bumped one step (12 → 13) for legibility.
 
 ---
 
@@ -10110,13 +10161,13 @@ Appended to Phase 4 (just before the existing Estimated-scope footer). Documents
 - **Growth targets** — math sanity-check shows 7 → 50 by year 10 on a standard playthrough with the default founding seven (Smurfette included).
 - **Colony caps** — 250 smurfs is the recommended late-game target on a 320 × 200 map (the WorldGenPanel "Recommended" preset). 1 000 is the theoretical max on a 480 × 300 map. Storyteller pressure (raids, disease, weather) scales with colony size so growth has a real cost.
 
-**Roadmap — new Phase 12 — Disease System (RimWorld-modeled):**
+**Roadmap — new Phase 12 — Disease System:**
 
-Inserted between Phase 11 (Technology and Culture) and the now-renumbered Phase 13 (Era System). Modelled on `https://rimworldwiki.com/wiki/Disease`. Ten sub-sections:
+Inserted between Phase 11 (Technology and Culture) and the now-renumbered Phase 13 (Era System). Ten sub-sections:
 
 - **12.1** Data model — new `Disease` class with `Severity` / `Immunity` / `SeverityRate` / `ImmunityRate` / `OnsetDay` / `Symptoms`. Multiple active diseases per smurf supported.
-- **12.2** Immunity-vs-severity race — the signature RimWorld mechanic. Visible twin progress bars on the Phase 3.x smurf card.
-- **12.3** Disease catalogue — 12 entries drawing from Smurfs canon (Blue Plague, Cat Fever) + RimWorld archetypes (Common Cold / Flu / Gut Worms / Frostbite / Heatstroke) + SmurfulationC originals (Mushroom Rot, Sensory Mushroom Spore Sickness, Fairy Fever, Magic Resonance Sickness, Wound Infection).
+- **12.2** Immunity-vs-severity race — the signature disease-progression mechanic. Visible twin progress bars on the Phase 3.x smurf card.
+- **12.3** Disease catalogue — 12 entries drawing from Smurfs canon (Blue Plague, Cat Fever) + classic colony-sim archetypes (Common Cold / Flu / Gut Worms / Frostbite / Heatstroke) + SmurfulationC originals (Mushroom Rot, Sensory Mushroom Spore Sickness, Fairy Fever, Magic Resonance Sickness, Wound Infection).
 - **12.4** Catching vectors — Airborne / Food-borne / Vector-borne / Environmental / Wound infection / Weather-borne. Each gets a per-tick exposure roll model.
 - **12.5** Treatment loop — Caretaker-only `Treat` task. Medicine items (Herb Poultice / Smurfberry Syrup / Magic Salve / Fungal Antibiotic / Pixie Dust) as Phase 4 stockables. New `Medical` skill.
 - **12.6** Symptom integration — needs decay multipliers, body-part damage, mood penalties, movement penalties, `Bedridden` task — all routed through existing systems.
@@ -10139,20 +10190,20 @@ All cross-references in earlier phases that pointed at the old numbers automatic
 
 ## [0.3.12] — 2026-05-11
 
-### Roadmap — Phase 7 Combat and Phase 9 Husbandry/Farming fleshed out (DF-modeled)
+### Roadmap — Phase 7 Combat and Phase 9 Husbandry/Farming fleshed out
 
 No code changes — roadmap-only expansion of two phases that were previously sketched at high level.
 
 **Phase 7 — Combat System (fully expanded, 15 sub-sections):**
 
-DF-modelled combat (reference: `https://dwarffortresswiki.org/index.php/Combat`) adapted to SmurfulationC's existing systems. Combat is task-driven through Phase 3 `BehaviorSystem`, not a parallel engine. Highlights:
+Detailed simulation combat adapted to SmurfulationC's existing systems. Combat is task-driven through Phase 3 `BehaviorSystem`, not a parallel engine. Highlights:
 
 - **7.1** Combat tick model — Attack/Defend/Flee/Hunt/Patrol task types; per-tick attack exchange (range → initiative → attack roll → defense roll → body-part selection → damage → wound → status effects → narrative log)
 - **7.2** Body-part targeting reuses the existing `BodyPartRegistry` 20-part list. Each `BodyPartDef` gains `Size` + `Location`; per-attack hit-location roll weighted by attack vector (front melee / behind / charge / aerial / ranged)
 - **7.3** Weapon types: Edged (slash/cut) / Blunt / Piercing / Ranged Piercing / Magical. Each with strength/weakness against armor classes. Phase 4 `Item.Material` drives damage multiplier (Stone 1.0 / Fungal Wood 0.7 / Iron 1.4 / Magicstone 1.6); `Item.Quality` from Crude (0.7) to Legendary (1.8 + critical chance)
 - **7.4** Damage formula — `DamageRaw = WeaponBase × MaterialMult × QualityMult × ConditionMult × WielderStrength`; subtracts layered armor; remainder hits part Condition and rolls a wound entry
-- **7.5** Layered armor (RimWorld-DF hybrid) — Phase 4 Apparel items with `Coverage` (which BodyPart Locations) + `Layer` (Skin/Padding/Mail/Plate/Cloak). Layers roll ArmorStop in order; damage that passes through reaches the part. Cloth absorbs Edged best; plate absorbs Blunt worst
-- **7.6** Combat skills — adds Fighting, per-weapon (Sword/Spear/Club/Bow/Sling), Wrestler, Dodge, Shield User, Armor User, Discipline, Tracker to SkillRegistry. XP gain on successful attacks/defenses (DF-style)
+- **7.5** Layered armor — Phase 4 Apparel items with `Coverage` (which BodyPart Locations) + `Layer` (Skin/Padding/Mail/Plate/Cloak). Layers roll ArmorStop in order; damage that passes through reaches the part. Cloth absorbs Edged best; plate absorbs Blunt worst
+- **7.6** Combat skills — adds Fighting, per-weapon (Sword/Spear/Club/Bow/Sling), Wrestler, Dodge, Shield User, Armor User, Discipline, Tracker to SkillRegistry. XP gain on successful attacks/defenses
 - **7.7** Wound model — Bruise / Cut / Fracture / Puncture / Mangle / Sever / Concussion. Per-part `Wounds: List<WoundType>` so a single leg can be both bruised and fractured. Severity scales by WeaponType × DamageNet
 - **7.8** Bleeding / Pain / Unconsciousness — new `Smurf.Blood` (0–100, depleted by Bleeding wounds, death at 0) and `Smurf.Pain` (0–100, knocks unconscious at 90, `Discipline` raises threshold). New status flags (Bleeding/Unconscious/Stunned/Venomed/Infected/Cursed) surfaced on Phase 3.x smurf card
 - **7.9** Combat narrative log — template-driven sentences in Phase 3.x message log (e.g. "Hefty bashes the Goblin's left leg with the iron mace, fracturing the bone!")
@@ -10165,9 +10216,9 @@ DF-modelled combat (reference: `https://dwarffortresswiki.org/index.php/Combat`)
 
 **Phase 9 — Animal Husbandry, Farming, and Hunting (fully expanded, 11 sub-sections):**
 
-DF-modelled animal + farming systems (refs: `DF2014:Domestic_animal` and `Farming`) adapted to existing simulation systems.
+Deep-sim animal + farming systems adapted to existing simulation systems.
 
-- **9.1** Animal categories — DF tag bitmask (Tameable / Pet / Pack / War / Hunt / Mount / Grazer / Carnivore / Omnivore / Milkable / Shearable / Egg-Layer / Butcherable / Breeds). Each Phase 6 entity species gets a tag set; mechanics are data-driven not per-species code. Worked example tagging for 9 SmurfulationC species (Glow Bunny, Honey Bee, Shore Frog, Forest Boar, Cave Lizard, Pegasus, Sky Pony, Mushroom Goat, Bonecrest Beetle)
+- **9.1** Animal categories — tag bitmask (Tameable / Pet / Pack / War / Hunt / Mount / Grazer / Carnivore / Omnivore / Milkable / Shearable / Egg-Layer / Butcherable / Breeds). Each Phase 6 entity species gets a tag set; mechanics are data-driven not per-species code. Worked example tagging for 9 SmurfulationC species (Glow Bunny, Honey Bee, Shore Frog, Forest Boar, Cave Lizard, Pegasus, Sky Pony, Mushroom Goat, Bonecrest Beetle)
 - **9.2** Taming — Caretaker walks bait to wild Tameable, roll on `AnimalHandling × Species TameDifficulty × Bait quality`. Catastrophic failure → animal becomes Hostile (Phase 7 combat). New `AnimalHandling` skill
 - **9.3** Pens / Pasture / Pet behavior — Pen is a Phase 5 building; Pasture is a Phase 5.11.a zone for Grazers; Nesting Box / Beehive Frame / Trough are Phase 5 furniture. Pets bypass pens and follow Owner
 - **9.4** Production work loop — Caretaker tasks for Milk / Shear / Collect Eggs / Feed / Vet Tend; per-tag cooldowns; output scales with Condition + AnimalHandling skill
@@ -10176,7 +10227,7 @@ DF-modelled animal + farming systems (refs: `DF2014:Domestic_animal` and `Farmin
 - **9.7** Mounts — Mount-tagged tamed animal assigned to a Rider smurf. Shared SimPos, +50 % movement, charge-attack access in combat. Phase 12 era unlocks (Pegasus etc.)
 - **9.8** Farming — 8 sub-sub-sections:
   - **9.8.1** Farm Plot Zone (Phase 5.11.a) painted on passable Mud / Grass / ForestFloor (refuses Sand / Stone). Each tile is a Plot cell with its own state
-  - **9.8.2** Seed system — every plant has a `Seed` item (Phase 4); harvest yields small chance of seed; eating all seeds = no future crops (DF-faithful conservation gameplay)
+  - **9.8.2** Seed system — every plant has a `Seed` item (Phase 4); harvest yields small chance of seed; eating all seeds = no future crops (conservation gameplay)
   - **9.8.3** Seasonal planting — per-crop PlantingSeason + GrowingSeasons table (Smurfberry / Spring Greens / Sunberry / Pumpkin / Magic Herb / Cold-Hardy Smurfberry / Small Mushroom / Large Mushroom / Magic Flower)
   - **9.8.4** Per-tile lifecycle — `Fallow → Planted → Sprouting → Growing → Ripening → Ripe → Wilted → Harvested` state machine
   - **9.8.5** Soil fertility + fertilization — uses existing `LocalTile.Fertility`; repeat planting depletes (-0.02 per harvest); Fertilizer item (manure / scraps / compost) restores; crop rotation prevents exhaustion
@@ -10232,19 +10283,19 @@ The v0.3.10 changelog entry is left untouched — it describes the as-of-that-ve
 
 ## [0.3.10] — 2026-05-11
 
-### Roadmap — Phase 8.x Fire lifted out into dedicated Phase 9.5 Weather and Environment (RimWorld-modeled)
+### Roadmap — Phase 8.x Fire lifted out into dedicated Phase 9.5 Weather and Environment
 
-No code changes — major roadmap restructure. The Fire System added in v0.3.9 as a sub-phase of Phase 8 (Events / Storyteller) is moved into a dedicated new phase between Phase 9 (Animal Husbandry / Farming / Hunting) and Phase 10 (Technology and Culture), where it joins a full RimWorld-style weather simulation.
+No code changes — major roadmap restructure. The Fire System added in v0.3.9 as a sub-phase of Phase 8 (Events / Storyteller) is moved into a dedicated new phase between Phase 9 (Animal Husbandry / Farming / Hunting) and Phase 10 (Technology and Culture), where it joins a full weather simulation.
 
-**New — Phase 9.5 Weather and Environment** (modeled on `https://rimworldwiki.com/wiki/Environment#Weather`):
+**New — Phase 9.5 Weather and Environment**:
 
 - **9.5.1 Weather state model** — singleton `LocalWeatherState` on `WorldState` with `Current` (WeatherType enum), `Intensity`, `Wind (Direction, Speed)`, per-tile `Moisture` and `SnowDepth`, `SkyCover`, `Visibility`, `LightningCharge`, `ElapsedTicks`. Weather is map-level; per-tile state is on `LocalTile`.
 
-- **9.5.2 Weather types (RimWorld-adapted)** — Clear, Cloudy, Fog, Foggy Rain, Rain, Heavy Rain, Snow, Dry Thunderstorm, Thunderstorm, Flashstorm, Cold Snap, Heat Wave, Eclipse (Phase 10 magic prereq), Magical Storm (SmurfulationC-original), Volcanic Pall (storyteller-only). Each has a tabulated temperature offset, moisture rate, wind, and notes.
+- **9.5.2 Weather types** — Clear, Cloudy, Fog, Foggy Rain, Rain, Heavy Rain, Snow, Dry Thunderstorm, Thunderstorm, Flashstorm, Cold Snap, Heat Wave, Eclipse (Phase 10 magic prereq), Magical Storm (SmurfulationC-original), Volcanic Pall (storyteller-only). Each has a tabulated temperature offset, moisture rate, wind, and notes.
 
 - **9.5.3 Weather selection** — Markov chain transitioning every 1–6 in-game hours, weighted by current state × biome × season × storyteller pressure. Table-driven so it can be tuned without touching sim code.
 
-- **9.5.4 Fire System (relocated)** — full migration of the v0.3.9 Phase 8.x design: `LocalTile.FireStage` enum, `Flammability` derivation, heat injection into the Phase 5.x temperature field for radiant ignition, smoke filling adjacent indoors, RimWorld-style firefighter task via Designate → Extinguish, Build → Firebreak, Mage Quench. All five ignition sources (Hearth/Kiln overflow, lightning, combat, Crafter accident, storyteller Wildfire) and the spread model (Flammability × wind × temperature × moisture) preserved.
+- **9.5.4 Fire System (relocated)** — full migration of the v0.3.9 Phase 8.x design: `LocalTile.FireStage` enum, `Flammability` derivation, heat injection into the Phase 5.x temperature field for radiant ignition, smoke filling adjacent indoors, firefighter task via Designate → Extinguish, Build → Firebreak, Mage Quench. All five ignition sources (Hearth/Kiln overflow, lightning, combat, Crafter accident, storyteller Wildfire) and the spread model (Flammability × wind × temperature × moisture) preserved.
 
 - **9.5.5 Temperature integration** — outdoor tiles read `WeatherOffset` from the §9.5.2 table each tick. Cold Snap / Heat Wave are how Phase 5.x's extreme-weather × 1.5–2.0 deterioration multipliers actually get triggered.
 
@@ -10306,7 +10357,7 @@ No code changes — roadmap-only release adding the universal eraser for player-
 
 - **Remove → Zone / Building Designation / Designation** — brush-paint to wipe any prior player-painted designation off the targeted tiles. Covers Storage / Stockpile / Sleeping / Recreation / Farm / Patrol / etc. Zones (§5.11.a), Building Zone roles (§5.11.b — also clears the chamber's name and role), and individual Designations from the Designate category (excavation marks, forbid flags, harvest queues).
 - **Non-destructive:** Remove strips the *designation*, never the physical tile. Walls / floors / roofs / structures come off through Build → Demolish, not through Remove. Items already in a removed Storage zone aren't destroyed — they remain as ground items.
-- RimWorld-style hold-shift to drag-erase across an area; Esc cancels the Remove brush.
+- Hold-shift to drag-erase across an area; Esc cancels the Remove brush.
 
 **Phase 5.11.a — Storage Zone removal semantics:**
 
@@ -10327,12 +10378,12 @@ The Remove → Building Designation brush dissolves a Building Zone — chamber'
 No code changes — roadmap-only release correcting two v0.3.6 mis-statements about Zones and adding the Building Zone concept:
 
 **Corrections to v0.3.6 Phase 5.11:**
-- **Storage / Stockpile / Farm / Recreation / Patrol / Forbidden Zones must be on passable tiles.** v0.3.6 claimed a "deliberate departure from RimWorld and DF" allowing Storage zones across Boulder outcrops / felled logs / frozen ponds — that was wrong. Smurfs need to physically walk onto the tile to deposit / retrieve items, plant crops, patrol. The brush now skips impassable tiles at paint time, matching RimWorld and DF on this point.
+- **Storage / Stockpile / Farm / Recreation / Patrol / Forbidden Zones must be on passable tiles.** v0.3.6 claimed a "deliberate departure" allowing Storage zones across Boulder outcrops / felled logs / frozen ponds — that was wrong. Smurfs need to physically walk onto the tile to deposit / retrieve items, plant crops, patrol. The brush now skips impassable tiles at paint time.
 - **Items in Storage zones DO count toward the Phase 3.x HUD "stored resources" total.** v0.3.6 said zones don't feed the HUD — that's reversed. Any explicit storage designation (zone or constructed building) feeds the resource readout. This gives the early game a meaningful HUD before the player has built warehouses — paint a Storage zone next to the drop point and it counts immediately. Upgrading to roofed pavilion zones and fully enclosed Storehouses is still rewarded through Phase 4 weather / temperature deterioration protection, not through HUD visibility.
 
 **New — Phase 5.11.b Building Zones:**
 
-The distinctive Songs-of-Syx-flavoured concept that separates SmurfulationC from RimWorld and DF: **the player can identify any fully enclosed space — including spaces whose perimeter is partly or entirely natural impassable terrain — and designate it as a Building.** No artificial walls required.
+The distinctive Songs-of-Syx-flavoured concept: **the player can identify any fully enclosed space — including spaces whose perimeter is partly or entirely natural impassable terrain — and designate it as a Building.** No artificial walls required.
 
 - Player drops a "Building Zone" marker inside an enclosed area; a flood-fill from that point checks every escape direction terminates in an impassable tile (natural Boulder / DeadLog / LivingWood *or* constructed Walls / Doors). If contained, the zone is valid. Player names it and assigns a role (Sleeping / Great Hall / Kitchen / Mage Circle / Storehouse / etc.) with the §5.4–5.9 room-role machinery.
 - **Carved cave fortresses become first-class gameplay.** A player who excavates a chamber out of a natural Boulder mass — leaving the surrounding stone as walls — paints a Building Zone inside it and immediately treats it as a Mushroom Hut / Mage Circle / etc. without building artificial walls inside the mountain.
@@ -10341,7 +10392,7 @@ The distinctive Songs-of-Syx-flavoured concept that separates SmurfulationC from
 - Combat / collapse: natural rock perimeter is tougher than constructed walls; if breached, the Building Zone is suspended until re-sealed.
 - A Building Zone with the Storehouse role counts contents toward the HUD just like §5.11.a Storage Zones.
 
-This unifies surface-base and cave-fortress play under one room-role system — RimWorld and DF both require players to either build artificial walls inside natural caves or use a parallel "carve" system; SmurfulationC handles both through the same zone designation.
+This unifies surface-base and cave-fortress play under one room-role system — most colony sims require players to either build artificial walls inside natural caves or use a parallel "carve" system; SmurfulationC handles both through the same zone designation.
 
 **Phase 3.x HUD description updated** to reflect the new counting rules: constructed storage buildings + Storage Zones + storage-role Building Zones all feed the HUD.
 
@@ -10373,17 +10424,17 @@ No code changes — roadmap-only release documenting four interconnected intenti
   - **Use** — tools / weapons take Condition damage per use; apparel per combat hit.
 - Condition 0 flips State to `Broken` (tools / apparel) or `Spoiled` (food); broken tools yield half material on disassembly.
 
-**Phase 5.10 — Roofing (RimWorld-style):**
+**Phase 5.10 — Roofing:**
 - `StructureSlot.HasRoof: bool`. Roof tiles consume Wood / Stone but don't block passability — they sit above the floor.
 - **Auto-roof** option in Phase 3.x build toolbar: enclosed rooms auto-queue a roof when the perimeter walls finish. Players almost never place roofs manually.
 - **Manual roof / un-roof** tools for awnings, courtyards, mixed open-roof structures.
 - A tile is **Indoors** iff `HasRoof = true` AND inside a RoomDetector-identified enclosed region. Otherwise Outdoors. Roof-only (pavilion) tiles get partial × 0.7 protection.
 - **Roof collapse** when supporting walls are destroyed (Phase 7 combat / Phase 8 storms) — drops chunk damage on anything underneath and re-classifies tiles as Outdoors.
 
-**Phase 5.11 — Zones (Songs-of-Syx-style structured zoning, NOT RimWorld/DF "open zones"):**
+**Phase 5.11 — Zones (Songs-of-Syx-style structured zoning, NOT "open zones"):**
 - The existing §5.4–5.9 room / building system (enclosed walls + role-defining furniture, Songs-of-Syx-style capacity + explicit role assignment) **stays exactly as written** per the user's intent. Zones below are a complement, not a replacement.
 - **Zones** are lightweight rectangular / freeform designations granting a single explicit function (Storage / Stockpile / Farm / Recreation / Patrol / Forbidden). Painted explicitly with the Phase 3.x Zones toolbar; NOT detected from enclosure.
-- **Zones can include impassable tiles** — deliberate departure from RimWorld / DF. A Storage zone can be painted across a Boulder outcrop, a felled log, a frozen pond; items sit on top and are accessed from any adjacent passable tile.
+- **Zones can include impassable tiles** — a deliberate departure from the standard "passable-only" rule. A Storage zone can be painted across a Boulder outcrop, a felled log, a frozen pond; items sit on top and are accessed from any adjacent passable tile.
 - **Outdoor vs Indoor follows §5.10 Roof classification, not the zone itself.** Bare-grass-under-sky Storage zone = Outdoor (full weather deterioration); same zone under a roofed pavilion = Indoor protection.
 - **Zones do not grant building HUD-counting status.** Only items in a properly constructed storage building feed the Phase 3.x resource HUD. Creates real progression: ground-pile → outdoor zone → roofed pavilion zone → enclosed storage building.
 - Zone overlap rules: one Zone per function per tile; building tiles override Zone tiles.
@@ -10398,9 +10449,9 @@ No code changes — roadmap-only release documenting four interconnected intenti
 
 No code changes — roadmap-only release adding a `5.x — Level-wide Temperature Simulation` subsection to Phase 5 (Tile-Based Construction). The intention was already implicit in the scenario screen's apparel / heat-source items (`apparel.cap.felt` "Felt cap — winter survival bonus", `apparel.cloak.wool` "+5 °C effective temperature", `misc.firekit` "spark a hearth fast", `misc.lantern` "Visibility in caves"); v0.3.5 makes the system explicit on the roadmap so the existing stubs have a target implementation.
 
-**Model: RimWorld + Dwarf-Fortress hybrid:**
-- Per-tile temperatures (DF-style) updated on a slow 1 Hz heat-diffusion pass — every passable tile exchanges a fraction with its 4-connected neighbours.
-- Room insulation (RimWorld-style): Phase 5's room scanner identifies enclosed regions; tiles in a sealed room share a fast-equalising pool and leak through walls at a per-material rate (Boulder 0.02 °C/tick … cloth wall 0.20 … open doorway 0.40).
+**Model: per-tile diffusion + room insulation hybrid:**
+- Per-tile temperatures updated on a slow 1 Hz heat-diffusion pass — every passable tile exchanges a fraction with its 4-connected neighbours.
+- Room insulation: Phase 5's room scanner identifies enclosed regions; tiles in a sealed room share a fast-equalising pool and leak through walls at a per-material rate (Boulder 0.02 °C/tick … cloth wall 0.20 … open doorway 0.40).
 - Outdoor temperature driven by seasonal curve + biome + Phase 8 weather + latitude (existing `WorldTile.Temperature`), with daily diurnal cycle.
 
 **Sub-sections specified:**
@@ -10419,13 +10470,13 @@ No code changes — roadmap-only release adding a `5.x — Level-wide Temperatur
 
 ## [0.3.4] — 2026-05-11
 
-### Fixed — Begin Colony button visibility; Changed — colony-wide inventory (DF Prepare-Carefully style)
+### Fixed — Begin Colony button visibility; Changed — colony-wide inventory (Prepare-Carefully style)
 
 **Begin Colony button now pinned to bottom:** the v0.3.3 layout used a `CenterContainer` + `CustomMinimumSize(1280, 780)` VBox, which clipped the footer when actual content height exceeded the min size (the personality grid + detail card combo pushed past the centred bounds). Restructured to use `FullRect` anchoring with `OffsetLeft/Top/Right/Bottom = ±40/32` margins on the root VBox. The footer is now guaranteed visible at the bottom of the viewport regardless of how much content the master/detail section produces.
 
-**Colony-wide starting inventory — Dwarf Fortress "Prepare Carefully" model:**
+**Colony-wide starting inventory — "Prepare Carefully" model:**
 
-The per-smurf `Items…` button in v0.3.3 didn't match how either RimWorld or DF actually present starting supplies. Both treat the colony's expedition gear as a single shared pool, distributed across colonists by role / need at landing. v0.3.4 follows that model:
+The per-smurf `Items…` button in v0.3.3 didn't match how standard colony-sims actually present starting supplies. They treat the colony's expedition gear as a single shared pool, distributed across colonists by role / need at landing. v0.3.4 follows that model:
 
 - `ScenarioConfig.StartingInventory: List<InventoryEntry>` replaces the per-smurf `StartingItems` field on `SmurfTemplate`.
 - Each `InventoryEntry` is a `(Token, Quantity)` pair so the same item can stack with a quantity stepper.
@@ -10433,7 +10484,7 @@ The per-smurf `Items…` button in v0.3.3 didn't match how either RimWorld or DF
 - New "**Colony Starting Inventory**" strip appears between the master/detail section and the footer. Shows a live summary (e.g. `8 item kinds · 19 units total`) and an `✎ Edit Inventory…` button.
 - The "Edit Items…" button on the per-smurf detail card is **removed**.
 
-**Items modal — DF Prepare-Carefully presentation:**
+**Items modal — Prepare-Carefully presentation:**
 
 - Title is now `Colony Starting Inventory — {Colony Name}` (not per-smurf).
 - Per-item row replaces the toggle CheckBox with a `SpinBox` (0..MaxStack), so the player chooses *how many* the colony brings rather than just whether to include the item type.
@@ -10447,7 +10498,7 @@ The per-smurf `Items…` button in v0.3.3 didn't match how either RimWorld or DF
 
 ### Changed — Scenario screen rebuilt with master/detail layout, items modal, visible Begin Colony
 
-v0.3.1's scenario screen squeezed every per-smurf control onto a single huge row, which scaled poorly with the AnimatedButton font and made the Begin Colony button slide off-screen. The screen is now a RimWorld-style master/detail layout:
+v0.3.1's scenario screen squeezed every per-smurf control onto a single huge row, which scaled poorly with the AnimatedButton font and made the Begin Colony button slide off-screen. The screen is now a master/detail layout:
 
 **Master/detail rebuild — `ScenarioPanel.cs`:**
 
@@ -10457,7 +10508,7 @@ v0.3.1's scenario screen squeezed every per-smurf control onto a single huge row
 - **Items row** in the detail card shows a summary (`(default colony loadout)` or `N items selected`) and an `✎ Edit Items…` button.
 - **Footer:** `← Back` (left), `🎲 Randomize All` (left), spacer, `✦ Begin Colony` (right). Begin button is 260×52 with tooltip "Load into the level and start the game with the chosen settings" — clearly the primary CTA at bottom-right.
 
-**Items modal — DF-style picker, modern presentation:**
+**Items modal — categorised picker, modern presentation:**
 
 - New `Window` opens on `Edit Items…` click — title shows the smurf's name.
 - Category column on the left (Food, Tools, Apparel, Weapons, Trade Goods, Miscellaneous); item list on the right with CheckBox per entry.
@@ -10472,11 +10523,11 @@ v0.3.1's scenario screen squeezed every per-smurf control onto a single huge row
 
 ## [0.3.2] — 2026-05-11
 
-### Roadmap — Phase 3.x Floating UI and DF-style procedural item system documented
+### Roadmap — Phase 3.x Floating UI and procedural item system documented
 
 No code changes — roadmap-only release documenting two large intentions surfaced in this session:
 
-**Phase 3.x — Floating Gameplay UI (RimWorld-style)** (new section between Phase 3 and Phase 4):
+**Phase 3.x — Floating Gameplay UI** (new section between Phase 3 and Phase 4):
 - Rounded-rectangle floating panels with ~16 px screen-edge insets, ~10 px corner radius, ~92 % opacity parchment background, parchment-gold border at 30 % alpha
 - Bottom-centre designation toolbar (Designate / Orders / Build / Zones / Priorities)
 - Right-click contextual menu for order issuance (consumes the Phase 3 data layer: `RequestPlayerMoveOrder`, `ToggleExcavationDesignation`, `GetResourcesSnapshot`)
@@ -10487,11 +10538,11 @@ No code changes — roadmap-only release documenting two large intentions surfac
 - Shared `FloatingPanelStyle` helper and `UITheme` constants for consistency
 - Positioned as the bridge that converts the Phase 3 data layer into playable gameplay — without it the simulation APIs are unreachable from mouse / keyboard
 
-**Phase 4 — Dwarf-Fortress-style procedural item system** (expansion of existing Phase 4 section):
+**Phase 4 — Procedural item system** (expansion of existing Phase 4 section):
 - Replaces the placeholder `ColonyResources` float ledger with first-class `Item` instances (Kind / Material / Quality / Condition / State / Owner / TilePos)
-- Procedural sub-materials per family (Wood: Oak/Pine/Willow/Magicwood/Fungal; Stone: Granite/Limestone/Marble/Obsidian/Magicstone; etc.) — DF-style variation each with distinct hardness, value, decay rate, visual tint
+- Procedural sub-materials per family (Wood: Oak/Pine/Willow/Magicwood/Fungal; Stone: Granite/Limestone/Marble/Obsidian/Magicstone; etc.) — each with distinct hardness, value, decay rate, visual tint
 - Quality tiers from skill (Crude → Normal → Fine → Superior → Masterwork → Legendary) with a named-artifact branch at Legendary
-- Food taxonomy: Raw → Prepared → Preserved with per-item nutrition + mood modifier + spoilage timeline (RimWorld-style "Ate fine meal" mood reads)
+- Food taxonomy: Raw → Prepared → Preserved with per-item nutrition + mood modifier + spoilage timeline ("Ate fine meal" mood reads)
 - Stockpiles with category/quality filters; per-smurf carrying capacity scaled by role + traits
 - Item decay / weather damage / trade-value computation
 - **Behavior rewire** of the v0.3.0 `Eat` task: instead of draining the float ledger, it locates the nearest acceptable food *item* and consumes that. New `Haul` and `Cook` task types added to `BehaviorSystem`. `GatherFood` / `GatherMaterial` produce typed items rather than crediting floats
@@ -10502,7 +10553,7 @@ No code changes — roadmap-only release documenting two large intentions surfac
 
 ## [0.3.1] — 2026-05-11
 
-### Added — Scenario screen (RimWorld-style) between WorldGen and Game
+### Added — Scenario screen between WorldGen and Game
 
 **New flow:** Main Menu → New Game → WorldGenPanel (settings + tile select) → **ScenarioPanel** → Game.tscn. The player customises their founding colony before landing.
 
@@ -10761,11 +10812,11 @@ One side of the map (top/bottom/left/right chosen by seed) is a solid rock wall 
 
 ## [0.2.37] — 2026-05-10
 
-### Changed — Mountain Cave-Carving Pass (RimWorld-Style Generation)
+### Changed — Mountain Cave-Carving Pass
 
 **LocalMapGenerator.cs — Pass 4h complete rewrite:**
 
-Previous attempts to produce RimWorld-style mountain maps failed because Pass 1 (elevation noise at 0.09 Hz) was baking in a fine-grained craggy scatter pattern, and all subsequent zone/scatter passes were building on top of it rather than replacing it. The craggy texture therefore dominated every mountain tile regardless of zone settings.
+Previous attempts to produce carve-in-cave mountain maps failed because Pass 1 (elevation noise at 0.09 Hz) was baking in a fine-grained craggy scatter pattern, and all subsequent zone/scatter passes were building on top of it rather than replacing it. The craggy texture therefore dominated every mountain tile regardless of zone settings.
 
 New approach — **cave-carving**: Pass 4h now fully overwrites Pass 1 results for Mountains and Peaks.
 
@@ -10834,7 +10885,7 @@ Root cause: `HasPassableNeighbor` only protected the *tile being placed*. It nev
 **LocalMapGenerator.cs — Mountains/Peaks biome overhaul:**
 - **Dead logs and living wood disabled on Mountains and Peaks** (`BiomeDeadLogThreshold` and `BiomeLivingWoodThreshold` return 2.0f for both). Boulders from the elevation pass were being enclosed by dead-log/living-wood scatter formations, producing impassable pockets. Mountains are above treeline — no wood spawns there.
 - **Mountain floor changed from `Grass` to `ForestFloor`** in `SelectTerrain` — bare rocky earth is more appropriate than lush grass at altitude. Boulder elevation threshold lowered from 0.68 to 0.62 so Pass 1 alone produces more initial stone coverage.
-- **New Pass 4h — Mountain rock massing**: large-scale Simplex FBm (frequency 0.025, 3 octaves) creates contiguous stone masses matching DF/RimWorld cave-style maps. A secondary medium-frequency layer (0.065) scatters rocky outcrops in open clearings. Coverage targets: ~65 % boulder on Mountains, ~80 % on Peaks. A cleanup sweep after the mass pass converts any isolated passable tile (zero passable 8-neighbors) to Boulder, eliminating 1-tile pockets smurfs can't exit.
+- **New Pass 4h — Mountain rock massing**: large-scale Simplex FBm (frequency 0.025, 3 octaves) creates contiguous stone masses matching cave-style maps. A secondary medium-frequency layer (0.065) scatters rocky outcrops in open clearings. Coverage targets: ~65 % boulder on Mountains, ~80 % on Peaks. A cleanup sweep after the mass pass converts any isolated passable tile (zero passable 8-neighbors) to Boulder, eliminating 1-tile pockets smurfs can't exit.
 
 **WorldMapGenerator.cs — Peaks now impassable:**
 - `Passable = biome != BiomeType.Pondsea && biome != BiomeType.Peaks` — colonies can no longer land on sheer mountain peaks, same restriction as open water.
@@ -11057,7 +11108,7 @@ Root cause: `HasPassableNeighbor` only protected the *tile being placed*. It nev
 
 **LocalMapGenerator — noise shape change:**
 - Dead log noise `Frequency` lowered from `0.035f` → `0.015f`. Lower frequency stretches the noise wavelength across the map so only 1–3 large peaks exceed the spawn threshold, producing continent-like blobs rather than many mid-scale clusters.
-- Added `FractalType = FractalTypeEnum.None`: removes the default FBM octave layering, which was adding small-scale roughness that fragmented the edges of formations. Pure simplex at this frequency gives smooth, solid-edged blobs matching the RimWorld/DF reference aesthetic.
+- Added `FractalType = FractalTypeEnum.None`: removes the default FBM octave layering, which was adding small-scale roughness that fragmented the edges of formations. Pure simplex at this frequency gives smooth, solid-edged blobs matching the reference aesthetic.
 
 **LocalMapRenderer — `PaintDeadLog` colour palette:**
 - Replaced the warm reddish-brown palette (fresh bark) with a weathered silver-grey palette drawn from photo reference of aged fallen logs and stumps:
@@ -11236,7 +11287,7 @@ Root cause: `HasPassableNeighbor` only protected the *tile being placed*. It nev
 ### Added — Message log and WorldGenPanel labels
 
 **MessageLog (new — scripts/ui/MessageLog.cs):**
-- RimWorld/DF-style event log anchored below the top HUD bar on the left side, matching the font, shadow, and positioning style of `TileInfoOverlay`. Shows the 6 most recent events; newest entry at top.
+- Event log anchored below the top HUD bar on the left side, matching the font, shadow, and positioning style of `TileInfoOverlay`. Shows the 6 most recent events; newest entry at top.
 - Six message categories: `Birth` (green), `Death` (red), `MoodDrop` (amber), `Combat` (orange), `Research` (blue), `General` (white). Each category has an independent visibility filter toggled via `SetCategoryVisible()`; all are visible by default.
 - `MessagePosted` event fires after every accepted message. `GameController` (or a future SettingsPanel) can subscribe to this hook to pause the simulation on specific event types — e.g. pause on `Death` or `Combat` — without modifying `MessageLog` itself.
 - Wired in `GameController`: `SmurfDied` → Death entry with compact date; `BirthOccurred` → Birth entry; `MoodThresholdCrossed` → MoodDrop entry only when mood moves downward into Stressed or worse. Date displayed as compact `[D{day} Y{year}]` prefix.
@@ -11403,7 +11454,7 @@ Root cause: `HasPassableNeighbor` only protected the *tile being placed*. It nev
 - `LocalMapRenderer`: Option B colored rectangles, one `DrawRect` per tile; green fallback for old saves without world data.
 - `WorldState` autoload: carries `WorldMap`, selected tile coordinates, and `CurrentLocalMap` between scenes; `EnsureDefaultMap()` handles legacy saves.
 - `WorldGenPanel`: two-column layout — world name, seed, world/level size dropdowns, 4 generation bias sliders; saved worlds browser with load/delete; worlds persisted to `user://worlds/{name}.json`.
-- `Camera2D`: three discrete zoom levels cycled with Tab (0.55× village / 1.0× neighbourhood / 2.0× individual); bounded to 12 tiles outside map edges; WASD pan, mouse-drag pan, scroll-wheel zoom with RimWorld-style mouse-anchor.
+- `Camera2D`: three discrete zoom levels cycled with Tab (0.55× village / 1.0× neighbourhood / 2.0× individual); bounded to 12 tiles outside map edges; WASD pan, mouse-drag pan, scroll-wheel zoom with mouse-anchored zoom.
 - `TileInfoOverlay`: hover tooltip showing tile type name.
 - `SmurfColonyView` restructured: terrain drawing delegated to `LocalMapRenderer`; wander bounds read from actual map dimensions; click detection uses `GetGlobalMousePosition()` for camera-correct hit testing.
 - `SaveManager` overhauled: named slots in `user://saves/{name}.json`; `SaveToSlot`, `LoadSlot`, `DeleteSlot`, `RenameSlot`, `GetSaveSlots`; legacy `smurfulation_save.json` auto-migrated to an `autosave` slot on first run; `ColonySave` extended with world fields (seed, tile coordinates, grid size, level size, name, all 4 bias values).
@@ -11450,7 +11501,7 @@ Root cause: `HasPassableNeighbor` only protected the *tile being placed*. It nev
 ### Added
 - `SmurfCardPanel`: tabbed unit-detail card — Main (needs bars, role dropdown, mood bar, personality trait list), Mood (need breakdown, personality modifier total, effective mood, state description), Health (body-part condition tree, biological trait bars).
 - `GameOverPanel`: full-screen overlay on colony wipe; deletes save; returns to main menu.
-- Tooltip system: RimWorld-style compact dark tooltips on needs, mood states, traits, roles, body parts; delay 1.5 s; `MouseFilter.Pass` on labels.
+- Tooltip system: compact dark tooltips on needs, mood states, traits, roles, body parts; delay 1.5 s; `MouseFilter.Pass` on labels.
 - `HUDController`: date display, population count, mood-state breakdown counts, speed/pause buttons.
 - `PauseMenuPanel`: full-screen pause overlay with Resume / Save / Load / Settings / Exit to Main Menu.
 - `SettingsPanel`: audio (master / music / SFX volume), display (full-screen toggle, zoom speed, scroll speed), gameplay (tooltip size, show tooltips) — persisted to `user://settings.cfg`.

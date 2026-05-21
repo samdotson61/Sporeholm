@@ -2,13 +2,13 @@
 
 A colony simulation game about a tribe of mushroom-people (**Shroomps**) trying to survive in a strange, fungal world. Built solo in **Godot 4.6** (C#).
 
-Current version: **v0.5.84** (active development — Phase 5 / 5.5 complete, Phase 6 next).
+Current version: **v0.6.0** (active development — Phase 6 entity system shipped; Phase 7 combat next).
 
 ---
 
 ## Project status at a glance
 
-Sporeholm is mid-development. The core simulation loop — colony of pawns, needs, work, construction, crafting, mood, save/load — is shipped and stable. Combat, animals, weather, events, and disease are the next phases.
+Sporeholm is mid-development. The core simulation loop — colony of pawns, needs, work, construction, crafting, mood, wildlife, save/load — is shipped and stable. Combat, farming/husbandry, weather, events, and disease are the next phases.
 
 | Layer | State |
 |---|---|
@@ -22,9 +22,10 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 | Room detection + room types (Bedroom / Kitchen / Workshop / Storage) | Shipped |
 | Natural cavern roofs | Shipped |
 | Per-tick mining scaled by skill + tools | Shipped |
+| **Wildlife (15 species: friendly + neutral + hostile)** | **Shipped — v0.6.0** |
 | Save / load | Shipped |
-| **Combat** | Stubs only — Phase 7 |
-| **Animals & farming** | Stubs only — Phase 9 |
+| **Combat** | Hostile-creature contact damage only — full Phase 7 next |
+| **Husbandry & farming** | Stubs only — Phase 9 |
 | **Weather & temperature** | Insulation half — Phase 10 |
 | **Disease, research, eras** | Future phases |
 
@@ -47,6 +48,18 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 - Full body-part hierarchy (Cap, Stalk, Gills, Spore Vent, Filter, legs, feet, hands) with damage, bleeding, downed state, natural healing.
 - Sleep on the ground / in beds with mood thoughts (**WellRested**, **SleptInBedroom**, **SleptOnGround**).
 - Visible animations: walking bob, sleeping (lying horizontal), eating (chew animation), bleeding (red drip).
+
+### Wildlife (v0.6.0)
+
+The map is populated with 15 species across friendly, neutral, and hostile dispositions. Each has its own sprite, stats, AI behaviour, and butcher drops; per-individual stats jitter ±10 % at spawn so a pack of three wolves isn't three clones.
+
+- **Friendly / Passive** — Glowbunny, Shroomgoat, Shroomalo (the very-friendly mushroom-hamster), Mouse, Ladybug, Hermit Crab.
+- **Neutral** — Squirrel, Bonecrest Beetle, Forest Boar, Cave Lizard.
+- **Hostile** — Ant Soldier, Wasp Renegade, Snake, Wolf (pack hunter), Magic Wisp.
+
+AI state machine: Wander / Flee / Hunt / Graze / Tamed / Dead. Hostiles aggro on the nearest non-pacifist shroomp within their range and attack on contact, applying damage that flows through the existing body-part / bleeding / downed pipelines — wolves will actually injure you. Friendlies flee from threats. Spawning is biome-tagged and population-capped; the map respawns ambient fauna on day boundaries to keep the world feeling alive.
+
+Event-only big creatures (Bear / Leopard Tortoise / Tasmanian Mauler / Dragon / Mushroom Drake) are deferred until the Phase 8 Storyteller layer — they're scripted events, not random spawns.
 
 ### Work + designations
 
@@ -128,8 +141,8 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 | 4 | Resource gathering, procedural items, starting inventory | Complete |
 | 5 | Tile-based construction | Complete |
 | 5.5 | Crafting bills | Complete |
-| **6** | **Entity system** (animals + creatures) | **Next** |
-| 7 | Combat (with Healer + Rescue + Weapons/Apparel) | Stubs ready |
+| 6 | Entity system (animals + creatures) | Shipped (v0.6.0 — 15 species + AI + sprites + save/load) |
+| **7** | **Combat** (with Healer + Rescue + Weapons/Apparel) | **Next** (stubs ready) |
 | 8 | Events + Storyteller (Balanced / Patient / Cataclysmic) | Stub |
 | 9 | Agricultural systems (animal husbandry, farming, hunting) | — |
 | 10 | Weather + Environment (Insulation half done) | — |

@@ -148,7 +148,33 @@ public partial class SaveManager : Node
 		// Saves predating v0.5.84s deserialise to null — workbenches load
 		// with no bills (auto-cook fallback remains active).
 		public List<WorkbenchBillsSave>? WorkbenchBills { get; init; } = null;
+
+		// v0.6.0 (Phase 6) — live wildlife snapshot. One entry per
+		// alive entity at save time. Null for pre-Phase-6 saves; load
+		// path treats null as "no entities exist, run EntitySpawnSystem
+		// .PopulateFromSpawnPoints on first tick" so old saves come
+		// back to life with fresh wildlife.
+		public List<EntitySaveData>? Entities { get; init; } = null;
 	}
+
+	// v0.6.0 (Phase 6) — round-trip of an Entity through save / load.
+	// Mirrors ShroompSaveData shape: enum names serialised as strings so
+	// reordering EntityKind / EntityState values doesn't break old saves.
+	public record EntitySaveData(
+		string  Id,                  // Guid-as-string
+		string  Kind,                // EntityKind enum name
+		float   PosX, float PosY,
+		float   TargetX, float TargetY,
+		float   Health,
+		float   MaxHealth,
+		float   Speed,
+		float   AttackPower,
+		string  State,               // EntityState enum name
+		bool    IsTamed,
+		string? TamedByName,
+		float   WanderHomeX, float WanderHomeY,
+		int     RandomSeed,
+		int     AttackCooldownTicks);
 
 	// v0.5.73 — one tile's structure snapshot. RoomId is NOT saved (the
 	// RoomDetector rebuilds the room registry on first room query after
@@ -459,6 +485,8 @@ public partial class SaveManager : Node
 			StockpileZones    = (stockpileZones?.Count  ?? 0) > 0 ? stockpileZones  : null,
 			NamedAreas        = (namedAreas?.Count      ?? 0) > 0 ? namedAreas      : null,
 			WorkbenchBills    = (workbenchBills?.Count  ?? 0) > 0 ? workbenchBills  : null,
+			// v0.6.0 (Phase 6) — wildlife snapshot from the live sim.
+			Entities          = BuildEntityList(snapshot),
 		};
 
 		string path = SlotPath(slotName);
@@ -643,6 +671,36 @@ public partial class SaveManager : Node
 			return (long)FileAccess.GetModifiedTime(path);
 		}
 		catch { return 0L; }
+	}
+
+	// v0.6.0 (Phase 6) — convert the snapshot's entity list into save
+	// records. The snapshot carries struct-copies of every persisted field
+	// so this never touches live sim state. Returns null when the snapshot
+	// has no entities (keeps the save JSON small for headless test runs).
+	private static List<EntitySaveData>? BuildEntityList(SimulationSnapshot snapshot)
+	{
+		if (snapshot.Entities == null || snapshot.Entities.Count == 0) return null;
+		var list = new List<EntitySaveData>(snapshot.Entities.Count);
+		foreach (var e in snapshot.Entities)
+		{
+			list.Add(new EntitySaveData(
+				Id:                  e.Id.ToString(),
+				Kind:                e.Kind.ToString(),
+				PosX:                e.SimPos.X, PosY: e.SimPos.Y,
+				TargetX:             e.SimTarget.X, TargetY: e.SimTarget.Y,
+				Health:              e.Health,
+				MaxHealth:           e.MaxHealth,
+				Speed:               e.Speed,
+				AttackPower:         e.AttackPower,
+				State:               e.State.ToString(),
+				IsTamed:             e.IsTamed,
+				TamedByName:         e.TamedByName,
+				WanderHomeX:         e.WanderHome.X,
+				WanderHomeY:         e.WanderHome.Y,
+				RandomSeed:          e.RandomSeed,
+				AttackCooldownTicks: e.AttackCooldownTicks));
+		}
+		return list;
 	}
 
 	private static List<ShroompSaveData> BuildShroompList(

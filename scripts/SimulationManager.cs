@@ -1303,6 +1303,26 @@ namespace Sporeholm
 			AddShroomp("Clumsy",    45,  "Forager",   Sex.Male);
 			AddShroomp("Handy",     61,  "Crafter",   Sex.Male);
 			AddShroomp("Grouchy",   83,  "Forager",   Sex.Male);
+
+			// v0.6.0 (Phase 6) — seed wildlife from gen-time
+			// AnimalSpawnPoint markers + light ambient density for species
+			// without markers. Runs once at fresh-colony start; loads
+			// restore entities through LoadFromSave instead.
+			SeedEntitiesFromMap();
+		}
+
+		// v0.6.0 (Phase 6) — runs at colony seed time to populate the
+		// map with wildlife. Reads LocalMap.SnapshotAnimalSpawns (placed at
+		// LocalMapGenerator gen-time per v0.5.14/v0.5.15) and instantiates
+		// entities per EntitySpawnSystem rules. Idempotent for restarts:
+		// LoadFromSave skips this and restores entities directly from the
+		// save data instead.
+		private void SeedEntitiesFromMap()
+		{
+			if (_core.Map == null) return;
+			var fresh = new System.Collections.Generic.List<Sporeholm.Simulation.Entities.Entity>();
+			Sporeholm.Simulation.Systems.EntitySpawnSystem.PopulateFromSpawnPoints(fresh, _core.Map, _rng);
+			_core.AddEntities(fresh);
 		}
 
 		// Build a Shroomp from a ScenarioPanel template. Unlike the legacy
@@ -1649,6 +1669,47 @@ namespace Sporeholm
 						map.DropItem(item);
 					}
 				}
+			}
+
+			// v0.6.0 (Phase 6) — restore wildlife. Saves predating
+			// Phase 6 deserialise with save.Entities == null; the catch-up
+			// branch instead seeds fresh entities from the map's
+			// AnimalSpawnPoint markers + ambient density so old colonies
+			// load with a populated fauna layer rather than a dead world.
+			if (save.Entities != null && save.Entities.Count > 0)
+			{
+				var fresh = new System.Collections.Generic.List<Sporeholm.Simulation.Entities.Entity>();
+				foreach (var rec in save.Entities)
+				{
+					if (!System.Enum.TryParse<Sporeholm.Simulation.Entities.EntityKind>(rec.Kind, out var kind))
+						continue;
+					if (!System.Enum.TryParse<Sporeholm.Simulation.Entities.EntityState>(rec.State, out var state))
+						state = Sporeholm.Simulation.Entities.EntityState.Wander;
+					var e = new Sporeholm.Simulation.Entities.Entity
+					{
+						Id                  = System.Guid.TryParse(rec.Id, out var g) ? g : System.Guid.NewGuid(),
+						Kind                = kind,
+						SimPos              = new Vector2(rec.PosX, rec.PosY),
+						SimTarget           = new Vector2(rec.TargetX, rec.TargetY),
+						Health              = rec.Health,
+						MaxHealth           = rec.MaxHealth,
+						Speed               = rec.Speed,
+						AttackPower         = rec.AttackPower,
+						State               = state,
+						IsTamed             = rec.IsTamed,
+						TamedByName         = rec.TamedByName,
+						WanderHome          = new Vector2(rec.WanderHomeX, rec.WanderHomeY),
+						RandomSeed          = rec.RandomSeed,
+						AttackCooldownTicks = rec.AttackCooldownTicks,
+					};
+					fresh.Add(e);
+				}
+				_core.AddEntities(fresh);
+			}
+			else
+			{
+				// Old save → no entity list. Seed fresh from map.
+				SeedEntitiesFromMap();
 			}
 		}
 

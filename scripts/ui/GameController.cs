@@ -39,6 +39,7 @@ public partial class GameController : Node
 	private ItemDropOverlay       _itemOverlay     = null!;
 	private StockpileOverlay      _stockpileOverlay = null!;   // v0.5.0 Phase 5A
 	private StructureOverlay      _structureOverlay = null!;   // v0.5.19 Phase 5B
+	private EntityColonyView      _entityColonyView = null!;   // v0.6.0 Phase 6 — wildlife renderer
 	private DayNightOverlay       _dayNight         = null!;   // v0.5.58 visual day/night cycle
 	private OrderQueueOverlay     _orderQueueOverlay = null!;  // v0.5.2 chain-order waypoints
 	private DragSelectionPreview  _dragPreview     = null!;
@@ -196,6 +197,12 @@ public partial class GameController : Node
 		// them via the LocalMap._passable cache that SetStructure updates.
 		_structureOverlay = new StructureOverlay { Name = "StructureOverlay" };
 		AddChild(_structureOverlay);
+
+		// v0.6.0 (Phase 6) — wildlife renderer. Sits between structures
+		// and designations so creatures appear ON TOP of floors/walls but
+		// UNDERNEATH player designation glyphs (consistent with shroomps).
+		_entityColonyView = new EntityColonyView { Name = "EntityColonyView" };
+		AddChild(_entityColonyView);
 
 		// v0.3.21 — designation overlay (Node2D in world space). Draws coloured
 		// glyphs on every tile flagged for Excavate / Gather. Added after the
@@ -1367,6 +1374,14 @@ public partial class GameController : Node
 			// entries (popped by BehaviorSystem) clear from the visualisation
 			// the same frame they execute.
 			_orderQueueOverlay.SetSnapshot(snap);
+			// v0.6.0 — feed live shroomp positions to the structure overlay
+			// so doors animate open when a shroomp walks through. Just hands
+			// over the snapshot's list; no copy.
+			_structureOverlay.SetShroompPositionsForDoorAnim(snap.Shroomps);
+			// v0.6.0 (Phase 6) — push the latest entity snapshot to the
+			// wildlife renderer. Cheap (≤ 50 entities × per-instance
+			// Transform2D write).
+			_entityColonyView.UpdateFromSnapshot(snap.Entities);
 			// v0.4.26 — visibility-gated panel refreshes. `_card.Refresh`
 			// and the roster Refresh (rows list construction + the per-
 			// row UpdateRow that touches multiple Label.Text values per

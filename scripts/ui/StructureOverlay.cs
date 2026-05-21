@@ -61,6 +61,37 @@ namespace Sporeholm.UI
         private const double MinRefreshIntervalSec = 0.20;
         private double _timeSinceRefresh = 1.0;
 
+        // v0.6.0 — door-opening animation cache. Populated by
+        // RebuildInstances; one entry per rendered door (regular + fungal)
+        // so UpdateDoorAnimation can update each door's MMI per-instance
+        // Transform2D every frame without rebuilding the full structure
+        // overlay. Per-door openness ∈ [0, 1] lerps toward 1.0 when a
+        // shroomp is within DoorOpenRadiusPx of the door centre, else
+        // toward 0. Door MMI scale.x = 1 − 0.78 × openness, so a fully
+        // open door visually compresses to ~22 % width (looks like the
+        // door has swung aside). Pure visual — has no effect on sim
+        // pathing or room detection.
+        private struct DoorRenderRef
+        {
+            public int TileKey;            // y * Width + x for openness lookup
+            public Vector2 Centre;
+            public MultiMeshInstance2D Mmi;
+            public int InstanceIdx;
+            public Color Tint;
+        }
+        private readonly System.Collections.Generic.List<DoorRenderRef> _doorRefs = new();
+        // openness keyed by tile-linear-index (y * Width + x); persists across
+        // rebuilds so the door state survives the 200 ms structure-overlay
+        // throttle window without snapping closed.
+        private readonly System.Collections.Generic.Dictionary<int, float> _doorOpenness = new();
+        private const float DoorOpenRadiusPx = 14f;   // half a tile + a little
+        private const float DoorOpenLerpUp   = 12f;   // per-second rate toward 1.0
+        private const float DoorOpenLerpDown = 6f;    // per-second rate toward 0.0 (slower close = more visible)
+        // v0.6.0 — supplied each frame by GameController so the door
+        // animation can react to live shroomp positions without the
+        // overlay needing its own SimulationManager handle.
+        private System.Collections.Generic.IReadOnlyList<Sporeholm.Simulation.ShroompSnapshot>? _shroompsForDoorAnim;
+
         // v0.5.71 — sub-layer for floor MMIs only. Sits at relative
         // ZIndex=-1 so floors render BELOW StockpileOverlay (z=0). Sam
         // screenshot: brown floor squares covered the green stockpile
@@ -144,6 +175,10 @@ namespace Sporeholm.UI
         {
             _timeSinceRefresh += delta;
             if (_map == null) return;
+            // v0.6.0 — door open/close animation runs every frame, not on
+            // the structure-rebuild throttle. Cheap (O(doors × shroomps);
+            // typical map: ≤ 30 doors × ≤ 60 shroomps = ~1800 dist² ops).
+            UpdateDoorAnimationTick(delta);
             bool hasDirty;
             lock (_dirtyLock) hasDirty = _dirtyTiles.Count > 0;
             if (!hasDirty) return;
@@ -155,9 +190,75 @@ namespace Sporeholm.UI
             RebuildInstances();
         }
 
+        // v0.6.0 — supplies the latest snapshot's shroomp positions for the
+        // door-opening animation. GameController calls this every snapshot
+        // tick. Reference held weakly (just the list); no copy.
+        public void SetShroompPositionsForDoorAnim(
+            System.Collections.Generic.IReadOnlyList<Sporeholm.Simulation.ShroompSnapshot> shroomps)
+        {
+            _shroompsForDoorAnim = shroomps;
+        }
+
+        // v0.6.0 — per-frame door animation tick. For each cached door,
+        // compute target openness (1.0 if any shroomp is inside
+        // DoorOpenRadiusPx of the door centre, else 0.0). Lerp current
+        // openness toward target with a separate up-rate vs down-rate so the
+        // door snaps open quickly when the shroomp arrives but closes
+        // gracefully after they leave. Apply the openness as scale.x on the
+        // door MMI's per-instance Transform2D — a fully-open door visually
+        // compresses to ~22 % width with a small slide-aside translation so
+        // it reads as "swung open" rather than "shrunken."
+        private void UpdateDoorAnimationTick(double delta)
+        {
+            if (_doorRefs.Count == 0) return;
+            float dt = (float)delta;
+            var shroomps = _shroompsForDoorAnim;
+            float r2 = DoorOpenRadiusPx * DoorOpenRadiusPx;
+            for (int i = 0; i < _doorRefs.Count; i++)
+            {
+                var dref = _doorRefs[i];
+                // Compute target openness from proximity. Cheap squared-dist
+                // check; no sqrt.
+                float target = 0f;
+                if (shroomps != null)
+                {
+                    for (int j = 0; j < shroomps.Count; j++)
+                    {
+                        var p = shroomps[j].SimPos;
+                        float dx = p.X - dref.Centre.X;
+                        float dy = p.Y - dref.Centre.Y;
+                        if (dx * dx + dy * dy <= r2) { target = 1f; break; }
+                    }
+                }
+                _doorOpenness.TryGetValue(dref.TileKey, out float openness);
+                float rate = target > openness ? DoorOpenLerpUp : DoorOpenLerpDown;
+                openness += (target - openness) * Mathf.Clamp(rate * dt, 0f, 1f);
+                if (openness < 0.001f) openness = 0f;
+                _doorOpenness[dref.TileKey] = openness;
+
+                // Apply visual: scale.x compresses, with a small slide-aside
+                // offset so it reads as a swing-open. Keep the door body
+                // centred at the same logical position when closed
+                // (openness=0) so the cosmetic shift is purely the swing.
+                float scaleX = 1f - 0.78f * openness;
+                float slidePx = openness * (TS * 0.34f);   // shift right as it opens
+                var origin = new Vector2(dref.Centre.X + slidePx, dref.Centre.Y);
+                var xform = new Transform2D(0f, new Vector2(scaleX, 1f), 0f, origin);
+                dref.Mmi.Multimesh.SetInstanceTransform2D(dref.InstanceIdx, xform);
+            }
+        }
+
         private void RebuildInstances()
         {
             if (_map == null) return;
+            // v0.6.0 — reset door-animation cache. RebuildInstances is
+            // the only place door MMI instance indices are assigned, so
+            // wiping the cache here keeps it in sync. Tile-keyed openness
+            // values in _doorOpenness persist (they're indexed by tile
+            // coords not MMI instance index), so a door whose render index
+            // shifts because another door was added/removed still keeps
+            // its open animation phase.
+            _doorRefs.Clear();
             // v0.5.84o — per-mask wall counters (16 per family). Other
             // counters unchanged.
             var wallStoneCounts  = new int[16];
@@ -292,11 +393,21 @@ namespace Sporeholm.UI
                     case StructureType.Door when isFungalWood && doorFungalCount < MaxInstances:
                         _doorFungalMmi.Multimesh.SetInstanceTransform2D(doorFungalCount, new Transform2D(0f, origin));
                         _doorFungalMmi.Multimesh.SetInstanceColor(doorFungalCount, fungalTint);
+                        // v0.6.0 — register for per-frame open-animation lookup.
+                        _doorRefs.Add(new DoorRenderRef {
+                            TileKey = y * _map.Width + x,
+                            Centre = origin, Mmi = _doorFungalMmi,
+                            InstanceIdx = doorFungalCount, Tint = fungalTint });
                         doorFungalCount++;
                         break;
                     case StructureType.Door when doorCount < MaxInstances:   // v0.5.20
                         _doorMmi.Multimesh.SetInstanceTransform2D(doorCount, new Transform2D(0f, origin));
                         _doorMmi.Multimesh.SetInstanceColor(doorCount, tint);
+                        // v0.6.0 — register for per-frame open-animation lookup.
+                        _doorRefs.Add(new DoorRenderRef {
+                            TileKey = y * _map.Width + x,
+                            Centre = origin, Mmi = _doorMmi,
+                            InstanceIdx = doorCount, Tint = tint });
                         doorCount++;
                         break;
                     case StructureType.Shelf when shelfCount < MaxInstances:   // v0.5.21

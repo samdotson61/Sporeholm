@@ -18,6 +18,10 @@ namespace Sporeholm.Simulation
         public SimulationDate Date { get; }
         public IReadOnlyList<ShroompSnapshot> Shroomps { get; }
         public IReadOnlyDictionary<string, ShroompSnapshot> ShroompsByName { get; }
+        // v0.6.0 (Phase 6) — live entity (creature) snapshot. Always
+        // present; empty list when no entities exist on the map.
+        public IReadOnlyList<Sporeholm.Simulation.Entities.EntitySnapshot> Entities { get; }
+            = System.Array.Empty<Sporeholm.Simulation.Entities.EntitySnapshot>();
 
         public SimulationSnapshot(SimulationDate date, IEnumerable<Shroomp> shroomps)
         {
@@ -33,6 +37,21 @@ namespace Sporeholm.Simulation
             }
             Shroomps       = list;
             ShroompsByName = dict;
+        }
+
+        // v0.6.0 — overload with entities for Phase 6 callers.
+        public SimulationSnapshot(SimulationDate date,
+            IEnumerable<Shroomp> shroomps,
+            IEnumerable<Sporeholm.Simulation.Entities.Entity> entities)
+            : this(date, shroomps)
+        {
+            var elist = new List<Sporeholm.Simulation.Entities.EntitySnapshot>();
+            foreach (var e in entities)
+            {
+                if (!e.IsAlive) continue;
+                elist.Add(new Sporeholm.Simulation.Entities.EntitySnapshot(e));
+            }
+            Entities = elist;
         }
 
         public SimulationSnapshot(SimulationDate date, IReadOnlyList<ShroompSnapshot> shroomps)

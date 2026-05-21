@@ -27,6 +27,28 @@ namespace Sporeholm.Simulation
 		private readonly List<Shroomp> _shroomps = new();
 		private readonly object _shroompLock = new();
 
+		// v0.6.0 (Phase 6) — entity (creature) authoritative state. Sim
+		// thread is sole writer; snapshots round-trip a read-only copy to
+		// the renderer each tick. Held under a separate lock to keep entity
+		// add/remove from contending with shroomp scans.
+		private readonly List<Sporeholm.Simulation.Entities.Entity> _entities = new();
+		private readonly object _entityLock = new();
+
+		public IReadOnlyList<Sporeholm.Simulation.Entities.Entity> AllEntities()
+		{
+			lock (_entityLock) return new List<Sporeholm.Simulation.Entities.Entity>(_entities);
+		}
+
+		public void AddEntity(Sporeholm.Simulation.Entities.Entity e)
+		{
+			lock (_entityLock) _entities.Add(e);
+		}
+
+		public void AddEntities(System.Collections.Generic.IEnumerable<Sporeholm.Simulation.Entities.Entity> es)
+		{
+			lock (_entityLock) _entities.AddRange(es);
+		}
+
 		// Capped snapshot queue. The main thread drains this each frame and
 		// uses only the latest entry; older entries are discarded automatically.
 		public ConcurrentQueue<SimulationSnapshot> Snapshots { get; } = new();
@@ -608,6 +630,34 @@ namespace Sporeholm.Simulation
 			PerfBehaviorMicros += (System.Diagnostics.Stopwatch.GetTimestamp() - tBehaviorStart)
 				* 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
 
+			// v0.6.0 (Phase 6) — entity tick. Runs after BehaviorSystem
+			// so hostile entities see shroomps with this tick's positions
+			// before reacting. Dead entities are filtered here (Health <= 0
+			// or State == Dead) so the next snapshot only carries the
+			// living roster.
+			if (Map != null)
+			{
+				List<Sporeholm.Simulation.Entities.Entity> entWork;
+				lock (_entityLock)
+				{
+					_entities.RemoveAll(e => !e.IsAlive);
+					entWork = new List<Sporeholm.Simulation.Entities.Entity>(_entities);
+				}
+				Sporeholm.Simulation.Systems.EntitySystem.Tick(entWork, working, Map, dt, _rng, (int)GlobalTick);
+				// v0.6.0 — once per in-game day, refill ambient population.
+				if (dayBoundary)
+					Sporeholm.Simulation.Systems.EntitySpawnSystem.MaintainPopulation(
+						(List<Sporeholm.Simulation.Entities.Entity>)entWork, Map, _rng);
+				lock (_entityLock)
+				{
+					// The list is the same reference held inside the lock until
+					// snapshot; no additional sync needed since we returned a
+					// fresh copy. Just write back the maintained additions.
+					_entities.Clear();
+					_entities.AddRange(entWork);
+				}
+			}
+
 			// 8. Push snapshot — only alive shroomps are included (filtered in constructor).
 			// v0.3.36 — skip during catch-up batch's intermediate ticks.
 			if (pushSnapshot) PushSnapshot();
@@ -621,7 +671,11 @@ namespace Sporeholm.Simulation
 		{
 			List<Shroomp> snap;
 			lock (_shroompLock) snap = new List<Shroomp>(_shroomps);
-			Snapshots.Enqueue(new SimulationSnapshot(_date, snap));
+			List<Sporeholm.Simulation.Entities.Entity> entSnap;
+			lock (_entityLock) entSnap = new List<Sporeholm.Simulation.Entities.Entity>(_entities);
+			// v0.6.0 (Phase 6) — entities flow into the snapshot alongside
+			// shroomps so the renderer's per-frame loop only needs one read.
+			Snapshots.Enqueue(new SimulationSnapshot(_date, snap, entSnap));
 			while (Snapshots.Count > MaxQueueDepth)
 				Snapshots.TryDequeue(out _);
 		}
