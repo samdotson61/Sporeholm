@@ -61,6 +61,39 @@ namespace Sporeholm.Simulation.Entities
         public Vector2 WanderHome { get; set; }   // anchor — set at spawn, used for ambient wander radius
         public int     WanderHopsRemaining { get; set; }
 
+        // v0.6.2 — simplified needs system. Wild entities track Nutrition +
+        // Rest only (no Magic / Social / Joy — they can't Attune or Converse).
+        // Decay is purely display today: EntityCardPanel reads these so the
+        // player can see fauna state. No behaviour impact yet — Phase 9
+        // husbandry adds Hungry → Graze transitions and Tired → Sleep.
+        // Range 0-100. Spawn at 70 (default fed + rested). Decay rates
+        // tuned slow so a wild entity doesn't visibly starve in the first
+        // in-game day; full Nutrition→0 in ~4 in-game days at 0.6/in-game-hr.
+        public float Nutrition { get; set; } = 70f;
+        public float Rest      { get; set; } = 70f;
+        // v0.6.2 — derived "mood" classification. Not stored; computed
+        // on demand from Health %, Nutrition, Rest, and AI state so the
+        // EntityCardPanel can surface a single human-readable label.
+        // Phase 9 husbandry will replace this with a real Tamed-creature
+        // mood model alongside the trainability system.
+        public string MoodLabel
+        {
+            get
+            {
+                if (!IsAlive) return "Dead";
+                float healthFrac = MaxHealth > 0f ? Health / MaxHealth : 1f;
+                if (State == EntityState.Flee)  return "Fleeing";
+                if (State == EntityState.Hunt)  return "Aggressive";
+                if (healthFrac < 0.30f)         return "Badly Wounded";
+                if (healthFrac < 0.60f)         return "Wounded";
+                if (Nutrition < 25f)            return "Starving";
+                if (Nutrition < 50f)            return "Hungry";
+                if (Rest      < 30f)            return "Exhausted";
+                if (IsTamed)                    return "Content (Tamed)";
+                return "Calm";
+            }
+        }
+
         public Entity()
         {
             RandomSeed = (int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF);

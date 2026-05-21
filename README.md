@@ -2,7 +2,7 @@
 
 A colony simulation game about a tribe of mushroom-people (**Shroomps**) trying to survive in a strange, fungal world. Built solo in **Godot 4.6** (C#).
 
-Current version: **v0.6.0** (active development — Phase 6 entity system shipped; Phase 7 combat next).
+Current version: **v0.6.2** (active development — Phase 6 entity system shipped; Phase 7 combat next).
 
 ---
 
@@ -60,6 +60,8 @@ The map is populated with 15 species across friendly, neutral, and hostile dispo
 AI state machine: Wander / Flee / Hunt / Graze / Tamed / Dead. Hostiles aggro on the nearest non-pacifist shroomp within their range and attack on contact, applying damage that flows through the existing body-part / bleeding / downed pipelines — wolves will actually injure you. Friendlies flee from threats. Spawning is biome-tagged and population-capped; the map respawns ambient fauna on day boundaries to keep the world feeling alive.
 
 Event-only big creatures (Bear / Leopard Tortoise / Tasmanian Mauler / Dragon / Mushroom Drake) are deferred until the Phase 8 Storyteller layer — they're scripted events, not random spawns.
+
+Click any creature to open the **Entity Card** — a compact inspector showing species, description, health, mood (derived from health % + needs + AI state), and the simplified Nutrition + Rest needs. Updates in real time while open.
 
 ### Work + designations
 

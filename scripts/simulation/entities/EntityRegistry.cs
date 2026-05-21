@@ -19,7 +19,7 @@ namespace Sporeholm.Simulation.Entities
         {
             // ── Friendly / Passive (6) ─────────────────────────────────
             Register(new EntityDef(
-                EntityKind.Glowbunny, "Glowbunny", EntityClass.Mammal, Disposition.Friendly,
+                EntityKind.Glowbunny, "Glowbunny", "Bioluminescent rabbit-kin that glows pale green at dusk. Herbivorous, skittish, harmless.", EntityClass.Mammal, Disposition.Friendly,
                 BiomeTag.Forest | BiomeTag.MagicGrove | BiomeTag.Hills,
                 MaxHealth: 22f, BaseSpeedPxPerSec: 28f, BodyRadiusPx: 7f,
                 AttackPower: 0f, AggroRangePx: 0f, FleeRangePx: 120f,
@@ -27,7 +27,7 @@ namespace Sporeholm.Simulation.Entities
                 ButcherDrops: new[] { ("Meat", 1, 2), ("Hide", 1, 1) }));
 
             Register(new EntityDef(
-                EntityKind.Shroomgoat, "Shroomgoat", EntityClass.Mammal, Disposition.Friendly,
+                EntityKind.Shroomgoat, "Shroomgoat", "Sturdy mushroom-fleeced grazer. Tameable as primary livestock; yields milk + wool when domesticated.", EntityClass.Mammal, Disposition.Friendly,
                 BiomeTag.Hills | BiomeTag.Forest | BiomeTag.MagicGrove,
                 MaxHealth: 42f, BaseSpeedPxPerSec: 22f, BodyRadiusPx: 9f,
                 AttackPower: 4f, AggroRangePx: 0f, FleeRangePx: 90f,
@@ -35,7 +35,7 @@ namespace Sporeholm.Simulation.Entities
                 ButcherDrops: new[] { ("Meat", 2, 4), ("Hide", 1, 2), ("Bone", 1, 2) }));
 
             Register(new EntityDef(
-                EntityKind.Shroomalo, "Shroomalo", EntityClass.Mammal, Disposition.Friendly,
+                EntityKind.Shroomalo, "Shroomalo", "Round, friendly hamster-kin with a soft mushroom-cap mane. Greets foragers with a chirp; mildly defensive if struck.", EntityClass.Mammal, Disposition.Friendly,
                 BiomeTag.AllOutdoor,
                 MaxHealth: 30f, BaseSpeedPxPerSec: 24f, BodyRadiusPx: 8f,
                 AttackPower: 2f, AggroRangePx: 0f, FleeRangePx: 60f,    // very low flee — friendly
@@ -43,7 +43,7 @@ namespace Sporeholm.Simulation.Entities
                 ButcherDrops: new[] { ("Meat", 1, 3), ("Hide", 1, 1), ("SmallMushroom", 1, 2) }));
 
             Register(new EntityDef(
-                EntityKind.Mouse, "Mouse", EntityClass.Mammal, Disposition.Friendly,
+                EntityKind.Mouse, "Mouse", "Sub-shroomp-sized scavenger. Harmless on its own; raids unguarded food in stockpile zones.", EntityClass.Mammal, Disposition.Friendly,
                 BiomeTag.Forest | BiomeTag.Plains | BiomeTag.Hills | BiomeTag.Caves,
                 MaxHealth: 8f, BaseSpeedPxPerSec: 36f, BodyRadiusPx: 4f,
                 AttackPower: 0f, AggroRangePx: 0f, FleeRangePx: 80f,
@@ -51,7 +51,7 @@ namespace Sporeholm.Simulation.Entities
                 ButcherDrops: new[] { ("Meat", 1, 1) }));
 
             Register(new EntityDef(
-                EntityKind.Ladybug, "Ladybug", EntityClass.Insect, Disposition.Friendly,
+                EntityKind.Ladybug, "Ladybug", "Friendly shroomp-shoulder-tall beetle. Eats aphids and small pests near gardens; harmless to colonists.", EntityClass.Insect, Disposition.Friendly,
                 BiomeTag.Forest | BiomeTag.Plains | BiomeTag.MagicGrove,
                 MaxHealth: 6f, BaseSpeedPxPerSec: 18f, BodyRadiusPx: 4f,
                 AttackPower: 0f, AggroRangePx: 0f, FleeRangePx: 50f,
@@ -59,7 +59,7 @@ namespace Sporeholm.Simulation.Entities
                 ButcherDrops: new[] { ("BoneFragment", 1, 1) }));   // chitin substitute pre-Phase 9
 
             Register(new EntityDef(
-                EntityKind.HermitCrab, "Hermit Crab", EntityClass.Crustacean, Disposition.Friendly,
+                EntityKind.HermitCrab, "Hermit Crab", "Coastal forager carrying a borrowed shell. Pinches lightly when cornered; otherwise placid.", EntityClass.Crustacean, Disposition.Friendly,
                 BiomeTag.Coast | BiomeTag.Island,
                 MaxHealth: 14f, BaseSpeedPxPerSec: 16f, BodyRadiusPx: 6f,
                 AttackPower: 1f, AggroRangePx: 0f, FleeRangePx: 40f,
@@ -68,7 +68,7 @@ namespace Sporeholm.Simulation.Entities
 
             // ── Neutral (4) ─────────────────────────────────────────────
             Register(new EntityDef(
-                EntityKind.Squirrel, "Squirrel", EntityClass.Mammal, Disposition.Neutral,
+                EntityKind.Squirrel, "Squirrel", "Skittish forest forager. Flees on approach but defends fiercely when cornered or near its cache.", EntityClass.Mammal, Disposition.Neutral,
                 BiomeTag.Forest | BiomeTag.Hills,
                 MaxHealth: 18f, BaseSpeedPxPerSec: 34f, BodyRadiusPx: 5f,
                 AttackPower: 2f, AggroRangePx: 0f, FleeRangePx: 60f,
@@ -76,7 +76,7 @@ namespace Sporeholm.Simulation.Entities
                 ButcherDrops: new[] { ("Meat", 1, 1), ("Hide", 1, 1) }));
 
             Register(new EntityDef(
-                EntityKind.BonecrestBeetle, "Bonecrest Beetle", EntityClass.Insect, Disposition.Neutral,
+                EntityKind.BonecrestBeetle, "Bonecrest Beetle", "Chitin-armoured scavenger with bone-coloured ridge spikes. Ignores shroomps unless starving or cornered.", EntityClass.Insect, Disposition.Neutral,
                 BiomeTag.Plains | BiomeTag.Hills | BiomeTag.Mountains,
                 MaxHealth: 26f, BaseSpeedPxPerSec: 14f, BodyRadiusPx: 7f,
                 AttackPower: 6f, AggroRangePx: 50f, FleeRangePx: 0f,   // doesn't flee
@@ -84,7 +84,7 @@ namespace Sporeholm.Simulation.Entities
                 ButcherDrops: new[] { ("Bone", 1, 3), ("BoneFragment", 1, 2) }));
 
             Register(new EntityDef(
-                EntityKind.ForestBoar, "Forest Boar", EntityClass.Mammal, Disposition.Neutral,
+                EntityKind.ForestBoar, "Forest Boar", "Tusked omnivore that roots through underbrush. Charges if disturbed near piglets; raids unfenced farm plots.", EntityClass.Mammal, Disposition.Neutral,
                 BiomeTag.Forest | BiomeTag.Hills,
                 MaxHealth: 48f, BaseSpeedPxPerSec: 26f, BodyRadiusPx: 9f,
                 AttackPower: 10f, AggroRangePx: 80f, FleeRangePx: 0f,
@@ -92,7 +92,7 @@ namespace Sporeholm.Simulation.Entities
                 ButcherDrops: new[] { ("Meat", 3, 5), ("Hide", 1, 2), ("Bone", 1, 2) }));
 
             Register(new EntityDef(
-                EntityKind.CaveLizard, "Cave Lizard", EntityClass.Reptile, Disposition.Neutral,
+                EntityKind.CaveLizard, "Cave Lizard", "Cold-blooded ambush predator. Favours caves and mountain biomes; stalks lone shroomps in the dark.", EntityClass.Reptile, Disposition.Neutral,
                 BiomeTag.Caves | BiomeTag.Mountains | BiomeTag.Peaks,
                 MaxHealth: 28f, BaseSpeedPxPerSec: 22f, BodyRadiusPx: 7f,
                 AttackPower: 7f, AggroRangePx: 100f, FleeRangePx: 0f,
@@ -101,7 +101,7 @@ namespace Sporeholm.Simulation.Entities
 
             // ── Hostile (5) ─────────────────────────────────────────────
             Register(new EntityDef(
-                EntityKind.AntSoldier, "Ant Soldier", EntityClass.Insect, Disposition.Hostile,
+                EntityKind.AntSoldier, "Ant Soldier", "Colony-attacker with sharp mandibles. Swarms in groups of 3-6; targets food stockpiles.", EntityClass.Insect, Disposition.Hostile,
                 BiomeTag.Forest | BiomeTag.Plains | BiomeTag.Desert,
                 MaxHealth: 10f, BaseSpeedPxPerSec: 26f, BodyRadiusPx: 4f,
                 AttackPower: 5f, AggroRangePx: 130f, FleeRangePx: 0f,
@@ -109,7 +109,7 @@ namespace Sporeholm.Simulation.Entities
                 ButcherDrops: new[] { ("BoneFragment", 1, 1) }));
 
             Register(new EntityDef(
-                EntityKind.WaspRenegade, "Wasp Renegade", EntityClass.Insect, Disposition.Hostile,
+                EntityKind.WaspRenegade, "Wasp Renegade", "Fast aerial attacker with a venomous stinger. Raids bee nests and isolated shroomps.", EntityClass.Insect, Disposition.Hostile,
                 BiomeTag.Forest | BiomeTag.Plains | BiomeTag.MagicGrove,
                 MaxHealth: 12f, BaseSpeedPxPerSec: 38f, BodyRadiusPx: 5f,
                 AttackPower: 7f, AggroRangePx: 140f, FleeRangePx: 0f,
@@ -117,7 +117,7 @@ namespace Sporeholm.Simulation.Entities
                 ButcherDrops: new[] { ("BoneFragment", 1, 1) }));
 
             Register(new EntityDef(
-                EntityKind.Snake, "Snake", EntityClass.Reptile, Disposition.Hostile,
+                EntityKind.Snake, "Snake", "Coiled ambush predator. Strikes from grass cover; venomous bite weakens its target.", EntityClass.Reptile, Disposition.Hostile,
                 BiomeTag.Forest | BiomeTag.Plains | BiomeTag.Desert,
                 MaxHealth: 18f, BaseSpeedPxPerSec: 18f, BodyRadiusPx: 6f,
                 AttackPower: 8f, AggroRangePx: 90f, FleeRangePx: 0f,
@@ -125,7 +125,7 @@ namespace Sporeholm.Simulation.Entities
                 ButcherDrops: new[] { ("Meat", 1, 1), ("Hide", 1, 1) }));
 
             Register(new EntityDef(
-                EntityKind.Wolf, "Wolf", EntityClass.Mammal, Disposition.Hostile,
+                EntityKind.Wolf, "Wolf", "Pack hunter, several times taller than a shroomp. Targets colonists and livestock alike.", EntityClass.Mammal, Disposition.Hostile,
                 BiomeTag.Forest | BiomeTag.Hills | BiomeTag.Mountains,
                 MaxHealth: 55f, BaseSpeedPxPerSec: 30f, BodyRadiusPx: 9f,
                 AttackPower: 12f, AggroRangePx: 180f, FleeRangePx: 0f,
@@ -133,7 +133,7 @@ namespace Sporeholm.Simulation.Entities
                 ButcherDrops: new[] { ("Meat", 2, 4), ("Hide", 1, 2), ("Bone", 1, 2) }));
 
             Register(new EntityDef(
-                EntityKind.MagicWisp, "Magic Wisp", EntityClass.Mythical, Disposition.Hostile,
+                EntityKind.MagicWisp, "Magic Wisp", "Rare floating mote of magical energy. Drains MagicResonance from nearby shroomps; flees when struck.", EntityClass.Mythical, Disposition.Hostile,
                 BiomeTag.MagicGrove,
                 MaxHealth: 14f, BaseSpeedPxPerSec: 18f, BodyRadiusPx: 5f,
                 AttackPower: 3f, AggroRangePx: 90f, FleeRangePx: 30f,   // flees when struck

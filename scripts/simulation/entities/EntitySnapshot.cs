@@ -25,14 +25,21 @@ namespace Sporeholm.Simulation.Entities
         string?       TamedByName,
         Vector2       WanderHome,
         int           RandomSeed,
-        int           AttackCooldownTicks
+        int           AttackCooldownTicks,
+        // v0.6.2 — simplified needs + derived mood label for the entity
+        // card. MoodLabel is computed from the live Entity at snapshot
+        // time (no further data needed by the card).
+        float         Nutrition,
+        float         Rest,
+        string        MoodLabel
     )
     {
         public EntitySnapshot(Entity e) : this(
             e.Id, e.Kind, e.SimPos, e.SimTarget, e.State,
             e.Health, e.MaxHealth,
             e.Speed, e.AttackPower,
-            e.IsTamed, e.TamedByName, e.WanderHome, e.RandomSeed, e.AttackCooldownTicks)
+            e.IsTamed, e.TamedByName, e.WanderHome, e.RandomSeed, e.AttackCooldownTicks,
+            e.Nutrition, e.Rest, e.MoodLabel)
         {
         }
     }

@@ -40,11 +40,20 @@ namespace Sporeholm.Simulation.Systems
             //     target (for Hunt / Flee transitions). Linear scan is OK
             //     at colony scale; if we ever hit 250 shroomps × 60 entities
             //     × 60 Hz we'll grid-index this, but not before.
+            // v0.6.2 — Nutrition + Rest decay. Tuned slow: ~0.6/in-game-hour
+            // for both, which at 60-sec/in-game-hour = ~0.01/sec → ~0.004 per
+            // 250 Hz tick. Wild entities full→0 in ~4 in-game days; no behavior
+            // impact today (EntityCardPanel just surfaces the value).
+            const float NeedDecayPerSec = 0.01f;
+            float needDecay = NeedDecayPerSec * dt;
+
             for (int i = 0; i < entities.Count; i++)
             {
                 var e = entities[i];
                 if (!e.IsAlive) continue;
                 if (e.AttackCooldownTicks > 0) e.AttackCooldownTicks--;
+                e.Nutrition = Math.Clamp(e.Nutrition - needDecay,        0f, 100f);
+                e.Rest      = Math.Clamp(e.Rest      - needDecay * 0.6f, 0f, 100f);   // rest decays slower than nutrition
 
                 var def = EntityRegistry.Get(e.Kind);
 

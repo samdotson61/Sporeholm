@@ -174,7 +174,16 @@ public partial class SaveManager : Node
 		string? TamedByName,
 		float   WanderHomeX, float WanderHomeY,
 		int     RandomSeed,
-		int     AttackCooldownTicks);
+		int     AttackCooldownTicks)
+	{
+		// v0.6.2 — Nutrition + Rest persist as init-only properties so the
+		// positional ctor stays compatible with pre-v0.6.2 save records.
+		// Saves predating this field deserialise to the default (70 fed,
+		// 70 rested) — same as a fresh-spawn entity, so the player doesn't
+		// see hungry wildlife on an old-save load.
+		public float Nutrition { get; init; } = 70f;
+		public float Rest      { get; init; } = 70f;
+	}
 
 	// v0.5.73 — one tile's structure snapshot. RoomId is NOT saved (the
 	// RoomDetector rebuilds the room registry on first room query after
@@ -698,7 +707,11 @@ public partial class SaveManager : Node
 				WanderHomeX:         e.WanderHome.X,
 				WanderHomeY:         e.WanderHome.Y,
 				RandomSeed:          e.RandomSeed,
-				AttackCooldownTicks: e.AttackCooldownTicks));
+				AttackCooldownTicks: e.AttackCooldownTicks)
+			{
+				Nutrition = e.Nutrition,
+				Rest      = e.Rest,
+			});
 		}
 		return list;
 	}

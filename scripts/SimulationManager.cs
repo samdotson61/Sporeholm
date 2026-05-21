@@ -95,6 +95,13 @@ namespace Sporeholm
 			// on-map stockpiles. Replaces the v0.4.30 dual-write that
 			// overflowed the colony pool.
 			_core.Resources.Map = _core.Map;
+			// v0.6.0u — seed wildlife AFTER the map is bound. SeedColony's
+			// internal call to SeedEntitiesFromMap early-returned because
+			// _core.Map was still null at that point. Now that the map is
+			// available, this call actually populates entities. Idempotent
+			// so it's safe to fire even on the load path (LoadFromSave's
+			// AddEntities already ran).
+			SeedEntitiesFromMap();
 			_core.Start();
 		}
 
@@ -105,6 +112,10 @@ namespace Sporeholm
 			_core.Map = map;
 			_core.Resources.Map = map;   // v0.4.36 — HUD ground-stockpile reads
 			SeedSimPositions();
+			// v0.6.0u — late-binding path also needs to trigger wildlife
+			// seeding (the _Ready call would have early-returned with no
+			// map). Idempotent — no-op if entities were already seeded.
+			SeedEntitiesFromMap();
 		}
 
 		// Assigns each shroomp a starting SimPos drawn from the map's spawn cluster
@@ -1311,18 +1322,34 @@ namespace Sporeholm
 			SeedEntitiesFromMap();
 		}
 
-		// v0.6.0 (Phase 6) — runs at colony seed time to populate the
-		// map with wildlife. Reads LocalMap.SnapshotAnimalSpawns (placed at
-		// LocalMapGenerator gen-time per v0.5.14/v0.5.15) and instantiates
-		// entities per EntitySpawnSystem rules. Idempotent for restarts:
-		// LoadFromSave skips this and restores entities directly from the
-		// save data instead.
+		// v0.6.0 (Phase 6) — populates the map with wildlife. Reads
+		// LocalMap.SnapshotAnimalSpawns (placed at LocalMapGenerator gen-time
+		// per v0.5.14/v0.5.15) and instantiates entities per
+		// EntitySpawnSystem rules. Idempotent: re-running is a no-op if
+		// entities already exist on the sim core. Safe to call from
+		// multiple sites (SeedColony / LoadFromSave fallback / _Ready post-
+		// map-bind / BindLocalMap) — only the first one with a non-null map
+		// + empty entity list actually seeds.
+		//
+		// **Important call-order note** (v0.6.0u — bug found Y9 forest map):
+		// `SimulationManager._Ready` runs `SeedColony()` BEFORE binding
+		// `_core.Map`. Inside `SeedColony` this helper early-returns at the
+		// `_core.Map == null` guard, so a fresh colony never gets wildlife
+		// from the in-SeedColony call. The _Ready handler now calls this
+		// helper a SECOND time right after the map binding, which is the
+		// path that actually seeds on a fresh start. `BindLocalMap` calls
+		// it too so a colony whose map was bound late (GameController
+		// fallback path) still gets fauna.
 		private void SeedEntitiesFromMap()
 		{
 			if (_core.Map == null) return;
+			// Idempotence guard: do nothing if entities already exist
+			// (LoadFromSave path or a previous SeedEntitiesFromMap call).
+			if (_core.AllEntities().Count > 0) return;
 			var fresh = new System.Collections.Generic.List<Sporeholm.Simulation.Entities.Entity>();
 			Sporeholm.Simulation.Systems.EntitySpawnSystem.PopulateFromSpawnPoints(fresh, _core.Map, _rng);
 			_core.AddEntities(fresh);
+			GD.Print($"[Entities] Seeded {fresh.Count} entities from map (markers + ambient density).");
 		}
 
 		// Build a Shroomp from a ScenarioPanel template. Unlike the legacy
@@ -1701,6 +1728,12 @@ namespace Sporeholm
 						WanderHome          = new Vector2(rec.WanderHomeX, rec.WanderHomeY),
 						RandomSeed          = rec.RandomSeed,
 						AttackCooldownTicks = rec.AttackCooldownTicks,
+						// v0.6.2 — pre-v0.6.2 save records deserialise these
+						// as their default (70, 70) which is the same as a
+						// freshly-spawned entity, so old saves come back to
+						// a "fed + rested" wildlife state on first load.
+						Nutrition           = rec.Nutrition,
+						Rest                = rec.Rest,
 					};
 					fresh.Add(e);
 				}

@@ -7,6 +7,81 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.6.2] — 2026-05-21 — Entity selection + EntityCardPanel inspector + needs scaffolding
+
+Wildlife is now selectable. Click a creature in the world and a compact inspector card opens at the top-right showing species name, description, health, mood, and needs — mirrors the Shroomp card slot (mutually exclusive with the shroomp / tile-properties cards). Also adds the Nutrition + Rest simplified-needs scaffolding the Phase 6 design called for; values decay slowly per sim tick (~4 in-game days nutrition→0) but don't drive behaviour yet — Phase 9 husbandry will wire Hungry → Graze and Tired → Sleep transitions.
+
+### Entity selection (`EntityColonyView.cs`, `GameController.cs`)
+
+- **`EntityClicked` signal** on `EntityColonyView` — payload is the Guid stringified. Mirrors `ShroompClicked` from the colony view.
+- **`GetEntitySnapAt(worldPos, fallbackRadius)`** hit-test. Caches the last snapshot list in `_lastSnap` so per-frame queries don't have to chase the live sim. Per-species hit radius uses `EntityDef.BodyRadiusPx` (Wolf / Forest Boar at 9 px get a forgiving 12 px hit-box; Mouse / Ant Soldier at 4 px need closer clicks). Closest entity wins when creatures overlap.
+- **Click priority in `GameController.HandleMouseClick`**: shroomp first (existing), then entity (new), then tile / drag-select. When an entity hit fires, the click handler explicitly closes `ShroompCardPanel`, `TilePropertiesPanel`, and clears the selection-box overlay before opening the EntityCardPanel — the three inspector cards share the top-right slot so visibility is mutually exclusive.
+
+### EntityCardPanel — wildlife inspector (`EntityCardPanel.cs`)
+
+New single-tab Control wired into the UI layer alongside `ShroompCardPanel`. Compact 260 × 360 panel anchored top-right with the existing dark-brown floating-panel styling from `UITheme`. Layout (top to bottom):
+
+- **Close button** (×) at the top-right of the header row.
+- **Name** — species `DisplayName`, gold accent colour, 16 pt.
+- **Description** — italic two-line blurb (`EntityDef.Description`, new field) auto-wrapped.
+- **State row** — `Wandering · Friendly` style line so the player can see what the AI is doing and how it'll behave on contact.
+- **Health** — labelled `ProgressBar` showing `current / max` (per-individual values, post-jitter).
+- **Mood** — single-word label from `EntitySnapshot.MoodLabel`. Derived on-the-fly from Health %, Nutrition, Rest, and AI state: Calm / Wounded / Badly Wounded / Hungry / Starving / Exhausted / Aggressive (Hunt state) / Fleeing / Content (Tamed) / Dead. No mood-thought system today — this is purely a derived classifier.
+- **Needs** — Nutrition + Rest each as a labelled `ProgressBar` with the numeric readout on the right.
+
+The card refreshes on every snapshot tick (`Refresh(snap)` in `GameController.OnTick`) so the player sees health drop in real time during a fight or needs decay during long observations. Visibility-gated — no-op when closed. If the entity dies (or despawns), `Refresh` notices the missing id and auto-closes the card.
+
+### Per-species descriptions (`EntityDef.cs`, `EntityRegistry.cs`)
+
+New `Description` field on `EntityDef`. All 15 species got a one-sentence flavor blurb describing their look + behaviour:
+- *Glowbunny:* "Bioluminescent rabbit-kin that glows pale green at dusk. Herbivorous, skittish, harmless."
+- *Wolf:* "Pack hunter, several times taller than a shroomp. Targets colonists and livestock alike."
+- *Shroomalo:* "Round, friendly hamster-kin with a soft mushroom-cap mane. Greets foragers with a chirp; mildly defensive if struck."
+- *Magic Wisp:* "Rare floating mote of magical energy. Drains MagicResonance from nearby shroomps; flees when struck."
+- (etc. across the full 15)
+
+These show on the EntityCard's Description row and will surface in future hover-tooltips + Animals tab (Phase 9).
+
+### Simplified needs system (`Entity.cs`, `EntitySystem.cs`, `EntitySnapshot.cs`, `SaveManager.cs`)
+
+`Entity` gains `Nutrition` + `Rest` (float, 0-100, default 70). `EntitySystem.Tick` decays both per-tick at ~0.01 / sim-second (Nutrition full → 0 in ~4 in-game days at default speed; Rest decays at 0.6× that rate). Range-clamped 0-100 — no negative-overshoot. No behavioural impact yet; the card just surfaces the values so the player can see fauna state. Phase 9 husbandry wires Hungry → Graze + Tired → Sleep transitions on top of this scaffolding.
+
+`EntitySnapshot` extended with `Nutrition`, `Rest`, and `MoodLabel` (computed on demand from the live Entity at snapshot construction). `EntitySaveData` adds nullable Nutrition + Rest init-only properties — pre-v0.6.2 saves deserialise to the default (70 fed, 70 rested), so old saves come back to a freshly-spawned-equivalent wildlife state on first load. `LoadFromSave` restores them via the same record-pattern as the rest of the entity fields.
+
+**Build:** 0 warnings, 0 errors.
+
+---
+
+## [0.6.1] — 2026-05-21 — Entity-spawn timing fix (Phase 6 post-ship bugreport)
+
+-Entities should now spawn properly
+
+Bug report: started a new colony on recommended settings in a forest biome, no non-shroomp entities visible.
+
+**Root cause** — order of operations in `SimulationManager._Ready`. The handler was running `SeedColony()` (which internally called `SeedEntitiesFromMap()`) BEFORE assigning `_core.Map = WorldState.Instance?.CurrentLocalMap`. The entity-seed helper's first line is `if (_core.Map == null) return;` — so on every fresh-colony start it early-returned silently. The shroomp seeding kept working because shroomps are added to the sim core without consulting the map; only `SeedSimPositions` reads the map and that one runs later. Entities, on the other hand, need the map for the spawn-point lookup + ambient-density biome tile search, so they need the map ready BEFORE seeding fires.
+
+Same trap caught two more code paths:
+- `LoadFromSave`'s fallback `SeedEntitiesFromMap()` call (for pre-Phase-6 saves that have no `Entities` field) — also runs from inside `SeedColony` before the map binding.
+- `BindLocalMap` (GameController's late-binding path for colonies where the map wasn't ready at `SimulationManager._Ready`) — never called the helper at all.
+
+**Fix** — three coordinated edits in `SimulationManager.cs`:
+
+1. **Idempotence guard** in `SeedEntitiesFromMap`: short-circuits if `_core.AllEntities().Count > 0` so all three call sites can fire freely without double-seeding. Also logs the seeded count on success so subsequent regressions surface in the Godot console.
+
+2. **Post-map-bind seed in `_Ready`**: new `SeedEntitiesFromMap()` call placed right after `_core.Map = WorldState.Instance?.CurrentLocalMap;`. This is the path that actually fires on a fresh start — the in-`SeedColony` call still runs first but early-returns, then this call runs with the map available and populates the fauna.
+
+3. **Late-binding seed in `BindLocalMap`**: new `SeedEntitiesFromMap()` call after `SeedSimPositions()`. Covers colonies where `WorldState.Instance.CurrentLocalMap` wasn't ready by `_Ready` time — GameController binds the map later via this entry point.
+
+**Verification path** — every entity-seed scenario now resolves correctly:
+- *Fresh colony, map-ready-at-_Ready*: `_Ready` seeds successfully.
+- *Fresh colony, late map bind*: `_Ready` early-returns (no map), `BindLocalMap` seeds.
+- *Load-with-Phase-6-save*: `LoadFromSave` populates from save records; all three subsequent calls short-circuit on the idempotence guard.
+- *Load-with-pre-Phase-6-save*: `LoadFromSave`'s fallback early-returns (no map), `_Ready`/`BindLocalMap` fills with fresh ambient fauna.
+
+Build clean, 0 warnings, 0 errors. Manual playtest verifies — a fresh forest-biome colony shows Glowbunnies / Shroomgoats / Shroomalos / etc. on day 1, and the Godot console prints `[Entities] Seeded N entities from map (markers + ambient density).`
+
+---
+
 ## [0.6.0] — 2026-05-21 — Phase 6 entity system + door-aware rooms + door open animation
 
 Phase 6 (Entity System) lands as the v0.6.0 headline plus two structural fixes in the room/door layer that completed the v0.5.84 "room system gap-fill" work properly. Three coordinated landings; each self-contained, each verified compiling against the existing shroomp pipeline.
@@ -62,7 +137,7 @@ Caps + weights tuned so a default-sized map (240 × 150) carries ~6-10 friendlie
 
 **Hostile attack damage routing**: when a hostile entity contacts a target shroomp, `ApplyEntityAttack` mutates the shroomp's `BodyParts` dict directly via the same pattern `NeedsSystem` starvation and `SimulationManager.DevDamageToDown` use. Bleeding + downed-state recomputation picks this up automatically through the existing v0.5.81 bleeding + v0.5.79 downed-state pipelines. Phase 7 combat will replace this minimal hit-routing with a proper weapon-vs-armor pipeline.
 
-**Deferred to v0.6.1+:** Hediff base class, mental-breaker system, opinion ledger + relations registry, Phase 8 Storyteller event hooks, entity card / unit panel UI, Phase 9 husbandry tags (Tame / Butcher / Milk / Shear / etc.). The Phase 6 spec calls these out as "lands alongside the entity registry"; the entity registry is the foundation they all build on, and it lands first so the additions can be done in self-contained follow-up bumps.
+**Deferred to v0.6.2+:** Hediff base class, mental-breaker system, opinion ledger + relations registry, Phase 8 Storyteller event hooks, entity card / unit panel UI, Phase 9 husbandry tags (Tame / Butcher / Milk / Shear / etc.). The Phase 6 spec calls these out as "lands alongside the entity registry"; the entity registry is the foundation they all build on, and it lands first so the additions can be done in self-contained follow-up bumps.
 
 **Build:** 0 warnings, 0 errors.
 
@@ -4613,13 +4688,13 @@ In `BehaviorSystem.Tick`, the gate fires right after the per-smurf cooldown decr
 
 ```csharp
 if (map != null && s.CurrentTask is { } valTask
-    && !IsTaskStillValid(s, valTask, map))
+	&& !IsTaskStillValid(s, valTask, map))
 {
-    ReleaseTaskClaim(s, map);   // also handles haul reservation via ReleaseByIdString
-    s.PathWaypoints.Clear();
-    s.StuckTicks = 0;
-    s.RePathTried = false;
-    s.CurrentTask = null;
+	ReleaseTaskClaim(s, map);   // also handles haul reservation via ReleaseByIdString
+	s.PathWaypoints.Clear();
+	s.StuckTicks = 0;
+	s.RePathTried = false;
+	s.CurrentTask = null;
 }
 ```
 
@@ -5233,9 +5308,9 @@ Root cause: in the per-smurf loop, `needNewTask` is computed each tick from four
 
 ```csharp
 needNewTask = ct.Type == TaskType.None
-    || critical
-    || lingerExpired
-    || workAvailable;     // <-- the culprit
+	|| critical
+	|| lingerExpired
+	|| workAvailable;     // <-- the culprit
 ```
 
 Where `workAvailable = idle && map != null && map.HasAnyDesignation()`.
@@ -5408,11 +5483,11 @@ New public method following the canonical order:
 ```csharp
 public void KillSmurf(Smurf s, CauseOfDeath cause)
 {
-    if (s == null || !s.IsAlive) return;   // idempotent
-    s.CauseOfDeath = cause;
-    DropCorpseGear(s);                      // drops inventory, equipment, spawns corpse Item, broadcasts witness thoughts
-    s.IsAlive = false;
-    PendingDeaths.Enqueue(new SmurfSnapshot(s));
+	if (s == null || !s.IsAlive) return;   // idempotent
+	s.CauseOfDeath = cause;
+	DropCorpseGear(s);                      // drops inventory, equipment, spawns corpse Item, broadcasts witness thoughts
+	s.IsAlive = false;
+	PendingDeaths.Enqueue(new SmurfSnapshot(s));
 }
 ```
 
@@ -5436,10 +5511,10 @@ One canonical path — "one death pipeline, fewer bugs."
 ```csharp
 public bool DevKillSmurf(string name)
 {
-    var s = DevFindSmurfByName(name);
-    if (s == null || !s.IsAlive || _core == null) return false;
-    _core.PostMainThreadCommand(() => _core.KillSmurf(s, CauseOfDeath.Dev));
-    return true;
+	var s = DevFindSmurfByName(name);
+	if (s == null || !s.IsAlive || _core == null) return false;
+	_core.PostMainThreadCommand(() => _core.KillSmurf(s, CauseOfDeath.Dev));
+	return true;
 }
 ```
 
@@ -5535,9 +5610,9 @@ Inner expansion loop now applies the cost:
 int stepCost = Cost[i];
 if (useCrowdCost)
 {
-    int crowd = smurfPerTile![nIdx];
-    if (nIdx == askerTileIdx && crowd > 0) crowd--;
-    if (crowd > 0) stepCost += PawnCollisionCost * crowd;
+	int crowd = smurfPerTile![nIdx];
+	if (nIdx == askerTileIdx && crowd > 0) crowd--;
+	if (crowd > 0) stepCost += PawnCollisionCost * crowd;
 }
 int tentative = curG + stepCost;
 ```
@@ -6014,7 +6089,7 @@ This release adds a single `mapScale` factor at the top of the river-carving pas
 
 ```csharp
 float mapScale = System.Math.Clamp(
-    System.Math.Min(map.Width, map.Height) / 150f, 0.6f, 4.0f);
+	System.Math.Min(map.Width, map.Height) / 150f, 0.6f, 4.0f);
 ```
 
 The reference point is the v0.4.41 default level dim (240×150 → min 150), so a 240×150 level gets `mapScale = 1.0` and v0.4.37 widths are preserved exactly. A 720×450 max-size level gets `mapScale = 3.0`. The clamp range [0.6, 4.0] gives the smallest 160×100 level (`min/150 = 0.667`) readable river widths and prevents nonsense values if the dial ever gets bumped.
@@ -6050,7 +6125,7 @@ The Delta subtype previously spawned exactly 2 sibling channels regardless of ma
 
 ```csharp
 int deltaBranchCount = System.Math.Clamp(
-    2 + (int)System.Math.Round((mapScale - 1f) * 0.7f), 1, 4);
+	2 + (int)System.Math.Round((mapScale - 1f) * 0.7f), 1, 4);
 ```
 
 | mapScale | branches | Delta main + branches |
@@ -6257,10 +6332,10 @@ The actual rogue setter is queued as a follow-up to find with logging at the nex
 
 ```
 else if (ev is InputEventKey { Keycode: Key.Escape, Pressed: true, Echo: false }
-    && !IsAnyOverlayOpen())
+	&& !IsAnyOverlayOpen())
 {
-    OnMenuRequested();
-    GetViewport().SetInputAsHandled();
+	OnMenuRequested();
+	GetViewport().SetInputAsHandled();
 }
 ```
 
@@ -7071,10 +7146,10 @@ The cleanest perf signal yet arrived: **0.6 FPS hit per smurf** measured precise
 ```csharp
 if (_roster != null)
 {
-    var rows = new List<SimulationC_Roster_Row>(snap.Smurfs.Count);
-    foreach (var s in snap.Smurfs)
-        rows.Add(new SimulationC_Roster_Row(...));
-    _roster.Refresh(rows);
+	var rows = new List<SimulationC_Roster_Row>(snap.Smurfs.Count);
+	foreach (var s in snap.Smurfs)
+		rows.Add(new SimulationC_Roster_Row(...));
+	_roster.Refresh(rows);
 }
 ```
 
@@ -7299,8 +7374,8 @@ Two distinct root causes, fixed separately.
 ```csharp
 foreach (var snap in snaps)
 {
-    var vs = _smurfs.Find(s => s.Name == snap.Name);   // ← O(N) per call
-    …
+	var vs = _smurfs.Find(s => s.Name == snap.Name);   // ← O(N) per call
+	…
 }
 ```
 

@@ -40,6 +40,7 @@ public partial class GameController : Node
 	private StockpileOverlay      _stockpileOverlay = null!;   // v0.5.0 Phase 5A
 	private StructureOverlay      _structureOverlay = null!;   // v0.5.19 Phase 5B
 	private EntityColonyView      _entityColonyView = null!;   // v0.6.0 Phase 6 — wildlife renderer
+	private EntityCardPanel       _entityCard       = null!;   // v0.6.2 — wildlife inspector card
 	private DayNightOverlay       _dayNight         = null!;   // v0.5.58 visual day/night cycle
 	private OrderQueueOverlay     _orderQueueOverlay = null!;  // v0.5.2 chain-order waypoints
 	private DragSelectionPreview  _dragPreview     = null!;
@@ -315,6 +316,12 @@ public partial class GameController : Node
 
 		_card = new ShroompCardPanel { Name = "ShroompCard" };
 		ul.AddChild(_card);
+
+		// v0.6.2 — entity inspector card. Shares the top-right slot with
+		// ShroompCardPanel + TilePropertiesPanel so they're mutually
+		// exclusive (toggled via Visible).
+		_entityCard = new EntityCardPanel { Name = "EntityCard" };
+		ul.AddChild(_entityCard);
 
 		_tileInfo = new TileInfoOverlay { Name = "TileInfo" };
 		ul.AddChild(_tileInfo);
@@ -751,6 +758,20 @@ public partial class GameController : Node
 			{
 				SelectSingleShroomp(hit);
 				_colony.EmitShroompClicked(hit);  // existing wiring opens ShroompCardPanel
+				return true;
+			}
+			// v0.6.2 — no shroomp hit → check for an entity (wildlife) at
+			// the click position. Mirrors the shroomp selection flow:
+			// closest entity within a body-radius wins, EntityCardPanel
+			// opens with the matching snapshot. Other inspector cards
+			// close (mutually exclusive top-right slot).
+			var entHit = _entityColonyView.GetEntitySnapAt(click);
+			if (entHit.HasValue)
+			{
+				_card.Visible      = false;
+				_tileProps?.Close();
+				_selOverlay?.ClearSelection();
+				_entityCard.Show(entHit.Value);
 				return true;
 			}
 			// v0.4.34 — no shroomp hit. If the clicked tile has items or
@@ -1382,6 +1403,10 @@ public partial class GameController : Node
 			// wildlife renderer. Cheap (≤ 50 entities × per-instance
 			// Transform2D write).
 			_entityColonyView.UpdateFromSnapshot(snap.Entities);
+			// v0.6.2 — refresh the entity inspector card so health/needs/
+			// mood stay in sync while the player has it open. Visibility-
+			// gated inside the card (no-op when closed).
+			_entityCard.Refresh(snap);
 			// v0.4.26 — visibility-gated panel refreshes. `_card.Refresh`
 			// and the roster Refresh (rows list construction + the per-
 			// row UpdateRow that touches multiple Label.Text values per

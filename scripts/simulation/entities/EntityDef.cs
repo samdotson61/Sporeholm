@@ -48,6 +48,7 @@ namespace Sporeholm.Simulation.Entities
     public sealed record EntityDef(
         EntityKind   Kind,
         string       DisplayName,
+        string       Description,        // v0.6.2 — one-sentence flavor blurb shown on EntityCardPanel
         EntityClass  Class,
         Disposition  Disposition,
         BiomeTag     HabitatBiomes,

@@ -168,7 +168,7 @@ public partial class MainMenuController : Control
 	{
 		var v = new Label
 		{
-			Text = "v0.6.0",
+			Text = "v0.6.2",
 			HorizontalAlignment = HorizontalAlignment.Center,
 		};
 		ApplyGrobold(v, 14);

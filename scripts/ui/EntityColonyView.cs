@@ -21,12 +21,22 @@ namespace Sporeholm.UI
     // MMI lifecycle + per-frame loop.
     public partial class EntityColonyView : Node2D
     {
+        // v0.6.2 — click selection. Mirrors ShroompColonyView.ShroompClicked
+        // → ShroompCardPanel flow; GameController routes this signal to
+        // EntityCardPanel.Show on click.
+        [Signal] public delegate void EntityClickedEventHandler(string entityIdAsString);
+
         private const int SpriteW = 20;
         private const int SpriteH = 20;
         private const int MaxPerKind = 32;   // soft cap; matches EntityRegistry PopulationCap max
 
         private readonly Dictionary<EntityKind, MultiMeshInstance2D> _mmis = new();
         private readonly Dictionary<EntityKind, ImageTexture>        _sprites = new();
+
+        // v0.6.2 — last-snapshot entity list cached so GetEntityIdAt can
+        // do per-frame hit-testing without spawning a fresh sim snapshot.
+        // Refreshed in UpdateFromSnapshot.
+        private System.Collections.Generic.IReadOnlyList<EntitySnapshot>? _lastSnap;
 
         public override void _Ready()
         {
@@ -72,6 +82,7 @@ namespace Sporeholm.UI
         // bump the per-kind index as each entity is emitted.
         public void UpdateFromSnapshot(IReadOnlyList<EntitySnapshot> entities)
         {
+            _lastSnap = entities;   // v0.6.2 — cache for hit-testing
             // Per-kind counters
             var counts = new Dictionary<EntityKind, int>(EntityRegistry.All.Count);
             foreach (var def in EntityRegistry.All) counts[def.Kind] = 0;
@@ -105,5 +116,38 @@ namespace Sporeholm.UI
                 _mmis[def.Kind].Multimesh.VisibleInstanceCount = counts[def.Kind];
             }
         }
+
+        // v0.6.2 — hit-test for click selection. Returns the EntitySnapshot
+        // whose SimPos is within `radius` px of the given world position;
+        // null if nothing matches. Mirrors ShroompColonyView.GetShroompNameAt.
+        // The radius defaults to a half-tile (8 px) to match the visual
+        // body size of most species — Wolf / Forest Boar (BodyRadius 9) are
+        // forgivingly hit-testable at 12 px; the smallest species (Mouse
+        // / Ant Soldier at 4) need clicks closer to centre but the per-
+        // species BodyRadiusPx in EntityDef sets the actual gate.
+        public EntitySnapshot? GetEntitySnapAt(Vector2 worldPos, float fallbackRadius = 10f)
+        {
+            if (_lastSnap == null) return null;
+            EntitySnapshot? best = null;
+            float bestDist2 = float.MaxValue;
+            for (int i = 0; i < _lastSnap.Count; i++)
+            {
+                var e = _lastSnap[i];
+                var def = EntityRegistry.Get(e.Kind);
+                float r = Mathf.Max(def.BodyRadiusPx, fallbackRadius);
+                float dx = e.SimPos.X - worldPos.X;
+                float dy = e.SimPos.Y - worldPos.Y;
+                float d2 = dx * dx + dy * dy;
+                if (d2 > r * r) continue;
+                // Closest entity wins (handles overlapping creatures correctly).
+                if (d2 < bestDist2) { bestDist2 = d2; best = e; }
+            }
+            return best;
+        }
+
+        // Convenience: fire the EntityClicked signal with the given id.
+        // GameController calls this after GetEntitySnapAt returns a hit.
+        public void EmitEntityClicked(System.Guid id) =>
+            EmitSignal(SignalName.EntityClicked, id.ToString());
     }
 }
