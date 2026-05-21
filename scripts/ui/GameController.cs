@@ -1047,6 +1047,21 @@ public partial class GameController : Node
 		// v0.5.84t — starving alert one-shot per pawn.
 		_sim.Connect(SimulationManager.SignalName.StarvationStarted,
 			Callable.From<string>(OnStarvationStarted));
+		// v0.6.2 audit Fix 5 — auto-close EntityCardPanel on entity death.
+		_sim.Connect(SimulationManager.SignalName.EntityRemoved,
+			Callable.From<string>(OnEntityRemoved));
+	}
+
+	// v0.6.2 audit Fix 5 — entity died/despawned. If the EntityCardPanel
+	// was showing this creature, close the card + clear the selection
+	// brackets in the same frame so the player doesn't keep clicking a
+	// dead-creature card with stale data.
+	private void OnEntityRemoved(string entityIdStr)
+	{
+		if (_entityCard == null || !_entityCard.Visible) return;
+		if (!System.Guid.TryParse(entityIdStr, out var removedId)) return;
+		if (_entityCard.SelectedId == removedId)
+			_entityCard.Close();   // Close() fires the Closed signal which clears brackets
 	}
 
 	private void SeedColonyVisuals()

@@ -191,7 +191,7 @@ public partial class TilePropertiesPanel : Control
             _content.AddChild(MakeRule());
         }
         // v0.5.25 — Structure section (walls / floors / doors / shelves /
-        // workbenches / hearths / blueprints). Lands above the Tile
+        // workbenches / bonfires / blueprints). Lands above the Tile
         // section because structures sit on top of the underlying terrain
         // gameplay-wise (a Wall on Grass is "a wall" first).
         var structure = map.GetStructure(tx, ty);
@@ -200,11 +200,12 @@ public partial class TilePropertiesPanel : Control
             BuildStructureSection(structure);
             _content.AddChild(MakeRule());
         }
-        // v0.5.84s — Phase 5.5 Bills section. Shown only for Workbench
-        // tiles (the structure type that consumes recipes). Sub-section
+        // v0.5.84s — Phase 5.5 Bills section. Shown for production stations
+        // (Workbench, and as of v0.6.2 Phase 5.6: CookingTable). Sub-section
         // is its own MakeRule-separated block so it reads as distinct
         // from the Structure section above.
-        if (structure.Type == Sporeholm.World.StructureType.Workbench)
+        if (structure.Type == Sporeholm.World.StructureType.Workbench
+            || structure.Type == Sporeholm.World.StructureType.CookingTable)
         {
             BuildBillsSection(map, tx, ty);
             _content.AddChild(MakeRule());
@@ -238,8 +239,8 @@ public partial class TilePropertiesPanel : Control
             Sporeholm.World.StructureType.ShelfPlanned            => "Shelf",
             Sporeholm.World.StructureType.Workbench               or
             Sporeholm.World.StructureType.WorkbenchPlanned        => "Workbench",
-            Sporeholm.World.StructureType.Hearth                  or
-            Sporeholm.World.StructureType.HearthPlanned           => "Hearth",
+            Sporeholm.World.StructureType.Bonfire                  or
+            Sporeholm.World.StructureType.BonfirePlanned           => "Bonfire",
             Sporeholm.World.StructureType.Bed                     or
             Sporeholm.World.StructureType.BedPlanned              => "Bed",
             Sporeholm.World.StructureType.MeditationShrine        or
@@ -250,6 +251,13 @@ public partial class TilePropertiesPanel : Control
             Sporeholm.World.StructureType.GossipBenchPlanned      => "Gossip Bench",
             Sporeholm.World.StructureType.Table                   or
             Sporeholm.World.StructureType.TablePlanned            => "Table",
+            Sporeholm.World.StructureType.Torch                   or
+            Sporeholm.World.StructureType.TorchPlanned            => "Torch",
+            // v0.6.2 (Phase 5.6 ship) — Cooking Table label. Surfaced both
+            // in TilePropertiesPanel readout and in the room-classification
+            // (Library hint via Bill section).
+            Sporeholm.World.StructureType.CookingTable            or
+            Sporeholm.World.StructureType.CookingTablePlanned     => "Cooking Table",
             _                                                     => s.Type.ToString(),
         };
         // v0.5.55 — show the actual sub-material (FungalWood / DeadWood /
@@ -294,6 +302,18 @@ public partial class TilePropertiesPanel : Control
             {
                 string qSym = Sporeholm.Simulation.Items.QualityMeta.Symbol(s.Quality);
                 _content.AddChild(MakeLabel($"  Quality: {qSym} {s.Quality}", 10, DarkWood));
+            }
+            // v0.6.2 — demolish-as-task readout. When the player has marked
+            // this structure for demolition, surface "marked + progress" so
+            // they know a Crafter is on the way / mid-work. The red X
+            // overlay on the world already says "marked"; this line gives
+            // the numeric percent for at-a-glance "how soon".
+            if (s.MarkedForDemolition)
+            {
+                int demPct = 100 * s.DemolitionProgress / Sporeholm.World.StructureSlot.BuildProgressTarget;
+                _content.AddChild(MakeLabel(
+                    $"  Marked for demolition · {demPct} % torn down",
+                    10, new Godot.Color(0.85f, 0.30f, 0.25f, 1f)));   // red-tinted to match the overlay
             }
         }
     }
@@ -392,15 +412,30 @@ public partial class TilePropertiesPanel : Control
         };
         picker.AddThemeFontSizeOverride("font_size", 10);
         picker.AddItem("(pick recipe)", -1);
+        // v0.6.2 (Phase 5.6 ship) — filter recipes by station compatibility.
+        // Workbench tile only shows Workbench recipes; CookingTable tile only
+        // shows CookingTable recipes. Prevents the player from queueing a
+        // CookMeal bill on a Workbench (it would never get picked up by the
+        // BillSystem's station-match check).
+        var stationStructure = map.GetStructure(tx, ty).Type;
+        var allowedStation = stationStructure == Sporeholm.World.StructureType.CookingTable
+            ? Sporeholm.Simulation.Crafting.RecipeStation.CookingTable
+            : Sporeholm.Simulation.Crafting.RecipeStation.Workbench;
         for (int i = 0; i < Sporeholm.Simulation.Crafting.RecipeRegistry.All.Length; i++)
         {
             var rec = Sporeholm.Simulation.Crafting.RecipeRegistry.All[i];
+            if (rec.Station != allowedStation) continue;
             picker.AddItem($"{rec.DisplayName} — {rec.PrimarySkill} ≥{rec.SkillMinimum}", i);
         }
         picker.ItemSelected += (long sel) =>
         {
+            // v0.6.2 (Phase 5.6 ship) — use the picker's item ID (set to the
+            // RecipeRegistry index when AddItem was called) instead of the
+            // picker position. Pre-fix this assumed all recipes were in the
+            // picker so position-1 == recipe-index; once station filtering
+            // started skipping recipes, that assumption broke.
             if (sel <= 0) return;
-            int idx = (int)sel - 1;
+            int idx = picker.GetItemId((int)sel);
             if (idx < 0 || idx >= Sporeholm.Simulation.Crafting.RecipeRegistry.All.Length) return;
             var rec = Sporeholm.Simulation.Crafting.RecipeRegistry.All[idx];
             map.AddWorkbenchBill(tx, ty, new Sporeholm.Simulation.Crafting.Bill
@@ -460,7 +495,7 @@ public partial class TilePropertiesPanel : Control
         // Storage / Generic) alongside id + tile count + roofed status.
         _content.AddChild(MakeLabel($"  Room #{room.Id} · {room.Type} · {room.TileCount} tiles · roofed", 10, DarkWood));
         _content.AddChild(MakeLabel(
-            $"  Floor: {room.FloorCount} · Furniture: {room.FurnitureCount} · Hearths: {room.HearthCount}",
+            $"  Floor: {room.FloorCount} · Furniture: {room.FurnitureCount} · Bonfires: {room.BonfireCount}",
             10, DarkWood));
         string beautyTier = room.BeautyScore >= 10 ? " (Pretty +3 mood)"
                          : room.BeautyScore < -3 ? " (Ugly -3 mood)"

@@ -97,6 +97,15 @@ namespace Sporeholm.Simulation
 		// to MessageLog under the new Starving category.
 		public ConcurrentQueue<ShroompSnapshot> PendingStarvationStarts { get; } = new();
 
+		// v0.6.2 audit Fix 5 — entity-removed events for UI cleanup. Mirrors
+		// PendingDeaths for shroomps. Enqueued when EntitySystem prunes dead
+		// entities + when an entity despawns (flee out the map edge, etc.).
+		// SimulationManager drains + emits EntityRemoved; GameController
+		// auto-closes the EntityCardPanel if the removed entity was the
+		// currently-selected one. Carries the entity Guid as the payload —
+		// snapshot would be stale by the time the event fires.
+		public ConcurrentQueue<System.Guid> PendingEntityRemovals { get; } = new();
+
 		// Full snapshot of the shroomp at the moment of birth
 		public ConcurrentQueue<ShroompSnapshot> PendingBirths { get; } = new();
 
@@ -640,6 +649,11 @@ namespace Sporeholm.Simulation
 				List<Sporeholm.Simulation.Entities.Entity> entWork;
 				lock (_entityLock)
 				{
+					// v0.6.2 audit Fix 5 — enqueue removal events for every entity
+					// about to be pruned. UI uses these to auto-close EntityCardPanel.
+					for (int i = 0; i < _entities.Count; i++)
+						if (!_entities[i].IsAlive)
+							PendingEntityRemovals.Enqueue(_entities[i].Id);
 					_entities.RemoveAll(e => !e.IsAlive);
 					entWork = new List<Sporeholm.Simulation.Entities.Entity>(_entities);
 				}

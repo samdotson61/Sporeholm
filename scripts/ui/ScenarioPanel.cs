@@ -1361,7 +1361,7 @@ internal static class ItemCatalog
             Description = "Quality-of-life consumables.",
             Items = new Entry[]
             {
-                new("misc.firekit",  "Fire-starting kit", "Lets the colony spark a hearth fast.", 5),
+                new("misc.firekit",  "Fire-starting kit", "Lets the colony spark a bonfire fast.", 5),
                 new("misc.rope.50",  "50-ft rope",        "General-purpose climbing / hauling.", 10),
                 new("misc.lantern",  "Oil lantern",       "Visibility in caves; small heat source (Phase 10 weather).", 8),
             },

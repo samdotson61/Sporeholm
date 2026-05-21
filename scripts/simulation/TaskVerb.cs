@@ -29,6 +29,7 @@ namespace Sporeholm.Simulation
             TaskType.DoBill         => "Crafting",   // v0.5.84s — Phase 5.5 bills
             TaskType.Build          => "Building",
             TaskType.BuildHaul      => "Hauling materials",   // v0.5.60
+            TaskType.Demolish       => "Demolishing",   // v0.6.2 — demolish-as-task
             TaskType.Research       => "Researching",
             TaskType.Guard          => "Guarding",
             // Tier 3 — idle (v0.3.43 rewrite)

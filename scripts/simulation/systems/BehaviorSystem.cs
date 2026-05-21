@@ -1085,6 +1085,15 @@ namespace Sporeholm.Simulation.Systems
                         s.CurrentTask = SelectTask(s, map, resources, rng, shroomps, hourOfDay);
                     }
 
+                    // v0.6.2 — reset the per-task progress accumulator on
+                    // every fresh assignment. Currently consumed by
+                    // CookSystem auto-cook (Phase 5.6) for Bonfire-speed
+                    // scaling; any future tick-accumulating per-task system
+                    // (e.g. demolish, scholar study) reads + resets the
+                    // same field, so the reset belongs here at the central
+                    // assignment point not in every system.
+                    s.TaskProgressTicks = 0;
+
                     // v0.4.4 — auto-equip the dominant-hand tool that
                     // matches this task's preferred-tools list. Magic
                     // grab from the colony pool until Phase 5 stockpile
@@ -2803,6 +2812,24 @@ namespace Sporeholm.Simulation.Systems
                     }
                 }
 
+                // v0.6.2 — Demolish-as-task. Construct-priority shroomps
+                // pick up MarkedForDemolition tiles when no Build work is
+                // available (the explicit build queue still wins on
+                // priority — see canFrameForBuild above). Returns null if
+                // no marked-and-reachable structure exists.
+                if (jobOk("Construct"))
+                {
+                    var demT = DemolishSystem.SelectTarget(s, map, resources);
+                    if (demT.HasValue)
+                    {
+                        var c = demT.Value;
+                        return new BehaviorTask(c.Type, c.Target,
+                            (isCrafter ? 50f : 35f) + jobTilt("Construct"),
+                            interruptible: c.Interruptible,
+                            tileX: c.TargetTileX, tileY: c.TargetTileY);
+                    }
+                }
+
                 // v0.5.22 (Phase 5E) — Cook task. Crafters get the priority
                 // boost (matches Build), other roles cook as fallback when
                 // no Crafter is around. Fires when a Workbench exists +
@@ -3300,7 +3327,7 @@ namespace Sporeholm.Simulation.Systems
         // Observe: pick a nearby visible tile, walk to a tile *near* it (not
         // onto it), and stand looking. For now this is functionally a
         // short-radius wander with a much longer linger; once Phase 4
-        // introduces points-of-interest (workshops, hearths, item piles),
+        // introduces points-of-interest (workshops, bonfires, item piles),
         // Observe can prefer those tiles.
         // v0.5.36 — if a ShroomBoard exists, the shroomp routes to it
         // (Cerebral recreation). Falls back to the random observe-tile
@@ -4455,8 +4482,20 @@ namespace Sporeholm.Simulation.Systems
                     HaulSystem.Apply(s, t, map, r);
                     break;
                 case TaskType.Cook:
+                    // v0.6.2 audit Fix 2 — CookSystem.Apply now manages its
+                    // own CurrentTask lifecycle (multi-tick progress on the
+                    // shroomp's TaskProgressTicks accumulator; clears on
+                    // completion). Don't clobber it here or the cook never
+                    // finishes — the task would re-fire selection every
+                    // tick instead of accumulating.
                     CookSystem.Apply(s, t, map, r);
-                    s.CurrentTask = null;
+                    break;
+                // v0.6.2 — Demolish-as-task. Like Build, DemolishSystem.Apply
+                // accumulates per-tick DemolitionProgress on the StructureSlot
+                // itself and manages CurrentTask lifecycle (clears on
+                // completion / when the marker is gone). Don't clobber here.
+                case TaskType.Demolish:
+                    DemolishSystem.Apply(s, t, map, r);
                     break;
                 // v0.5.84s — Phase 5.5 bills dispatch.
                 case TaskType.DoBill:
@@ -4684,12 +4723,14 @@ namespace Sporeholm.Simulation.Systems
                                     StructureType.DoorPlanned       => StructureType.Door,
                                     StructureType.ShelfPlanned      => StructureType.Shelf,       // v0.5.21
                                     StructureType.WorkbenchPlanned  => StructureType.Workbench,   // v0.5.22
-                                    StructureType.HearthPlanned     => StructureType.Hearth,      // v0.5.24
+                                    StructureType.BonfirePlanned     => StructureType.Bonfire,      // v0.5.24
                                     StructureType.BedPlanned        => StructureType.Bed,         // v0.5.35
                                     StructureType.MeditationShrinePlanned => StructureType.MeditationShrine,   // v0.5.36
                                     StructureType.ShroomBoardPlanned      => StructureType.ShroomBoard,        // v0.5.36
                                     StructureType.GossipBenchPlanned      => StructureType.GossipBench,        // v0.5.36
                                     StructureType.TablePlanned      => StructureType.Table,       // v0.5.37
+                                    StructureType.TorchPlanned      => StructureType.Torch,       // v0.5.84t — was missing, completed as Floor
+                                    StructureType.CookingTablePlanned => StructureType.CookingTable, // v0.6.2 (Phase 5.6)
                                     _                               => StructureType.Floor,       // FloorPlanned + safety default
                                 };
                                 built.BuildProgress = StructureSlot.BuildProgressTarget;

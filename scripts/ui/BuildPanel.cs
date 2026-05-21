@@ -11,7 +11,7 @@ namespace Sporeholm.UI
     //
     // v0.5.19 ships three tools — Wall / Floor / Demolish. v0.5.20+ will
     // extend with Door (after pathfinding cost-tier), Furniture (after
-    // ItemRegistry furniture-subtype block lands), Workbench / Hearth
+    // ItemRegistry furniture-subtype block lands), Workbench / Bonfire
     // (after Bills system in v0.5.21).
     //
     // Design: same tool-routing pattern as ZonesPanel (v0.5.1) — buttons
@@ -27,13 +27,14 @@ namespace Sporeholm.UI
         private Button              _doorBtn     = null!;   // v0.5.20
         private Button              _shelfBtn    = null!;   // v0.5.21
         private Button              _workbenchBtn = null!;  // v0.5.32 (was stub)
-        private Button              _hearthBtn   = null!;   // v0.5.32 (was stub)
+        private Button              _bonfireBtn   = null!;   // v0.5.32 (was stub)
         private Button              _bedBtn      = null!;   // v0.5.35
         private Button              _shrineBtn   = null!;   // v0.5.36
         private Button              _boardBtn    = null!;   // v0.5.36
         private Button              _benchBtn    = null!;   // v0.5.36
         private Button              _tableBtn    = null!;   // v0.5.37
         private Button              _torchBtn    = null!;   // v0.5.84t
+        private Button              _cookingTableBtn = null!; // v0.6.2 (Phase 5.6)
         private Button              _demolishBtn = null!;
         // v0.5.32 — material picker chips. One per StructureMat option.
         // Visibility + enabled state filtered per-tool by RefreshMaterialChips.
@@ -47,7 +48,15 @@ namespace Sporeholm.UI
         // doors). Sam: "We should have a 'Build' tab like Rimworld's
         // 'Architect' tab that opens up with sub-categories... like
         // 'Orders', 'Zones', 'Structure', 'Furniture', etc."
-        private enum SubCat { Structure, Furniture, Joy }
+        // v0.6.2 (Phase 5.6 ship) — Production sub-cat split off Furniture.
+        // Production hosts the workstations that DRIVE production loops:
+        // Workbench (Crafting recipes) + Cooking Table (Cooking recipes).
+        // Phase 11 tier additions (Forge / Brewery / Loom / Magic Altar)
+        // will land here too. Furniture keeps the passive interior pieces
+        // (Bed / Table / Shelf / Bonfire / Torch). Bonfire stays in Furniture
+        // because its primary purpose is heat — its 50%-speed cooking
+        // fallback is a Step-5 CookSystem feature, not a UI categorisation.
+        private enum SubCat { Structure, Production, Furniture, Joy }
         private SubCat _subCat = SubCat.Structure;
         private HBoxContainer _subCatRow  = null!;
         private HBoxContainer _toolsRow   = null!;
@@ -184,8 +193,14 @@ namespace Sporeholm.UI
 
             AddSubCatChip(SubCat.Structure, "🧱 Structure",
                 "Walls, floors, doors — the basic shell of any room. Click to filter the tool row to structural builds.");
+            // v0.6.2 (Phase 5.6 ship) — Production tab. Holds workstations that
+            // drive recipe loops. Workbench (Crafting) and Cooking Table
+            // (Cooking) for now; Forge / Brewery / Loom / Magic Altar land
+            // here in Phase 11 without retrofitting the Build panel.
+            AddSubCatChip(SubCat.Production, "⚙ Production",
+                "Workbench, Cooking Table — workstations where shroomps run crafting and cooking recipes. Bills queued via the tile-properties panel.");
             AddSubCatChip(SubCat.Furniture, "🪑 Furniture",
-                "Beds, tables, shelves, workbenches, hearths — interior pieces that make a room functional.");
+                "Beds, tables, shelves, bonfires, torches — interior pieces that make a room functional. Workstations live in the Production tab.");
             AddSubCatChip(SubCat.Joy,       "🎭 Joy",
                 "Meditation shrines, shroom boards, gossip benches — recreation furniture that restores Joy faster than freelance idle.");
 
@@ -217,19 +232,31 @@ namespace Sporeholm.UI
             _shelfBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.BuildShelf);
             row.AddChild(_shelfBtn);
 
-            // v0.5.32 — Workbench + Hearth promoted from stub to live tools
+            // v0.5.32 — Workbench + Bonfire promoted from stub to live tools
             // (the underlying SimulationManager + StructureOverlay handling
             // shipped in v0.5.22 / v0.5.24; only the BuildPanel button was
             // still a stub).
+            // v0.6.2 (Phase 5.6 ship) — Workbench moved from Furniture to
+            // Production. Cooking responsibility moved to the new Cooking
+            // Table; Workbench now drives Crafting recipes only.
             _workbenchBtn = MakeButton("🔨 Workbench",
-                tips ? "Plan a workbench. Crafters cook + craft here (Phase 5E recipes)." : "");
+                tips ? "Plan a workbench. Crafters run Crafting recipes here (tools, weapons, cloth, knives, planks). Cooking moved to the Cooking Table (Phase 5.6)." : "");
             _workbenchBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.BuildWorkbench);
             row.AddChild(_workbenchBtn);
 
-            _hearthBtn = MakeButton("🔥 Hearth",
-                tips ? "Plan a hearth. Warms the room + boosts cooking; needed for cold-climate colonies." : "");
-            _hearthBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.BuildHearth);
-            row.AddChild(_hearthBtn);
+            // v0.6.2 (Phase 5.6 ship) — Cooking Table. New dedicated cooking
+            // workstation for the Cooking skill split. Cooks meals at full
+            // speed; Bonfire becomes a half-speed fallback so a bare colony
+            // can still cook before building a proper table.
+            _cookingTableBtn = MakeButton("🍳 Cook Table",
+                tips ? "Plan a Cooking Table. Cooks run Cooking recipes (Cook Meal, Juice Berries, future butchery) here at full speed. Bonfire is a fallback at half speed." : "");
+            _cookingTableBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.BuildCookingTable);
+            row.AddChild(_cookingTableBtn);
+
+            _bonfireBtn = MakeButton("🔥 Bonfire",
+                tips ? "Plan a bonfire. Warms the room (+10°C per bonfire) and serves as a half-speed cooking fallback when no Cooking Table is built. Needed for cold-climate colonies." : "");
+            _bonfireBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.BuildBonfire);
+            row.AddChild(_bonfireBtn);
 
             // v0.5.84t — Torch. Cheap floor-tile decoration + light source +
             // small heat (+2°C per torch). Built with 1 wood unit.
@@ -266,14 +293,19 @@ namespace Sporeholm.UI
             _tableBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.BuildTable);
             row.AddChild(_tableBtn);
 
+            // v0.6.2 — Demolish-as-task. Painting a built structure marks
+            // it for tear-down (red X overlay); a Crafter walks to it and
+            // performs demolition work over multiple ticks. Refund is
+            // 20%-60% based on Construction skill (skilled crafters salvage
+            // more). Re-painting the same tile cancels the demolition mark.
             _demolishBtn = MakeButton("⛏ Demolish",
-                tips ? "Remove built walls / floors / doors / shelves and cancel pending blueprints. 50 % material refund for built structures." : "");
+                tips ? "Paint structures for demolition. A Crafter walks to the tile and performs the tear-down (Construction skill drives speed). Refund 20%-60% of the material cost based on Construction skill. Re-paint to cancel. Blueprints cancel instantly + refund any delivered materials." : "");
             _demolishBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.Demolish);
             row.AddChild(_demolishBtn);
 
             // v0.5.32 — material picker chips. Each chip is a toggle
             // button bound to a StructureMat. Filtered per-tool: walls/
-            // floors/hearths accept Stone + every wood sub-material; doors/
+            // floors/bonfires accept Stone + every wood sub-material; doors/
             // shelves/workbenches accept wood sub-materials only.
             // v0.5.43 — _matRow was created at the top of BuildContent
             // (cascade-up layout puts it at the top of the panel). Here
@@ -289,7 +321,7 @@ namespace Sporeholm.UI
             // v0.5.70 — per-stone subtype chips. Each consumes its own
             // MaterialKey Stone/<SubType> from the colony pool (strict
             // consume via StructureMatMeta.ConsumeSubType). RimWorld-parity
-            // material picker for stone walls / floors / hearths.
+            // material picker for stone walls / floors / bonfires.
             AddMaterialChip(Sporeholm.World.StructureMat.Granite,     "🪨 Granite",     tips);
             AddMaterialChip(Sporeholm.World.StructureMat.Limestone,   "◻ Limestone",   tips);
             AddMaterialChip(Sporeholm.World.StructureMat.Marble,      "◼ Marble",      tips);
@@ -373,9 +405,12 @@ namespace Sporeholm.UI
             _wallBtn     .Visible = _subCat == SubCat.Structure;
             _floorBtn    .Visible = _subCat == SubCat.Structure;
             _doorBtn     .Visible = _subCat == SubCat.Structure;
+            // v0.6.2 (Phase 5.6 ship) — Workbench + CookingTable in Production.
+            _workbenchBtn   .Visible = _subCat == SubCat.Production;
+            _cookingTableBtn.Visible = _subCat == SubCat.Production;
+            // Furniture: shelf / bonfire / bed / table / torch (interior pieces).
             _shelfBtn    .Visible = _subCat == SubCat.Furniture;
-            _workbenchBtn.Visible = _subCat == SubCat.Furniture;
-            _hearthBtn   .Visible = _subCat == SubCat.Furniture;
+            _bonfireBtn   .Visible = _subCat == SubCat.Furniture;
             _bedBtn      .Visible = _subCat == SubCat.Furniture;
             _tableBtn    .Visible = _subCat == SubCat.Furniture;
             // v0.5.84t — Torch lives in Furniture sub-cat (cheap floor-tile
@@ -417,7 +452,7 @@ namespace Sporeholm.UI
         }
 
         // Filters which material chips are visible/enabled based on the
-        // active Build tool. Walls / Floors / Hearths accept any material;
+        // active Build tool. Walls / Floors / Bonfires accept any material;
         // Doors / Shelves / Workbenches / Beds / Joy / Tables are wood-only
         // (cosmetically — the family resolves through StructureMatMeta.
         // ConsumeFamily).
@@ -431,18 +466,19 @@ namespace Sporeholm.UI
                 t == DesignationToolbar.Tool.BuildDoor              ||
                 t == DesignationToolbar.Tool.BuildShelf             ||
                 t == DesignationToolbar.Tool.BuildWorkbench         ||
-                t == DesignationToolbar.Tool.BuildHearth            ||
+                t == DesignationToolbar.Tool.BuildBonfire            ||
                 t == DesignationToolbar.Tool.BuildBed               ||
                 t == DesignationToolbar.Tool.BuildMeditationShrine  ||
                 t == DesignationToolbar.Tool.BuildShroomBoard       ||
                 t == DesignationToolbar.Tool.BuildGossipBench       ||
                 t == DesignationToolbar.Tool.BuildTable              ||
-                t == DesignationToolbar.Tool.BuildTorch;
+                t == DesignationToolbar.Tool.BuildTorch              ||
+                t == DesignationToolbar.Tool.BuildCookingTable;       // v0.6.2 (Phase 5.6)
             _matRow.Visible = isBuildTool;
             if (!isBuildTool) return;
 
             // v0.5.84h — stone-family material chips are now offered for
-            // ALL build tools, not just wall/floor/hearth. Sam: "all
+            // ALL build tools, not just wall/floor/bonfire. Sam: "all
             // furniture, doors, and joy objects should be able to be
             // built with stone subtypes." Doors/Shelves/Workbenches/
             // Beds/MeditationShrine/ShroomBoard/GossipBench/Table all
@@ -491,7 +527,7 @@ namespace Sporeholm.UI
         private Button MakeButton(string text, string tooltip)
         {
             // v0.5.55 — tool button min-width 140→100 + font 14→12. The
-            // Furniture sub-cat shows 6 buttons (Shelf+Workbench+Hearth+
+            // Furniture sub-cat shows 6 buttons (Shelf+Workbench+Bonfire+
             // Bed+Table+Demolish) — at 140 the row needed 870 logical px
             // which overflowed the panel's host area on the bottom-right.
             // At 100 the row fits in ~620 logical px including separations.
@@ -547,8 +583,8 @@ namespace Sporeholm.UI
             // press the one that matches the toolbar's ActiveTool.
             Button[] all = {
                 _wallBtn, _floorBtn, _doorBtn, _shelfBtn, _workbenchBtn,
-                _hearthBtn, _bedBtn, _shrineBtn, _boardBtn, _benchBtn,
-                _tableBtn, _demolishBtn,
+                _bonfireBtn, _bedBtn, _shrineBtn, _boardBtn, _benchBtn,
+                _tableBtn, _torchBtn, _cookingTableBtn, _demolishBtn,   // v0.6.2 (Phase 5.6)
             };
             foreach (var b in all)
             {
@@ -563,13 +599,14 @@ namespace Sporeholm.UI
                 DesignationToolbar.Tool.BuildDoor              => _doorBtn,
                 DesignationToolbar.Tool.BuildShelf             => _shelfBtn,
                 DesignationToolbar.Tool.BuildWorkbench         => _workbenchBtn,
-                DesignationToolbar.Tool.BuildHearth            => _hearthBtn,
+                DesignationToolbar.Tool.BuildBonfire            => _bonfireBtn,
                 DesignationToolbar.Tool.BuildBed               => _bedBtn,
                 DesignationToolbar.Tool.BuildMeditationShrine  => _shrineBtn,
                 DesignationToolbar.Tool.BuildShroomBoard       => _boardBtn,
                 DesignationToolbar.Tool.BuildGossipBench       => _benchBtn,
                 DesignationToolbar.Tool.BuildTable             => _tableBtn,
                 DesignationToolbar.Tool.BuildTorch             => _torchBtn,   // v0.5.84t
+                DesignationToolbar.Tool.BuildCookingTable      => _cookingTableBtn, // v0.6.2 (Phase 5.6)
                 DesignationToolbar.Tool.Demolish               => _demolishBtn,
                 _                                              => null,
             };

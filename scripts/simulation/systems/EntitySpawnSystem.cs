@@ -16,7 +16,7 @@ namespace Sporeholm.Simulation.Systems
     //   2. Ambient respawn (MaintainPopulation): called occasionally
     //      (once per in-game day) to refill species that fell below half
     //      their PopulationCapPerMap. Picks a random biome-appropriate
-    //      passable tile away from the colony hearth and spawns a small
+    //      passable tile away from the colony bonfire and spawns a small
     //      group. Caps at PopulationCapPerMap so colonies never get
     //      overwhelmed by ambient fauna.
     //

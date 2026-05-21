@@ -128,7 +128,7 @@ public partial class SaveManager : Node
 		public List<StoneTileDelta>? StoneTileDeltas { get; init; } = null;
 
 		// v0.5.73 — built structures + in-progress blueprints (walls,
-		// floors, doors, shelves, workbenches, hearths, beds, joy
+		// floors, doors, shelves, workbenches, bonfires, beds, joy
 		// furniture, tables). Sam: "Ensure all structures, items,
 		// inventories, etc. are saved/loaded. Structures disappear on
 		// save." Pre-v0.5.73 nothing serialised StructureSlot[,].
@@ -202,7 +202,12 @@ public partial class SaveManager : Node
 		// which ApplyStructureDelta treats as "no floor beneath" (the
 		// existing v0.5.73 behaviour).
 		string? FloorBeneath = null,
-		bool    HasFloorBeneath = false);
+		bool    HasFloorBeneath = false,
+		// v0.6.2 — demolish-as-task. Pre-v0.6.2 saves default both fields
+		// to (false, 0) — no marked structures + no in-progress demolitions,
+		// which matches pre-rename behaviour.
+		bool    MarkedForDemolition = false,
+		ushort  DemolitionProgress  = 0);
 
 	// v0.5.84s — bills for one workbench tile (Phase 5.5).
 	public record WorkbenchBillsSave(
@@ -434,7 +439,9 @@ public partial class SaveManager : Node
 				s.Slot.MaterialsDelivered,
 				s.Slot.Quality.ToString(),
 				FloorBeneath:    s.Slot.HasFloorBeneath ? s.Slot.FloorBeneath.ToString() : null,
-				HasFloorBeneath: s.Slot.HasFloorBeneath))
+				HasFloorBeneath: s.Slot.HasFloorBeneath,
+				MarkedForDemolition: s.Slot.MarkedForDemolition,
+				DemolitionProgress:  s.Slot.DemolitionProgress))
 			.ToList();
 
 		var stockpileZones = localMap?.SnapshotStockpileZonesForSave()

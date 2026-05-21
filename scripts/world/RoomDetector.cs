@@ -71,13 +71,14 @@ namespace Sporeholm.World
                 int tileCount = 0;
                 int floorCount = 0;
                 int furnitureCount = 0;
-                int hearthCount = 0;
+                int bonfireCount = 0;
                 int corpseCount = 0;   // beauty negative — only if items registered
                 // v0.5.84t — per-furniture counts for RoomType inference.
                 int bedCount       = 0;
                 int workbenchCount = 0;
                 int shelfCount     = 0;
                 int torchCount     = 0;   // v0.5.84t
+                int cookingTableCount = 0;   // v0.6.2 (Phase 5.6)
 
                 // First pass: assign a temporary marker (use the next id),
                 // we'll downgrade to OutdoorRoomId at the end if it touched the edge.
@@ -107,7 +108,7 @@ namespace Sporeholm.World
                         case StructureType.Floor:        floorCount++;     floorBeauty += qMul;     break;
                         case StructureType.Shelf:        furnitureCount++; shelfCount++;     furnitureBeauty += qMul; break;
                         case StructureType.Workbench:    furnitureCount++; workbenchCount++; furnitureBeauty += qMul; break;
-                        case StructureType.Hearth:       furnitureCount++; hearthCount++; furnitureBeauty += qMul; break;
+                        case StructureType.Bonfire:       furnitureCount++; bonfireCount++; furnitureBeauty += qMul; break;
                         // v0.6.0 — Doors are room boundaries (treated like
                         // walls for flood-fill), so a door tile never carries
                         // a RoomId and this case is unreachable. Beauty
@@ -127,6 +128,12 @@ namespace Sporeholm.World
                         // small beauty add. TorchCount tracked separately so
                         // Room.TemperatureOffsetC adds +2°C per torch.
                         case StructureType.Torch:            furnitureCount++; torchCount++; furnitureBeauty += qMul; break;
+                        // v0.6.2 (Phase 5.6 ship) — Cooking Table promotes
+                        // the room to Kitchen the same way a Bonfire does, so
+                        // a colony can build a dedicated kitchen without
+                        // needing a Bonfire in the room (it just gets the
+                        // Phase 5.6 Cooking-Table-driven cooks instead).
+                        case StructureType.CookingTable:     furnitureCount++; cookingTableCount++; furnitureBeauty += qMul; break;
                     }
 
                     // 4-neighbour expansion. Diagonal not used (keeps room
@@ -170,12 +177,15 @@ namespace Sporeholm.World
                     furnitureBeauty += doorBorderBeauty;
                     // v0.5.84t — infer RoomType from furniture mix.
                     // Priority: Bedroom > Kitchen > Workshop > Storage > Generic.
+                    // v0.6.2 (Phase 5.6 ship) — CookingTable also promotes to
+                    // Kitchen (the new dedicated cooking station fills the
+                    // same role as Bonfire in the kitchen-inference rule).
                     RoomType type;
-                    if      (bedCount > 0)       type = RoomType.Bedroom;
-                    else if (hearthCount > 0)    type = RoomType.Kitchen;
-                    else if (workbenchCount > 0) type = RoomType.Workshop;
-                    else if (shelfCount > 0)     type = RoomType.Storage;
-                    else                         type = RoomType.Generic;
+                    if      (bedCount > 0)                              type = RoomType.Bedroom;
+                    else if (bonfireCount > 0 || cookingTableCount > 0)  type = RoomType.Kitchen;
+                    else if (workbenchCount > 0)                        type = RoomType.Workshop;
+                    else if (shelfCount > 0)                            type = RoomType.Storage;
+                    else                                                type = RoomType.Generic;
 
                     map.RegisterRoom(new Room
                     {
@@ -183,7 +193,7 @@ namespace Sporeholm.World
                         TileCount       = tileCount,
                         FloorCount      = floorCount,
                         FurnitureCount  = furnitureCount,
-                        HearthCount     = hearthCount,
+                        BonfireCount     = bonfireCount,
                         CorpseCount     = corpseCount,
                         FurnitureBeauty = furnitureBeauty,
                         FloorBeauty     = floorBeauty,
@@ -191,6 +201,7 @@ namespace Sporeholm.World
                         WorkbenchCount  = workbenchCount,
                         ShelfCount      = shelfCount,
                         TorchCount      = torchCount,
+                        CookingTableCount = cookingTableCount,   // v0.6.2 (Phase 5.6)
                         Type            = type,
                     });
                     nextRoomId++;
@@ -260,9 +271,9 @@ namespace Sporeholm.World
     // Per-room metadata. Beauty score is derived from contents — RimWorld's
     // pattern: positive contributions from furniture / floor / decoration;
     // negative from corpses / debris. v0.5.23 ships a simple model:
-    //   • +1 per furniture piece (Shelf, Workbench, Hearth, Door)
+    //   • +1 per furniture piece (Shelf, Workbench, Bonfire, Door)
     //   • +0.5 per Floor tile (laid floor better than dirt)
-    //   • +5 per Hearth (warm, cosy)
+    //   • +5 per Bonfire (warm, cosy)
     //   • -3 per CorpseCount (placeholder; corpses-in-room detection
     //     deferred until v0.6 thought integration)
     // Beauty thresholds for the player-facing thought tier:
@@ -278,8 +289,8 @@ namespace Sporeholm.World
         Outdoor   = 0,
         Generic   = 1,
         Bedroom   = 2,   // has at least one Bed
-        Kitchen   = 3,   // has Hearth(s), no Bed
-        Workshop  = 4,   // has Workbench(s), no Bed/Hearth
+        Kitchen   = 3,   // has Bonfire(s), no Bed
+        Workshop  = 4,   // has Workbench(s), no Bed/Bonfire
         Storage   = 5,   // only Shelves (or only floors + Shelves)
     }
 
@@ -289,7 +300,7 @@ namespace Sporeholm.World
         public int    TileCount;
         public int    FloorCount;
         public int    FurnitureCount;
-        public int    HearthCount;
+        public int    BonfireCount;
         public int    CorpseCount;
         // v0.5.84t — additional per-furniture counts for room-type inference.
         public int    BedCount;
@@ -299,6 +310,10 @@ namespace Sporeholm.World
         // TemperatureOffsetC). Light: tracked for future glow-grid system
         // (Phase 10) — no visual effect today.
         public int    TorchCount;
+        // v0.6.2 (Phase 5.6 ship) — Cooking Table count per room. Promotes
+        // the room to Kitchen and is read by CookSystem when scanning for
+        // a preferred cook target inside built rooms.
+        public int    CookingTableCount;
         // v0.5.84t — derived room type (Bedroom / Kitchen / Workshop / Storage /
         // Generic). Outdoor room (Id == OutdoorRoomId) always reports Outdoor.
         // Computed at Rebuild from per-furniture counts.
@@ -313,12 +328,12 @@ namespace Sporeholm.World
         public float FurnitureBeauty;
         public float FloorBeauty;
 
-        // BeautyScore folds quality-weighted furniture + floor + hearths
-        // — minus corpses. Hearths get a flat +5 each on top of their
-        // quality contribution because a hearth's beauty is in its
+        // BeautyScore folds quality-weighted furniture + floor + bonfires
+        // — minus corpses. Bonfires get a flat +5 each on top of their
+        // quality contribution because a bonfire's beauty is in its
         // function ("warm, cosy") not its build polish.
         public float BeautyScore =>
-            FurnitureBeauty + FloorBeauty * 0.5f + HearthCount * 5f - CorpseCount * 3f;
+            FurnitureBeauty + FloorBeauty * 0.5f + BonfireCount * 5f - CorpseCount * 3f;
 
         public bool IsOutdoor => Id == RoomDetector.OutdoorRoomId;
 
@@ -332,8 +347,8 @@ namespace Sporeholm.World
 
         // v0.5.24 (Phase 5G — Roadmap §5.12) — Temperature. Simple model:
         // outdoor rooms inherit biome ambient (15 °C default). Indoor
-        // rooms get a baseline +2 °C insulation, plus +10 °C per Hearth.
-        // A room with one Hearth at 15 °C ambient sits at 27 °C — warm
+        // rooms get a baseline +2 °C insulation, plus +10 °C per Bonfire.
+        // A room with one Bonfire at 15 °C ambient sits at 27 °C — warm
         // and comfortable. Per-tile diffusion (RimWorld parity) is
         // deferred to v0.6 since per-room is enough for the meaningful
         // gameplay coupling (item decay, shroomp comfort).
@@ -344,7 +359,7 @@ namespace Sporeholm.World
         // combine with ambient.
         public float TemperatureOffsetC =>
             IsOutdoor ? 0f
-                      // v0.5.84t — torches add +2°C each on top of Hearth contribution.
-                      : 2f + (HearthCount * 10f) + (TorchCount * 2f);
+                      // v0.5.84t — torches add +2°C each on top of Bonfire contribution.
+                      : 2f + (BonfireCount * 10f) + (TorchCount * 2f);
     }
 }

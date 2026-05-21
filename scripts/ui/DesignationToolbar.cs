@@ -42,8 +42,8 @@ public partial class DesignationToolbar : Control
         BuildShelf = DesignationTool.BuildShelf,
         // v0.5.22 (Phase 5E) — Workbench.
         BuildWorkbench = DesignationTool.BuildWorkbench,
-        // v0.5.24 (Phase 5G) — Hearth.
-        BuildHearth    = DesignationTool.BuildHearth,
+        // v0.5.24 (Phase 5G) — Bonfire.
+        BuildBonfire    = DesignationTool.BuildBonfire,
         // v0.5.35 (Phase 5 arc) — Bed.
         BuildBed       = DesignationTool.BuildBed,
         // v0.5.36 (Phase 5 arc) — Joy furniture (recreation).
@@ -54,6 +54,8 @@ public partial class DesignationToolbar : Control
         BuildTable     = DesignationTool.BuildTable,
         // v0.5.84t — Torch. Cheap floor-tile decoration; +2°C per torch.
         BuildTorch     = DesignationTool.BuildTorch,
+        // v0.6.2 (Phase 5.6 ship) — Cooking Table painter.
+        BuildCookingTable = DesignationTool.BuildCookingTable,
         // v0.5.25 (Phase 5C polish) — Allowed-area painter (per-shroomp).
         AllowedArea    = DesignationTool.AllowedArea,
         Demolish   = DesignationTool.Demolish,
@@ -65,7 +67,7 @@ public partial class DesignationToolbar : Control
     // v0.5.32 — fires when the player picks a Build material from the
     // BuildPanel chip row. DesignateRect reads ActiveBuildMaterial when
     // placing blueprints. Defaults to Stone (matches pre-v0.5.32 hardcoded
-    // wall/floor/hearth default); BuildPanel switches to a wood variant
+    // wall/floor/bonfire default); BuildPanel switches to a wood variant
     // automatically when the player picks a wood-only tool (Door/Shelf/
     // Workbench), so the picker never has to handle "no material chosen".
     [Signal] public delegate void BuildMaterialChangedEventHandler(int newMat);
@@ -101,13 +103,14 @@ public partial class DesignationToolbar : Control
         Tool.BuildDoor  => DesignationTool.BuildDoor,   // v0.5.20
         Tool.BuildShelf => DesignationTool.BuildShelf,  // v0.5.21
         Tool.BuildWorkbench => DesignationTool.BuildWorkbench,   // v0.5.22
-        Tool.BuildHearth    => DesignationTool.BuildHearth,      // v0.5.24
+        Tool.BuildBonfire    => DesignationTool.BuildBonfire,      // v0.5.24
         Tool.BuildBed       => DesignationTool.BuildBed,         // v0.5.35
         Tool.BuildMeditationShrine => DesignationTool.BuildMeditationShrine,   // v0.5.36
         Tool.BuildShroomBoard      => DesignationTool.BuildShroomBoard,        // v0.5.36
         Tool.BuildGossipBench      => DesignationTool.BuildGossipBench,        // v0.5.36
         Tool.BuildTable     => DesignationTool.BuildTable,       // v0.5.37
         Tool.BuildTorch     => DesignationTool.BuildTorch,       // v0.5.84t
+        Tool.BuildCookingTable => DesignationTool.BuildCookingTable, // v0.6.2 (Phase 5.6)
         Tool.AllowedArea    => DesignationTool.AllowedArea,      // v0.5.25
         Tool.Demolish   => DesignationTool.Demolish,    // v0.5.19
         Tool.Remove    => DesignationTool.Remove,
@@ -205,7 +208,7 @@ public partial class DesignationToolbar : Control
         // accepts one family. Doors / Shelves / Workbenches are wood-only;
         // if the player switches into one of those with Stone selected,
         // snap to DeadWood so the next paint produces a valid blueprint.
-        // Walls / Floors / Hearths accept Stone + every wood sub-material,
+        // Walls / Floors / Bonfires accept Stone + every wood sub-material,
         // so they leave whatever the player previously chose intact.
         // Wood-only tools snap to DeadWood if Stone is selected. v0.5.35-37
         // joins Beds, Joy furniture, and Tables to the wood-only family.

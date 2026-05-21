@@ -125,13 +125,13 @@ namespace Sporeholm.Simulation
         // boulder/dead-log/living-wood Excavate work at priority 2."
         public static string DisplayTooltip(string category) => category switch
         {
-            "Construct" => "Build blueprints (walls / floors / doors / shelves / workbenches / hearths / beds / joy furniture / tables). Set to '-' to forbid this shroomp from any construction.",
+            "Construct" => "Build blueprints (walls / floors / doors / shelves / workbenches / bonfires / beds / joy furniture / tables). Set to '-' to forbid this shroomp from any construction.",
             "Mine"      => "Excavate impassable terrain (boulders, dead logs, living wood, skeletons) — produces Stone Blocks, Wood Logs, Bone. Set to '-' to forbid mining.",
             "PlantCut"  => "Cut vegetation (clear the tile + drop its relevant resource — Fungal Wood from large shrooms, food from food-yielders, Cuttings from undergrowth/moss). Used both for clearing plant tiles and for prepping a tile under a blueprint. Set to '-' to forbid cutting.",
             "Forage"    => "Gather wild food (Capberry Bush, Small Mushroom, Herb Cluster, Magic Flower). Set to '-' to forbid foraging.",
             "Chop"      => "Chop wood-yielding shrooms (Large Mushroom, Palm Shroom, Large Sandshroom) — produces Wood Logs. Set to '-' to forbid chopping.",
             "Haul"      => "Carry items to stockpile zones or shelves. No haul work runs when no storage exists (v0.5.39). Set to '-' to forbid hauling.",
-            "Cook"      => "Cook prepared meals at a workbench from raw food. Set to '-' to forbid cooking.",
+            "Cook"      => "Cook prepared meals at a Cooking Table (or Bonfire at half speed) from raw food. Drives the Cooking skill. Set to '-' to forbid cooking.",
             "Healer"    => "Heal others when they are injured. Set to '-' to forbid doctoring (Phase 7 hediffs land here).",
             "Craft"     => "Take recipes from workbench bills queues and produce items (food / cloth / tools / medicine). Set to '-' to forbid this shroomp from crafting at workbenches.",
             "Patient"   => "Be a patient when injured (rest, accept tending). Set to '-' if this shroomp should not rest when injured.",

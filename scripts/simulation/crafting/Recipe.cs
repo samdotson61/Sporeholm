@@ -36,6 +36,24 @@ namespace Sporeholm.Simulation.Crafting
         int        Amount,
         bool       RollQuality = true);       // most recipes roll quality from skill
 
+    // v0.6.2 (Phase 5.6 ship) — `Station` controls which built structure
+    // can execute the recipe. Lets the Cooking split route food recipes
+    // (CookMeal / JuiceBerries) to the new CookingTable and away from the
+    // Workbench, while Bonfire gets to act as a 50%-speed fallback so a
+    // bare colony can still cook before the player builds a proper table.
+    //
+    //   Workbench    — workbench-only (tools, knives, cloth, planks, etc.). DEFAULT.
+    //   CookingTable — cooking recipes; runs at CookingTable at full speed,
+    //                  or at a Bonfire at WorkTicks × BonfireSpeedMul (× 2.0 → 50% speed).
+    //
+    // Adding a new station means extending this enum and teaching
+    // BillSystem.GetStationKind(StructureType) about it.
+    public enum RecipeStation
+    {
+        Workbench    = 0,
+        CookingTable = 1,
+    }
+
     public sealed record RecipeDef(
         string     Id,                         // stable key, e.g. "CookMeal", "BrewBerryWine"
         string     DisplayName,                // player-facing label
@@ -43,9 +61,12 @@ namespace Sporeholm.Simulation.Crafting
         RecipeIngredient[] Ingredients,        // what gets consumed
         RecipeOutput[]     Outputs,            // what gets produced
         int        WorkTicks,                  // base sim-ticks at SkillCurve 1.0× (scaled by primary skill speed)
-        string     PrimarySkill,               // e.g. "Crafting", "Cooking" (post-restructure → Crafting), "Mining"
+        string     PrimarySkill,               // e.g. "Crafting", "Cooking", "Mining"
         int        SkillMinimum         = 0,   // pawns below this skill level can't take the bill
         string?    SecondarySkill       = null,// some recipes train two skills (e.g. Magic Herb Poultice = Crafting + Healing)
         int        SecondaryMinimum     = 0,
-        int        XpReward             = 80); // primary skill XP per completion (matches the existing Cook 80)
+        int        XpReward             = 80,  // primary skill XP per completion (matches the existing Cook 80)
+        RecipeStation Station           = RecipeStation.Workbench,
+        bool       AllowBonfireFallback  = false, // true = recipe can also run at Bonfire (× BonfireSpeedMul)
+        float      BonfireSpeedMul       = 2.0f); // > 1.0 = slower at Bonfire. 2.0 = half speed.
 }

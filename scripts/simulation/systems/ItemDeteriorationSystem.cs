@@ -47,8 +47,8 @@ namespace Sporeholm.Simulation.Systems
         // v0.5.24 (Phase 5G) — wired. Resolves insulation per-room based
         // on the rooms map items occupy. Returns the AVERAGE insulation
         // across colony Inventory items by their TilePos. Items in roofed
-        // rooms with a Hearth get the strongest (×0.25 — sealed +
-        // temperature-controlled per spec); roofed-without-Hearth get
+        // rooms with a Bonfire get the strongest (×0.25 — sealed +
+        // temperature-controlled per spec); roofed-without-Bonfire get
         // ×0.5; outdoor items get ×1.0 (no insulation).
         //
         // Inventory items themselves don't carry a TilePos for this version
@@ -60,20 +60,20 @@ namespace Sporeholm.Simulation.Systems
         // Item.TilePos field isn't always populated for inventoried items).
         //
         // For v0.5.24 minimum-viable: if the map has any indoor rooms with
-        // Hearths, apply ×0.5; with Hearths AND substantial enclosure
+        // Bonfires, apply ×0.5; with Bonfires AND substantial enclosure
         // (>50% of items presumed sheltered), apply ×0.25. Outdoor-only
         // colonies stay at ×1.0.
         public static float ResolveInsulationMul(Inventory? inv = null, LocalMap? map = null)
         {
             if (map == null) return 1f;
             map.EnsureRooms();
-            // Quick aggregate — count rooms + Hearths to decide colony's
+            // Quick aggregate — count rooms + Bonfires to decide colony's
             // overall insulation profile. This is a coarse approximation;
             // proper per-item lookup will land alongside the v0.6 storage-
             // tile-binding refactor.
             bool anyIndoor = false;
-            bool anyHearth = false;
-            // Walk the map's structure grid for indoor tiles + hearths.
+            bool anyBonfire = false;
+            // Walk the map's structure grid for indoor tiles + bonfires.
             // O(W*H) but called once per day on the day boundary — cheap.
             //
             // v0.5.84t — also count tiles with `IsRoofed=true` (natural
@@ -88,12 +88,12 @@ namespace Sporeholm.Simulation.Systems
                     anyIndoor = true;
                 if (!anyIndoor && map.Get(x, y).IsRoofed)
                     anyIndoor = true;
-                if (slot.Type == StructureType.Hearth)
-                    anyHearth = true;
-                if (anyIndoor && anyHearth) break;
+                if (slot.Type == StructureType.Bonfire)
+                    anyBonfire = true;
+                if (anyIndoor && anyBonfire) break;
             }
             if (!anyIndoor) return 1f;
-            return anyHearth ? 0.25f : 0.5f;   // sealed-with-hearth vs roofed-only
+            return anyBonfire ? 0.25f : 0.5f;   // sealed-with-bonfire vs roofed-only
         }
     }
 }

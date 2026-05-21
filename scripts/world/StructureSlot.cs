@@ -77,6 +77,22 @@ namespace Sporeholm.World
         public StructureMat   FloorBeneath;
         public bool           HasFloorBeneath;
 
+        // v0.6.2 — demolish-as-task fields. Pre-v0.6.2 the Demolish tool
+        // instantly cleared the structure + refunded 50%. v0.6.2 turns it
+        // into a paintable Build-style task: the player marks the
+        // structure, a Crafter walks to it, performs demolition work over
+        // multiple ticks (Construction skill drives speed), and on
+        // completion the structure clears + refunds 20%-60% of the
+        // material cost (Construction skill drives recovery rate).
+        //
+        // MarkedForDemolition — set by the Demolish designation tool.
+        // Re-painting the same tile clears the mark (cancel demolition).
+        // DemolitionProgress accumulates per-tick during the Demolish task
+        // up to BuildProgressTarget; on hit the structure is cleared.
+        // Visualised by StructureOverlay as a red X over the tile.
+        public bool           MarkedForDemolition;
+        public ushort         DemolitionProgress;
+
         // v0.5.30 — universal build target (work units). Per-structure-type
         // multipliers (e.g. Wall × 1, Floor × 0.4) live in the Build apply
         // path so different structures take proportionally different work
@@ -92,9 +108,13 @@ namespace Sporeholm.World
             StructureType.DoorPlanned       or StructureType.Door      => 2,
             StructureType.ShelfPlanned      or StructureType.Shelf     => 2,
             StructureType.WorkbenchPlanned  or StructureType.Workbench => 2,
-            StructureType.HearthPlanned     or StructureType.Hearth    => 2,
+            StructureType.BonfirePlanned    or StructureType.Bonfire   => 2,   // v0.6.2 renamed from Hearth
             // v0.5.84t — Torch: 1 wood unit. Cheapest furniture.
             StructureType.TorchPlanned      or StructureType.Torch     => 1,
+            // v0.6.2 (Phase 5.6 ship) — Cooking Table: 3 units total (2 wood
+            // for the chopping block + 1 stone surface). Same Workbench-tier
+            // investment; reads as more substantial than a Hearth.
+            StructureType.CookingTablePlanned or StructureType.CookingTable => 3,
             // v0.5.35 — Beds are 3-unit structures (RimWorld bed cost ≈ 45
             // wood; we use a simplified per-tile-cost so colony bookkeeping
             // stays consistent with the Wall=4 anchor).
@@ -115,25 +135,27 @@ namespace Sporeholm.World
                                 || Type == StructureType.DoorPlanned    // v0.5.20
                                 || Type == StructureType.ShelfPlanned   // v0.5.21
                                 || Type == StructureType.WorkbenchPlanned   // v0.5.22
-                                || Type == StructureType.HearthPlanned      // v0.5.24
+                                || Type == StructureType.BonfirePlanned     // v0.5.24 (renamed v0.6.2)
                                 || Type == StructureType.BedPlanned         // v0.5.35
                                 || Type == StructureType.MeditationShrinePlanned    // v0.5.36
                                 || Type == StructureType.ShroomBoardPlanned         // v0.5.36
                                 || Type == StructureType.GossipBenchPlanned         // v0.5.36
                                 || Type == StructureType.TablePlanned              // v0.5.37
-                                || Type == StructureType.TorchPlanned;             // v0.5.84t
+                                || Type == StructureType.TorchPlanned              // v0.5.84t
+                                || Type == StructureType.CookingTablePlanned;      // v0.6.2 (Phase 5.6)
         public bool IsBuilt    => Type == StructureType.Wall
                                || Type == StructureType.Floor
                                || Type == StructureType.Door            // v0.5.20
                                || Type == StructureType.Shelf           // v0.5.21
                                || Type == StructureType.Workbench       // v0.5.22
-                               || Type == StructureType.Hearth          // v0.5.24
+                               || Type == StructureType.Bonfire         // v0.5.24 (renamed v0.6.2)
                                || Type == StructureType.Bed             // v0.5.35
                                || Type == StructureType.MeditationShrine            // v0.5.36
                                || Type == StructureType.ShroomBoard                 // v0.5.36
                                || Type == StructureType.GossipBench                 // v0.5.36
                                || Type == StructureType.Table                      // v0.5.37
-                               || Type == StructureType.Torch;                     // v0.5.84t
+                               || Type == StructureType.Torch                      // v0.5.84t
+                               || Type == StructureType.CookingTable;              // v0.6.2 (Phase 5.6)
         public bool IsImpassable => Type == StructureType.Wall;   // Floors / Doors / Shelves are passable
 
         public static StructureSlot Empty => default;
@@ -174,10 +196,13 @@ namespace Sporeholm.World
         // per-workbench Bill queue UI, ingredient filters, repeat modes.
         WorkbenchPlanned = 12,
         Workbench        = 13,
-        // v0.5.24 (Phase 5G) — Hearth. Heat source for room temperature
-        // simulation + cooking-quality bonus when adjacent to workbench.
-        HearthPlanned    = 14,
-        Hearth           = 15,
+        // v0.5.24 (Phase 5G) — Bonfire. Heat source for room temperature
+        // simulation + half-speed cooking fallback (v0.6.2 Phase 5.6: cooking
+        // primarily belongs to the Cooking Table now). Renamed v0.6.2 from
+        // "Hearth" — save-load migrates the string "Hearth"/"HearthPlanned"
+        // on read so pre-rename saves still deserialize cleanly.
+        BonfirePlanned   = 14,
+        Bonfire          = 15,
         // v0.5.35 (Phase 5 arc) — Bed. Sleep target for the Sleep task;
         // 1.0× RestEffectiveness vs 0.8× for sleeping on the ground.
         // Triggers WellRested mood thought on wake (vs SleptOnGround).
@@ -206,6 +231,14 @@ namespace Sporeholm.World
         // visual is an animated flame sprite (no scene-tinting yet).
         TorchPlanned     = 26,
         Torch            = 27,
+        // v0.6.2 (Phase 5.6 ship) — Cooking Table. The dedicated cooking
+        // workstation for the new Cooking skill split. Cooks meals at full
+        // speed; food recipes (CookMeal, JuiceBerries, future butchery
+        // outputs) land here by default. Hearth becomes a half-speed
+        // fallback so a bare colony can still cook before building one.
+        // 2 Fungal Wood + 1 Pebblestone (chopping block + stove top).
+        CookingTablePlanned = 28,
+        CookingTable        = 29,
     }
 
     // v0.5.19 — structure material. Mirrors the v0.5.16 MaterialKey families

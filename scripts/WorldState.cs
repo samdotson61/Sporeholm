@@ -182,7 +182,16 @@ public partial class WorldState : Node
         if (save.StructureDeltas != null)
             foreach (var d in save.StructureDeltas)
             {
-                if (!System.Enum.TryParse<StructureType>(d.Type, out var stype)) continue;
+                // v0.6.2 — Hearth → Bonfire rename migration. Pre-rename saves
+                // serialised the structure type string as "Hearth" / "HearthPlanned";
+                // map those onto the new enum names before the TryParse.
+                string typeStr = d.Type switch
+                {
+                    "Hearth"        => "Bonfire",
+                    "HearthPlanned" => "BonfirePlanned",
+                    _               => d.Type,
+                };
+                if (!System.Enum.TryParse<StructureType>(typeStr, out var stype)) continue;
                 System.Enum.TryParse<StructureMat>(d.Material, out var smat);
                 System.Enum.TryParse<Sporeholm.Simulation.Items.Quality>(d.Quality, out var quality);
                 // v0.5.84c — restore floor underneath. Old saves predating
@@ -202,6 +211,12 @@ public partial class WorldState : Node
                     RoomId             = 0,   // rebuilt by RoomDetector on next room query
                     FloorBeneath       = floorBeneath,
                     HasFloorBeneath    = d.HasFloorBeneath,
+                    // v0.6.2 — demolish-as-task. Pre-v0.6.2 saves default
+                    // both fields to (false, 0) via the record's default
+                    // values, so a player who quits-and-reloads with no
+                    // marked tiles sees no change.
+                    MarkedForDemolition = d.MarkedForDemolition,
+                    DemolitionProgress  = d.DemolitionProgress,
                 });
             }
 

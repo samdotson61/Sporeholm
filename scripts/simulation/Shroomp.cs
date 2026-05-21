@@ -501,6 +501,18 @@ namespace Sporeholm.Simulation
 		public bool TaskDidWork              { get; set; } = false;
 		public int  ConsecutiveTaskFailures  { get; set; } = 0;
 
+		// v0.6.2 — per-task progress tracker for systems that accumulate
+		// work over multiple Apply ticks but don't carry their progress on
+		// a target tile (BillSystem stores ProgressTicks on the Bill object;
+		// CookSystem auto-cook has no Bill, so it tracks here). Reset to 0
+		// when CurrentTask changes. Currently used by:
+		//   • CookSystem auto-cook (Phase 5.6 ship) — accumulates against
+		//     recipe.WorkTicks; at Bonfire the effective WorkTicks scales by
+		//     2.0 (the AllowBonfireFallback / BonfireSpeedMul mechanic that
+		//     BillSystem already implements for explicit cooking bills).
+		// Sim-thread-owned. Don't read from UI.
+		public int TaskProgressTicks { get; set; } = 0;
+
 		// v0.3.35 — short-term per-shroomp blacklist used by FindNearestExcavate /
 		// FindNearestGather. v0.3.40 — extended from a single slot to a
 		// small FIFO so consecutive stucks blacklist multiple distinct

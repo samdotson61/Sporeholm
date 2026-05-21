@@ -39,14 +39,21 @@ namespace Sporeholm.UI
         private MultiMeshInstance2D _doorFungalMmi = null!;  // v0.5.70 — FungalWood doors (cap-and-stem sprite)
         private MultiMeshInstance2D _shelfMmi     = null!;   // v0.5.21
         private MultiMeshInstance2D _workbenchMmi = null!;   // v0.5.25 (was missing)
-        private MultiMeshInstance2D _hearthMmi    = null!;   // v0.5.25 (was missing)
+        private MultiMeshInstance2D _bonfireMmi    = null!;   // v0.5.25 (was missing)
         private MultiMeshInstance2D _bedMmi       = null!;   // v0.5.35
         private MultiMeshInstance2D _shrineMmi    = null!;   // v0.5.36
         private MultiMeshInstance2D _boardMmi     = null!;   // v0.5.36
         private MultiMeshInstance2D _benchMmi     = null!;   // v0.5.36
         private MultiMeshInstance2D _tableMmi     = null!;   // v0.5.37
         private MultiMeshInstance2D _torchMmi     = null!;   // v0.5.84t
+        private MultiMeshInstance2D _cookingTableMmi = null!; // v0.6.2 (Phase 5.6)
         private MultiMeshInstance2D _blueprintMmi = null!;
+        // v0.6.2 — Demolish-as-task. Red X overlay drawn over any built
+        // structure whose StructureSlot.MarkedForDemolition flag is set.
+        // Lives in its own MMI so the demolish marker can stack on top of
+        // the existing structure sprite (player still sees the wall/door/
+        // furniture being marked, with a clear destruction indicator).
+        private MultiMeshInstance2D _demolishMarkMmi = null!;
         // v0.5.84d/v0.5.84o — wood-family wall MMI array (16 autotile variants).
         // v0.5.84e — wood-family floor MMI. Sam: "Flooring made from wood
         // types/fungalwood should have subtle plank lines." Pre-fix all
@@ -141,14 +148,16 @@ namespace Sporeholm.UI
             _doorFungalMmi  = CreateMmi(quad, BakeDoorSpriteFungal());    // v0.5.70
             _shelfMmi       = CreateMmi(quad, BakeShelfSprite());         // v0.5.21
             _workbenchMmi   = CreateMmi(quad, BakeWorkbenchSprite());     // v0.5.25
-            _hearthMmi      = CreateMmi(quad, BakeHearthSprite());        // v0.5.25
+            _bonfireMmi      = CreateMmi(quad, BakeBonfireSprite());        // v0.5.25
             _bedMmi         = CreateMmi(quad, BakeBedSprite());           // v0.5.35
             _shrineMmi      = CreateMmi(quad, BakeShrineSprite());        // v0.5.36
             _boardMmi       = CreateMmi(quad, BakeBoardSprite());         // v0.5.36
             _benchMmi       = CreateMmi(quad, BakeBenchSprite());         // v0.5.36
             _tableMmi       = CreateMmi(quad, BakeTableSprite());         // v0.5.37
             _torchMmi       = CreateMmi(quad, BakeTorchSprite());         // v0.5.84t
+            _cookingTableMmi = CreateMmi(quad, BakeCookingTableSprite()); // v0.6.2 (Phase 5.6)
             _blueprintMmi   = CreateMmi(quad, BakeBlueprintSprite());
+            _demolishMarkMmi = CreateMmi(quad, BakeDemolishMarkSprite()); // v0.6.2 — demolish-as-task
         }
 
         public void SetMap(LocalMap map)
@@ -267,9 +276,11 @@ namespace Sporeholm.UI
             int floorCount = 0, floorFungalCount = 0, floorWoodCount = 0,
                 doorCount = 0, doorFungalCount = 0,
                 shelfCount = 0,
-                workbenchCount = 0, hearthCount = 0, blueprintCount = 0,
+                workbenchCount = 0, bonfireCount = 0, blueprintCount = 0,
                 bedCount = 0, shrineCount = 0, boardCount = 0, benchCount = 0,
-                tableCount = 0, torchCount = 0;
+                tableCount = 0, torchCount = 0,
+                cookingTableCount = 0,   // v0.6.2 (Phase 5.6)
+                demolishMarkCount = 0;   // v0.6.2 — demolish-as-task
             for (int y = 0; y < _map.Height; y++)
             for (int x = 0; x < _map.Width;  x++)
             {
@@ -420,12 +431,12 @@ namespace Sporeholm.UI
                         _workbenchMmi.Multimesh.SetInstanceColor(workbenchCount, tint);
                         workbenchCount++;
                         break;
-                    case StructureType.Hearth when hearthCount < MaxInstances:   // v0.5.25
-                        _hearthMmi.Multimesh.SetInstanceTransform2D(hearthCount, new Transform2D(0f, origin));
-                        // Hearth is stone-only by design; force neutral tint so
+                    case StructureType.Bonfire when bonfireCount < MaxInstances:   // v0.5.25
+                        _bonfireMmi.Multimesh.SetInstanceTransform2D(bonfireCount, new Transform2D(0f, origin));
+                        // Bonfire is stone-only by design; force neutral tint so
                         // accidental wood mat values still render plausibly.
-                        _hearthMmi.Multimesh.SetInstanceColor(hearthCount, new Color(1f, 1f, 1f, 1f));
-                        hearthCount++;
+                        _bonfireMmi.Multimesh.SetInstanceColor(bonfireCount, new Color(1f, 1f, 1f, 1f));
+                        bonfireCount++;
                         break;
                     case StructureType.Bed when bedCount < MaxInstances:   // v0.5.35
                         _bedMmi.Multimesh.SetInstanceTransform2D(bedCount, new Transform2D(0f, origin));
@@ -457,18 +468,24 @@ namespace Sporeholm.UI
                         _torchMmi.Multimesh.SetInstanceColor(torchCount, tint);
                         torchCount++;
                         break;
+                    case StructureType.CookingTable when cookingTableCount < MaxInstances:   // v0.6.2 (Phase 5.6)
+                        _cookingTableMmi.Multimesh.SetInstanceTransform2D(cookingTableCount, new Transform2D(0f, origin));
+                        _cookingTableMmi.Multimesh.SetInstanceColor(cookingTableCount, tint);
+                        cookingTableCount++;
+                        break;
                     case StructureType.WallPlanned:
                     case StructureType.FloorPlanned:
                     case StructureType.DoorPlanned:
                     case StructureType.ShelfPlanned:
                     case StructureType.WorkbenchPlanned:
-                    case StructureType.HearthPlanned:
+                    case StructureType.BonfirePlanned:
                     case StructureType.BedPlanned:               // v0.5.35
                     case StructureType.MeditationShrinePlanned:  // v0.5.36
                     case StructureType.ShroomBoardPlanned:       // v0.5.36
                     case StructureType.GossipBenchPlanned:       // v0.5.36
                     case StructureType.TablePlanned:             // v0.5.37
                     case StructureType.TorchPlanned:             // v0.5.84t
+                    case StructureType.CookingTablePlanned:      // v0.6.2 (Phase 5.6)
                         if (blueprintCount < MaxInstances)
                         {
                             _blueprintMmi.Multimesh.SetInstanceTransform2D(blueprintCount, new Transform2D(0f, origin));
@@ -476,6 +493,23 @@ namespace Sporeholm.UI
                             blueprintCount++;
                         }
                         break;
+                }
+
+                // v0.6.2 — Demolish-as-task. Overlay a red X on any built
+                // structure flagged for demolition. Runs after the main
+                // type-switch so the structure sprite still paints first;
+                // the X stacks on top so the player sees both "what's there"
+                // and "it's marked for tear-down". The overlay also shows
+                // an alpha rising with DemolitionProgress so the player
+                // visually tracks how close to completion the work is.
+                if (slot.MarkedForDemolition && slot.IsBuilt && demolishMarkCount < MaxInstances)
+                {
+                    float progress = slot.DemolitionProgress / (float)StructureSlot.BuildProgressTarget;
+                    float alpha = 0.55f + progress * 0.40f;   // 0.55 → 0.95 as work nears completion
+                    var tintMark = new Color(1.00f, 0.20f, 0.20f, alpha);
+                    _demolishMarkMmi.Multimesh.SetInstanceTransform2D(demolishMarkCount, new Transform2D(0f, origin));
+                    _demolishMarkMmi.Multimesh.SetInstanceColor(demolishMarkCount, tintMark);
+                    demolishMarkCount++;
                 }
             }
             // v0.5.84o — per-mask visible counts for all 3 wall families.
@@ -492,14 +526,16 @@ namespace Sporeholm.UI
             _doorFungalMmi .Multimesh.VisibleInstanceCount = doorFungalCount;   // v0.5.70
             _shelfMmi      .Multimesh.VisibleInstanceCount = shelfCount;
             _workbenchMmi  .Multimesh.VisibleInstanceCount = workbenchCount;
-            _hearthMmi     .Multimesh.VisibleInstanceCount = hearthCount;
+            _bonfireMmi     .Multimesh.VisibleInstanceCount = bonfireCount;
             _bedMmi        .Multimesh.VisibleInstanceCount = bedCount;        // v0.5.35
             _shrineMmi     .Multimesh.VisibleInstanceCount = shrineCount;     // v0.5.36
             _boardMmi      .Multimesh.VisibleInstanceCount = boardCount;      // v0.5.36
             _benchMmi      .Multimesh.VisibleInstanceCount = benchCount;      // v0.5.36
             _tableMmi      .Multimesh.VisibleInstanceCount = tableCount;      // v0.5.37
             _torchMmi      .Multimesh.VisibleInstanceCount = torchCount;      // v0.5.84t
+            _cookingTableMmi.Multimesh.VisibleInstanceCount = cookingTableCount; // v0.6.2 (Phase 5.6)
             _blueprintMmi  .Multimesh.VisibleInstanceCount = blueprintCount;
+            _demolishMarkMmi.Multimesh.VisibleInstanceCount = demolishMarkCount; // v0.6.2 — demolish-as-task
         }
 
         // v0.5.84o — autotile mask. Bit 0 = N, 1 = E, 2 = S, 3 = W. A bit
@@ -1207,9 +1243,89 @@ namespace Sporeholm.UI
             return ImageTexture.CreateFromImage(img);
         }
 
-        // v0.5.25 — Hearth sprite. Stone fire pit with flames + glowing
+        // v0.6.2 (Phase 5.6 ship) — Cooking Table sprite. Reads as a kitchen
+        // prep station rather than a tool bench: light wood chopping-block
+        // base, dark stone slab on top for the cook surface, plus a cleaver
+        // silhouette + a small bowl. Sits in the same Workbench-tier MMI
+        // footprint so it stacks on floors and respects all the v0.5.84
+        // furniture rendering rules.
+        private static ImageTexture BakeCookingTableSprite()
+        {
+            var wood     = new Color(0.62f, 0.46f, 0.30f, 1.0f);   // lighter than Workbench wood
+            var woodHi   = new Color(0.78f, 0.62f, 0.42f, 1.0f);
+            var woodLo   = new Color(0.42f, 0.30f, 0.20f, 1.0f);
+            var slab     = new Color(0.46f, 0.44f, 0.40f, 1.0f);   // dark stone slab
+            var slabHi   = new Color(0.62f, 0.60f, 0.55f, 1.0f);
+            var border   = new Color(0.20f, 0.12f, 0.06f, 1.0f);
+            var blade    = new Color(0.78f, 0.80f, 0.85f, 1.0f);   // cleaver steel
+            var handle   = new Color(0.30f, 0.20f, 0.12f, 1.0f);
+            var bowl     = new Color(0.50f, 0.30f, 0.20f, 1.0f);   // ceramic bowl
+            var bowlHi   = new Color(0.70f, 0.50f, 0.35f, 1.0f);
+            var greens   = new Color(0.45f, 0.65f, 0.30f, 1.0f);   // herb/veg fleck
+
+            var img = Image.CreateEmpty(TS, TS, false, Image.Format.Rgba8);
+            for (int y = 0; y < TS; y++)
+            for (int x = 0; x < TS; x++)
+                img.SetPixel(x, y, wood);
+
+            // Stone slab covers the top ~40% — the actual cook surface
+            int slabTop = TS / 4;
+            int slabBot = TS / 2 + 1;
+            for (int y = slabTop; y < slabBot; y++)
+            for (int x = 1; x < TS - 1; x++)
+                img.SetPixel(x, y, slab);
+            // Slab highlight on top edge
+            for (int x = 1; x < TS - 1; x++) img.SetPixel(x, slabTop, slabHi);
+
+            // Cleaver: rectangular blade + handle, top-left of the slab
+            // Blade (4×2 block)
+            for (int dy = 0; dy < 2; dy++)
+            for (int dx = 0; dx < 4; dx++)
+                img.SetPixel(2 + dx, slabTop + 1 + dy, blade);
+            // Handle (2 pixels right of the blade)
+            img.SetPixel(6, slabTop + 1, handle);
+            img.SetPixel(7, slabTop + 1, handle);
+
+            // Bowl on the right side of the slab
+            int bcx = TS - 4;
+            int bcy = slabTop + 2;
+            // Top rim
+            img.SetPixel(bcx - 1, bcy,     bowlHi);
+            img.SetPixel(bcx,     bcy,     bowlHi);
+            img.SetPixel(bcx + 1, bcy,     bowlHi);
+            // Body
+            img.SetPixel(bcx - 1, bcy + 1, bowl);
+            img.SetPixel(bcx,     bcy + 1, bowl);
+            img.SetPixel(bcx + 1, bcy + 1, bowl);
+            // Contents (one green fleck)
+            img.SetPixel(bcx,     bcy,     greens);
+
+            // Wood face beneath the slab — chopping-block grain stripes
+            int grain1 = slabBot + 2;
+            int grain2 = slabBot + 4;
+            for (int x = 2; x < TS - 2; x++)
+            {
+                img.SetPixel(x, grain1, woodLo);
+                img.SetPixel(x, grain2, woodHi);
+            }
+
+            // Vertical "table leg" lines on lower half
+            for (int y = slabBot + 1; y < TS - 1; y++)
+            {
+                img.SetPixel(2,        y, woodLo);
+                img.SetPixel(TS - 3,   y, woodLo);
+            }
+
+            // Border
+            for (int x = 0; x < TS; x++) { img.SetPixel(x, 0, border); img.SetPixel(x, TS - 1, border); }
+            for (int y = 0; y < TS; y++) { img.SetPixel(0, y, border); img.SetPixel(TS - 1, y, border); }
+
+            return ImageTexture.CreateFromImage(img);
+        }
+
+        // v0.5.25 — Bonfire sprite. Stone fire pit with flames + glowing
         // embers. Reads as the warmest, most alive structure on the map.
-        private static ImageTexture BakeHearthSprite()
+        private static ImageTexture BakeBonfireSprite()
         {
             var stone    = new Color(0.42f, 0.40f, 0.36f, 1.0f);
             var stoneHi  = new Color(0.55f, 0.52f, 0.46f, 1.0f);
@@ -1483,6 +1599,36 @@ namespace Sporeholm.UI
             // White-hot core.
             img.SetPixel(7, 3, flameW);
             img.SetPixel(8, 3, flameW);
+            return ImageTexture.CreateFromImage(img);
+        }
+
+        // v0.6.2 — Demolish-as-task. Red X overlay drawn on top of any
+        // built structure flagged MarkedForDemolition. Reads as the
+        // RimWorld-style "deconstruct" mark: two thick diagonal red bands
+        // forming an X, transparent everywhere else so the structure
+        // sprite shows through behind it. The per-instance tint colour
+        // bumps the alpha from 0.55 (just-painted) to 0.95 (near-complete)
+        // as DemolitionProgress accumulates, giving the player at-a-glance
+        // visibility into how close the tear-down is.
+        private static ImageTexture BakeDemolishMarkSprite()
+        {
+            var trans = new Color(0f, 0f, 0f, 0f);
+            var bar   = new Color(1.00f, 0.20f, 0.20f, 1.00f);   // bright red
+            var img = Image.CreateEmpty(TS, TS, false, Image.Format.Rgba8);
+            for (int y = 0; y < TS; y++)
+            for (int x = 0; x < TS; x++)
+                img.SetPixel(x, y, trans);
+            // Thick diagonals (3 pixels wide) — TL↘BR and TR↙BL bands.
+            for (int i = 0; i < TS; i++)
+            {
+                for (int t = -1; t <= 1; t++)
+                {
+                    int aX = i + t,           aY = i;
+                    int bX = (TS - 1 - i) + t, bY = i;
+                    if (aX >= 0 && aX < TS) img.SetPixel(aX, aY, bar);
+                    if (bX >= 0 && bX < TS) img.SetPixel(bX, bY, bar);
+                }
+            }
             return ImageTexture.CreateFromImage(img);
         }
 

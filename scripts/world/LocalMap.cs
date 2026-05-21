@@ -1460,12 +1460,22 @@ namespace Sporeholm.World
 
         // ── v0.5.84s — Phase 5.5 Crafting Bills System ────────────────────
         //
-        // Per-workbench bills queue. Keyed by tile coords (so the bill
-        // list moves cleanly through SetStructure / SnapshotStructures
-        // without touching the StructureSlot value-type struct).
-        // BillSystem reads this on every Crafter SelectTask to find a
-        // satisfiable bill on any reachable workbench.
+        // Per-station bills queue (Workbench or CookingTable as of v0.6.2
+        // Phase 5.6). Keyed by tile coords (so the bill list moves cleanly
+        // through SetStructure / SnapshotStructures without touching the
+        // StructureSlot value-type struct). BillSystem reads this on every
+        // Crafter / Cook SelectTask to find a satisfiable bill on any
+        // reachable station.
+        //
+        // v0.6.2 — thread-safety. Mutated by BillSystem on the sim thread,
+        // read by TilePropertiesPanel + the picker on the main UI thread.
+        // All public accessors lock the same monitor; reads return defensive
+        // List<Bill> copies so the caller can iterate without holding the
+        // lock. AllWorkbenchBills() snapshots the entire dict at call time
+        // (so callers can use `foreach` safely even if a sim-thread bill
+        // mutation lands mid-iteration).
         private readonly Dictionary<(int X, int Y), List<Sporeholm.Simulation.Crafting.Bill>> _workbenchBills = new();
+        private readonly object _workbenchBillsLock = new();
 
         // UI signal — TilePropertiesPanel re-snapshots on this event so
         // the Bills section updates immediately after add / remove.
@@ -1473,43 +1483,94 @@ namespace Sporeholm.World
 
         public List<Sporeholm.Simulation.Crafting.Bill> GetWorkbenchBills(int x, int y)
         {
-            if (_workbenchBills.TryGetValue((x, y), out var list)) return list;
-            return new List<Sporeholm.Simulation.Crafting.Bill>(0);   // empty (don't auto-create — caller decides)
+            lock (_workbenchBillsLock)
+            {
+                if (_workbenchBills.TryGetValue((x, y), out var list))
+                    return new List<Sporeholm.Simulation.Crafting.Bill>(list);   // defensive copy
+                return new List<Sporeholm.Simulation.Crafting.Bill>(0);
+            }
         }
 
         public void AddWorkbenchBill(int x, int y, Sporeholm.Simulation.Crafting.Bill bill)
         {
-            if (!_workbenchBills.TryGetValue((x, y), out var list))
+            lock (_workbenchBillsLock)
             {
-                list = new List<Sporeholm.Simulation.Crafting.Bill>(4);
-                _workbenchBills[(x, y)] = list;
+                if (!_workbenchBills.TryGetValue((x, y), out var list))
+                {
+                    list = new List<Sporeholm.Simulation.Crafting.Bill>(4);
+                    _workbenchBills[(x, y)] = list;
+                }
+                list.Add(bill);
             }
-            list.Add(bill);
             WorkbenchBillsChanged?.Invoke(x, y);
         }
 
         public void RemoveWorkbenchBill(int x, int y, int index)
         {
-            if (!_workbenchBills.TryGetValue((x, y), out var list)) return;
-            if (index < 0 || index >= list.Count) return;
-            list.RemoveAt(index);
-            if (list.Count == 0) _workbenchBills.Remove((x, y));
-            WorkbenchBillsChanged?.Invoke(x, y);
+            bool changed = false;
+            lock (_workbenchBillsLock)
+            {
+                if (_workbenchBills.TryGetValue((x, y), out var list)
+                    && index >= 0 && index < list.Count)
+                {
+                    list.RemoveAt(index);
+                    if (list.Count == 0) _workbenchBills.Remove((x, y));
+                    changed = true;
+                }
+            }
+            if (changed) WorkbenchBillsChanged?.Invoke(x, y);
         }
 
         public void ClearWorkbenchBills(int x, int y)
         {
-            if (_workbenchBills.Remove((x, y)))
-                WorkbenchBillsChanged?.Invoke(x, y);
+            bool changed;
+            lock (_workbenchBillsLock) changed = _workbenchBills.Remove((x, y));
+            if (changed) WorkbenchBillsChanged?.Invoke(x, y);
         }
 
-        // Enumerate every workbench-tile + its bills. BillSystem calls
-        // this on Crafter SelectTask to find any unclaimed satisfiable
-        // bill. Yield-return so the caller can short-circuit.
-        public IEnumerable<((int X, int Y) Tile, List<Sporeholm.Simulation.Crafting.Bill> Bills)> AllWorkbenchBills()
+        // v0.6.2 — atomic recipe-id-based remove. BillSystem.Apply uses this
+        // instead of index-based remove because the index it cached at
+        // SelectTarget time may have shifted by the time Apply commits (the
+        // player could have removed an earlier bill via the UI between).
+        // Lock + find + remove in one critical section.
+        public void RemoveWorkbenchBillByRecipeId(int x, int y, string recipeId)
         {
-            foreach (var kv in _workbenchBills)
-                yield return (kv.Key, kv.Value);
+            bool changed = false;
+            lock (_workbenchBillsLock)
+            {
+                if (_workbenchBills.TryGetValue((x, y), out var list))
+                {
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        if (list[i].RecipeId == recipeId)
+                        {
+                            list.RemoveAt(i);
+                            if (list.Count == 0) _workbenchBills.Remove((x, y));
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (changed) WorkbenchBillsChanged?.Invoke(x, y);
+        }
+
+        // Enumerate every station-tile + its bills. BillSystem calls this
+        // on Crafter/Cook SelectTask to find any unclaimed satisfiable bill.
+        // v0.6.2 — returns a snapshot list (not a yield) so callers can
+        // iterate without the sim thread potentially mutating mid-loop.
+        // The inner bill lists are also defensive copies — bill structs
+        // (RecipeId / Mode / ProgressTicks) are then mutated in place via
+        // BillSystem.Apply which acquires the lock again on commit.
+        public IReadOnlyList<((int X, int Y) Tile, List<Sporeholm.Simulation.Crafting.Bill> Bills)> AllWorkbenchBills()
+        {
+            lock (_workbenchBillsLock)
+            {
+                var snapshot = new List<((int X, int Y), List<Sporeholm.Simulation.Crafting.Bill>)>(_workbenchBills.Count);
+                foreach (var kv in _workbenchBills)
+                    snapshot.Add((kv.Key, new List<Sporeholm.Simulation.Crafting.Bill>(kv.Value)));
+                return snapshot;
+            }
         }
 
         // Save/load support — snapshot returns a flat list the SaveManager
@@ -1517,16 +1578,22 @@ namespace Sporeholm.World
         // SaveManager + WorldState.
         public List<(int X, int Y, List<Sporeholm.Simulation.Crafting.Bill> Bills)> SnapshotWorkbenchBills()
         {
-            var result = new List<(int, int, List<Sporeholm.Simulation.Crafting.Bill>)>(_workbenchBills.Count);
-            foreach (var kv in _workbenchBills)
-                result.Add((kv.Key.X, kv.Key.Y, new List<Sporeholm.Simulation.Crafting.Bill>(kv.Value)));
-            return result;
+            lock (_workbenchBillsLock)
+            {
+                var result = new List<(int, int, List<Sporeholm.Simulation.Crafting.Bill>)>(_workbenchBills.Count);
+                foreach (var kv in _workbenchBills)
+                    result.Add((kv.Key.X, kv.Key.Y, new List<Sporeholm.Simulation.Crafting.Bill>(kv.Value)));
+                return result;
+            }
         }
 
         public void ApplyWorkbenchBills(int x, int y, List<Sporeholm.Simulation.Crafting.Bill> bills)
         {
-            if (bills == null || bills.Count == 0) { _workbenchBills.Remove((x, y)); return; }
-            _workbenchBills[(x, y)] = new List<Sporeholm.Simulation.Crafting.Bill>(bills);
+            lock (_workbenchBillsLock)
+            {
+                if (bills == null || bills.Count == 0) { _workbenchBills.Remove((x, y)); return; }
+                _workbenchBills[(x, y)] = new List<Sporeholm.Simulation.Crafting.Bill>(bills);
+            }
             WorkbenchBillsChanged?.Invoke(x, y);
         }
         public bool HasStructure(int x, int y) => InBounds(x, y) && _structures[x, y].IsPresent;

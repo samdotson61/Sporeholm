@@ -27,7 +27,7 @@ namespace Sporeholm.Simulation
             Dictionary<string, int> SkillBumps);
 
         // Childhood backstories — apply to every shroomp at generation.
-        // Themes lean on canon Shroomp flavour: foraging fields, hearth
+        // Themes lean on canon Shroomp flavour: foraging fields, bonfire
         // chores, mushroom-house life, observing elders.
         public static readonly BackstoryDef[] Childhoods =
         {
@@ -35,9 +35,9 @@ namespace Sporeholm.Simulation
                 "Wandering Berry-Picker",
                 "Spent every summer combing the hills for capberries.",
                 new() { ["Botany"] = 3, ["Athletics"] = 1 }),
-            new("HearthApprentice",
-                "Hearth Apprentice",
-                "Helped tend the village hearth before they could walk.",
+            new("HearthApprentice",   // v0.6.2 — ID kept for save compat; display renamed Hearth → Bonfire
+                "Bonfire Apprentice",
+                "Helped tend the village bonfire before they could walk.",
                 new() { ["Crafting"] = 2, ["Construction"] = 1 }),
             new("MushroomLetter",
                 "Mushroom-House Letter",
@@ -97,8 +97,8 @@ namespace Sporeholm.Simulation
                 "Healer's Apprentice",
                 "Mixed poultices in the back of the infirmary for years.",
                 new() { ["Healing"] = 3, ["Social"] = 2 }),
-            new("HearthOrator",
-                "Hearth Orator",
+            new("HearthOrator",   // v0.6.2 — ID kept for save compat; display renamed Hearth → Bonfire
+                "Bonfire Orator",
                 "Held the colony rapt with stories of the Old Shroomps.",
                 new() { ["Social"] = 3, ["Magic"] = 1 }),   // v0.5.84r: Social + Leadership collapsed; bumped to 3
             new("RoamingTinker",

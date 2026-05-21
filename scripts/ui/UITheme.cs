@@ -58,10 +58,10 @@ namespace Sporeholm.UI
         // v0.5.22 (Phase 5E) — Workbench painter. Crafters use workbenches
         // to run Cook recipes (raw food → prepared meal).
         BuildWorkbench,
-        // v0.5.24 (Phase 5G) — Hearth painter. Heat source for room
+        // v0.5.24 (Phase 5G) — Bonfire painter. Heat source for room
         // temperature simulation; cooking-quality bonus when adjacent
         // to a workbench.
-        BuildHearth,
+        BuildBonfire,
         // v0.5.35 (Phase 5 arc) — Bed painter. Shroomps sleep on built beds
         // for full rest effectiveness (1.0×) + a positive "WellRested"
         // mood thought. Without a bed, shroomps sleep on the ground (0.8×
@@ -81,8 +81,13 @@ namespace Sporeholm.UI
         // v0.5.84t — Torch painter. Cheap floor-tile light source +
         // small room temperature offset (+2°C per torch).
         BuildTorch,
+        // v0.6.2 (Phase 5.6 ship) — Cooking Table painter. Dedicated cook
+        // station for the new Cooking skill: Cooks prepare meals at full
+        // speed here. Bonfire is a half-speed fallback so a bare colony can
+        // still cook before a Cooking Table is built.
+        BuildCookingTable,
         // Demolish removes built structures (Wall / Floor / Door / Shelf
-        // / Workbench / Hearth / Bed / Joy furniture / Table) AND cancels
+        // / Workbench / Bonfire / Bed / Joy furniture / Table) AND cancels
         // pending blueprints. v0.5.20 added partial material refund (50%
         // of original cost) for completed structures.
         Demolish,

@@ -21,7 +21,7 @@ namespace Sporeholm.Simulation.Crafting
             new RecipeDef(
                 Id:           "CookMeal",
                 DisplayName:  "Cook Meal",
-                Description:  "Combine 4 raw foods of any kind (berries, mushrooms, herbs, future meats) into a Prepared Meal. Higher nutrition + longer freshness than the raw inputs.",
+                Description:  "Combine 4 raw foods of any kind (berries, mushrooms, herbs, future meats) into a Prepared Meal. Higher nutrition + longer freshness than the raw inputs. Cooks fastest at a Cooking Table; Bonfire fallback runs at half speed.",
                 // v0.5.84t — MaterialFamily=null means "any family of ItemKind.Food",
                 // so the cook will pull from Plant (berries/mushrooms/herbs) and
                 // any future Food families (Meat, Insect, etc.) interchangeably.
@@ -32,15 +32,18 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeOutput(ItemKind.Food, "PreparedMeal", "Plant", "Cooked", 1, RollQuality: true),
                 },
                 WorkTicks:    240,
-                PrimarySkill: "Crafting",
+                PrimarySkill: "Cooking",                // v0.6.2 — Phase 5.6 ships Cooking skill split.
                 SkillMinimum: 0,
-                XpReward:     100
+                XpReward:     100,
+                Station:              RecipeStation.CookingTable,
+                AllowBonfireFallback:  true,
+                BonfireSpeedMul:       2.0f
             ),
 
             new RecipeDef(
                 Id:           "JuiceBerries",
                 DisplayName:  "Juice Berries",
-                Description:  "Press 4 Capberries into 1 Berry Juice — a refreshing drink with longer freshness than the raw fruit.",
+                Description:  "Press 4 Capberries into 1 Berry Juice — a refreshing drink with longer freshness than the raw fruit. Runs at a Cooking Table; Bonfire fallback runs at half speed.",
                 Ingredients:  new[] {
                     new RecipeIngredient(ItemKind.Food, "Plant", 4, RequiredSubType: "Capberry"),
                 },
@@ -48,9 +51,12 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeOutput(ItemKind.Food, "BerryJuice", "Plant", "Capberry", 1, RollQuality: true),
                 },
                 WorkTicks:    300,
-                PrimarySkill: "Crafting",
+                PrimarySkill: "Cooking",                // v0.6.2 — Phase 5.6 ships Cooking skill split.
                 SkillMinimum: 1,
-                XpReward:     100
+                XpReward:     100,
+                Station:              RecipeStation.CookingTable,
+                AllowBonfireFallback:  true,
+                BonfireSpeedMul:       2.0f
             ),
 
             // ── Cloth ───────────────────────────────────────────────────

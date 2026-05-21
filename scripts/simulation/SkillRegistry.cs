@@ -16,8 +16,11 @@ namespace Sporeholm.Simulation
         //     same conversational ground)
         //   • Medicine → Healing (the role-driving skill the Healer job uses)
         //   • Research → Study (aesthetic rename)
-        // Cap budget proportionally reduced 320 → 220 (11 × 20 max).
-        // Legacy saves migrate via SkillNameMigration applied at Shroomp load.
+        // v0.6.2 (Phase 5.6 ship) — Cooking restored as its own 12th skill,
+        // split off from Crafting. Food-producing recipes (CookMeal,
+        // JuiceBerries) drive Cooking; non-food workbench output stays on
+        // Crafting. Cooking will also drive butchery yield once Phase 8
+        // ships the Butcher task. Cap budget bumped 220 → 240 (12 × 20 max).
         public static readonly IReadOnlyList<SkillDef> All = new[]
         {
             // Survival
@@ -28,7 +31,8 @@ namespace Sporeholm.Simulation
             new SkillDef("Melee",        "Combat",    "Close-quarters fighting with weapons or fists."),
             new SkillDef("Ranged",       "Combat",    "Attacking at distance with thrown or launched projectiles."),
             // Crafting
-            new SkillDef("Crafting",     "Crafting",  "Making tools, goods, meals, and equipment at workbenches."),
+            new SkillDef("Crafting",     "Crafting",  "Making tools, goods, and equipment at workbenches. Excludes meals — see Cooking."),
+            new SkillDef("Cooking",      "Crafting",  "Preparing meals at a Cooking Table (or Bonfire fallback). Drives meal speed, quality, and — once Phase 8 ships — butchery yield."),
             new SkillDef("Construction", "Crafting",  "Building and repairing structures."),
             // Magic (placeholder — full system in a future phase)
             new SkillDef("Magic",        "Magic",     "Channeling magic essence, performing rituals, and Shroomp lore. Levels via Attune until the full magic system ships."),
@@ -53,7 +57,13 @@ namespace Sporeholm.Simulation
             { "Leadership", "Social" },
             { "Medicine",   "Healing" },
             { "Research",   "Study" },
-            { "Cooking",    "Crafting" },
+            // v0.6.2 (Phase 5.6) — Cooking is its own skill again. We keep
+            // the migration entry COMMENTED so legacy v0.5.84r saves (which
+            // had Cooking folded into Crafting) don't silently lose their
+            // Crafting points to a fresh Cooking bucket. Cooks just start
+            // from 0 in the new column on load; the value is preserved on
+            // Crafting where the v0.5.84r migration parked it.
+            // { "Cooking",    "Crafting" },
         };
 
         // v0.5.84r — role bonuses re-mapped to new skill set.
@@ -68,13 +78,13 @@ namespace Sporeholm.Simulation
         // Elder     — Social (leadership consolidated), Study, Healing
         private static readonly Dictionary<string, Dictionary<string, int>> _roleBonuses = new()
         {
-            ["Forager"]   = new() { ["Botany"]   = 3, ["Athletics"]    = 2, ["Mining"]   = 1 },
-            ["Crafter"]   = new() { ["Crafting"] = 3, ["Construction"] = 2, ["Mining"]   = 1 },
-            ["Scholar"]   = new() { ["Study"]    = 3, ["Magic"]        = 2, ["Healing"]  = 1 },
-            ["Sage"]      = new() { ["Magic"]    = 3, ["Study"]        = 2, ["Social"]   = 1 },
-            ["Caretaker"] = new() { ["Healing"]  = 3, ["Social"]       = 2, ["Crafting"] = 1 },
+            ["Forager"]   = new() { ["Botany"]   = 3, ["Athletics"]    = 2, ["Mining"]    = 1, ["Cooking"]  = 1 },
+            ["Crafter"]   = new() { ["Crafting"] = 3, ["Construction"] = 2, ["Cooking"]   = 2, ["Mining"]   = 1 },
+            ["Scholar"]   = new() { ["Study"]    = 3, ["Magic"]        = 2, ["Healing"]   = 1 },
+            ["Sage"]      = new() { ["Magic"]    = 3, ["Study"]        = 2, ["Social"]    = 1 },
+            ["Caretaker"] = new() { ["Healing"]  = 3, ["Social"]       = 2, ["Crafting"]  = 1, ["Cooking"]  = 1 },
             ["Guardian"]  = new() { ["Melee"]    = 3, ["Ranged"]       = 2, ["Athletics"] = 1 },
-            ["Elder"]     = new() { ["Social"]   = 3, ["Study"]        = 2, ["Healing"]  = 1 },
+            ["Elder"]     = new() { ["Social"]   = 3, ["Study"]        = 2, ["Healing"]   = 1, ["Cooking"]  = 1 },
         };
 
         public static int GetRoleBonus(string role, string skill) =>
@@ -197,11 +207,12 @@ namespace Sporeholm.Simulation
         }
 
         // v0.5.84r — total skill point cap. Was 320 (16 skills × 20 max);
-        // now 220 (11 × 20). Sam: "ensure that skill point allocation
+        // now 240 (12 × 20). Sam: "ensure that skill point allocation
         // weight on shroomp creation is adjusted for the new total skill
-        // point reduction (now 11 skills for 220 total skill points —
-        // reduce allocation by the appropriate percentage)."
-        public const int SkillBudgetCap = 220;
+        // point reduction." v0.6.2 (Phase 5.6 ship) — Cooking restored as
+        // 12th skill, so cap bumps 220 → 240. Age floors and right-skewed
+        // budget curve below auto-scale with the cap value.
+        public const int SkillBudgetCap = 240;
 
         // Distributes random skill points using a right-skewed budget.
         //
@@ -218,12 +229,15 @@ namespace Sporeholm.Simulation
                 s.Skills[def.Name] = 0;
 
             double u = Math.Min(Math.Min(rng.NextDouble(), rng.NextDouble()), rng.NextDouble());
+            // v0.6.2 — floors re-scaled for 12-skill / 240-point cap.
+            // Same fraction of cap as v0.5.84r (juvenile ≈ 6%, adult ≈ 15%,
+            // elder ≈ 22%, last-season ≈ 25%).
             int floor = s.LifeStage switch
             {
-                LifeStage.Juvenile   => 14,   // was 20 (20×0.69 ≈ 14)
-                LifeStage.Adult      => 34,   // was 50
-                LifeStage.Elder      => 48,   // was 70
-                LifeStage.LastSeason => 55,   // was 80
+                LifeStage.Juvenile   => 15,
+                LifeStage.Adult      => 37,
+                LifeStage.Elder      => 53,
+                LifeStage.LastSeason => 60,
                 _                    =>  0,
             };
             int budget = Math.Min(SkillBudgetCap, (int)(u * (SkillBudgetCap - floor)) + floor);

@@ -50,6 +50,14 @@ namespace Sporeholm.Simulation
         // Construct priority (Crafter does the framing). Multiple shroomps
         // can BuildHaul to one blueprint simultaneously.
         BuildHaul,
+        // v0.6.2 — Demolish-as-task. Pre-v0.6.2 the Demolish designation
+        // tool was instant (RimWorld-style insta-clear on paint). v0.6.2
+        // mirrors Build: the player paints the structure marked for
+        // demolition, a Crafter walks to it, performs demolish work per
+        // tick (Construction skill drives speed), and on completion the
+        // tile clears + refunds 20%-60% of the material cost (Construction
+        // skill drives recovery rate). See DemolishSystem.
+        Demolish,
         // Tier 3 — idle. Wander still exists as the "go somewhere new"
         // baseline; v0.3.43 adds five more idle behaviours so shroomps stop
         // jittering in place between commands:

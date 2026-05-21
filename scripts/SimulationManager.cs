@@ -42,6 +42,12 @@ namespace Sporeholm
 		// GameController posts a MessageLog entry under Category.Starving.
 		[Signal] public delegate void StarvationStartedEventHandler(string name);
 
+		// v0.6.2 audit Fix 5 — entity removed (died / despawned). GameController
+		// uses this to auto-close the EntityCardPanel when the selected
+		// creature is no longer alive. Payload is the entity's Guid as a string
+		// (Godot signals don't carry System.Guid directly).
+		[Signal] public delegate void EntityRemovedEventHandler(string entityId);
+
 		// ── State ─────────────────────────────────────────────────────────────────
 
 		private SimulationSnapshot? _lastSnapshot;
@@ -219,6 +225,12 @@ namespace Sporeholm
 			// v0.5.84t — drain starvation rising-edges.
 			while (_core.PendingStarvationStarts.TryDequeue(out var starv))
 				EmitSignal(SignalName.StarvationStarted, starv.Name);
+
+			// v0.6.2 audit Fix 5 — drain entity-removal events. GameController
+			// auto-closes the EntityCardPanel if the removed creature was the
+			// currently-selected one. Guid → string for the Godot signal.
+			while (_core.PendingEntityRemovals.TryDequeue(out var removedId))
+				EmitSignal(SignalName.EntityRemoved, removedId.ToString());
 		}
 
 		public override void _ExitTree() => _core.Dispose();
@@ -639,13 +651,13 @@ namespace Sporeholm
 							AutoAddPrepDesignations(map, x, y);
 						}
 						break;
-					// v0.5.24 (Phase 5G) — Hearth blueprint (heat source).
-					case Sporeholm.UI.DesignationTool.BuildHearth:
+					// v0.5.24 (Phase 5G) — Bonfire blueprint (heat source).
+					case Sporeholm.UI.DesignationTool.BuildBonfire:
 						if (CanPlaceBlueprint(map, x, y))
 						{
 							map.SetStructure(x, y,
 								Sporeholm.World.StructureSlot.Blueprint(
-									Sporeholm.World.StructureType.HearthPlanned,
+									Sporeholm.World.StructureType.BonfirePlanned,
 									buildMaterial ?? Sporeholm.World.StructureMat.Stone));
 							AutoAddPrepDesignations(map, x, y);
 						}
@@ -717,50 +729,71 @@ namespace Sporeholm
 							AutoAddPrepDesignations(map, x, y);
 						}
 						break;
+					// v0.6.2 (Phase 5.6 ship) — Cooking Table blueprint. Dedicated
+					// cook station for the Cooking skill split. Accepts any
+					// material (wood for the chopping-block base or stone for a
+					// stone-slab surface). Bonfire is the fallback cooker; this
+					// is the proper full-speed cook target.
+					case Sporeholm.UI.DesignationTool.BuildCookingTable:
+						if (CanPlaceBlueprint(map, x, y))
+						{
+							map.SetStructure(x, y,
+								Sporeholm.World.StructureSlot.Blueprint(
+									Sporeholm.World.StructureType.CookingTablePlanned,
+									buildMaterial ?? Sporeholm.World.StructureMat.DeadWood));
+							AutoAddPrepDesignations(map, x, y);
+						}
+						break;
 					case Sporeholm.UI.DesignationTool.Demolish:
-						// v0.5.20 — refund 50 % of original cost when
-						// demolishing a built structure (RimWorld pattern).
-						// v0.5.34 — refund logic now reads MaterialsDelivered
-						// so mid-delivery cancels recover the delivered units.
-						// Pending blueprints with no delivery get full clear
-						// (nothing was consumed); frames + builds refund
-						// 50 % of delivered.
+						// v0.6.2 — Demolish is now a paintable task instead of
+						// an instant action. Paint marks the structure for
+						// demolition; a Crafter walks to it and performs
+						// demolition work (Construction skill drives speed).
+						// On completion, the structure clears and refunds
+						// 20%-60% of the material cost (Construction skill
+						// drives recovery rate — see DemolishSystem).
+						//
+						//   • Blueprint with no investment → instant cancel
+						//     (nothing to demolish; nothing to refund).
+						//   • Blueprint with delivered materials → instant
+						//     cancel + refund the delivered units (avoids
+						//     stranding material at an abandoned site).
+						//   • Built structure → set MarkedForDemolition=true,
+						//     spawn the demolish work. Re-painting the same
+						//     tile clears the mark (cancel demolition).
 						if (map.HasStructure(x, y))
 						{
 							var dStruct = map.GetStructure(x, y);
-							bool hasInvestment = dStruct.IsBuilt
-								|| (dStruct.IsBlueprint && (dStruct.MaterialsDelivered > 0 || dStruct.BuildProgress > 0));
-							if (hasInvestment)
+							if (dStruct.IsBlueprint)
 							{
-								int delivered = dStruct.IsBuilt
-									? Sporeholm.World.StructureSlot.BuildMaterialCost(dStruct.Type)
-									: dStruct.MaterialsDelivered;
-								int refundAmount = System.Math.Max(1, delivered / 2);
-								// Drop the refund as an item on the demolished
-								// tile so it joins the haul flow naturally.
-								_core?.PostMainThreadCommand(() =>
+								// Cancel + refund any already-delivered materials.
+								if (dStruct.MaterialsDelivered > 0)
 								{
-									if (_core?.Resources == null) return;
-									// v0.5.32 — refund family resolved through the central
-									// helper so wood sub-materials (FungalWood / LivingWood /
-									// etc.) refund into the colony's generic Wood pool.
-									string family = Sporeholm.World.StructureMatMeta.ConsumeFamily(dStruct.Material);
-									string subType = family == "Wood" ? "WoodLog" : "StoneBlock";
-									string matSubType = family == "Wood" ? "DeadWood" : "Granite";
-									var refundItem = Sporeholm.Simulation.Items.ItemFactory.Create(
-										Sporeholm.Simulation.Items.ItemKind.Material, subType,
-										new Sporeholm.Simulation.Items.MaterialKey(family, matSubType),
-										new System.Random(),
-										0,
-										skillLevel: 0,
-										quantity: refundAmount);
-									refundItem.TilePos = new Godot.Vector2(
-										x * Sporeholm.World.LocalMap.TileSize + Sporeholm.World.LocalMap.TileSize * 0.5f,
-										y * Sporeholm.World.LocalMap.TileSize + Sporeholm.World.LocalMap.TileSize * 0.5f);
-									map.DropItem(refundItem);
-								});
+									int refundAmount = dStruct.MaterialsDelivered;
+									_core?.PostMainThreadCommand(() =>
+									{
+										if (_core?.Resources == null) return;
+										DropRefundOrCredit(map, x, y, dStruct.Material, refundAmount);
+									});
+								}
+								map.SetStructure(x, y, Sporeholm.World.StructureSlot.Empty);
 							}
-							map.SetStructure(x, y, Sporeholm.World.StructureSlot.Empty);
+							else if (dStruct.IsBuilt)
+							{
+								if (dStruct.MarkedForDemolition)
+								{
+									// Toggle off — player painted twice to cancel.
+									dStruct.MarkedForDemolition = false;
+									dStruct.DemolitionProgress  = 0;
+									map.SetStructure(x, y, dStruct);
+								}
+								else
+								{
+									dStruct.MarkedForDemolition = true;
+									dStruct.DemolitionProgress  = 0;
+									map.SetStructure(x, y, dStruct);
+								}
+							}
 						}
 						break;
 				}
@@ -777,6 +810,43 @@ namespace Sporeholm
 		// AutoAddPrepDesignations spawns the cleanup designations the
 		// constructor (or any spare worker) will use to clear the tile
 		// before the build proceeds.
+		// v0.6.2 audit Fix 4 + demolish-as-task — refund-drop helper. Used
+		// by demolish-cancel (blueprint with delivered materials) and by
+		// DemolishSystem on completed work to drop the refund items onto
+		// the demolished tile.
+		//
+		// The audit Fix 4 concern (silent item loss if DropItem fails) was
+		// a false positive — `LocalMap.DropItem` already has a cap-bust
+		// last-ditch fallback that logs a warning and force-drops on the
+		// requested tile rather than dropping the item. Items never vanish.
+		// The helper still exists for code reuse since the demolish refund
+		// path now fires from two call sites (cancel-blueprint + complete-
+		// demolish), and centralizing the family/subtype resolution avoids
+		// drift between them.
+		internal static void DropRefundOrCredit(
+			Sporeholm.World.LocalMap map, int x, int y,
+			Sporeholm.World.StructureMat mat, int quantity)
+		{
+			if (quantity <= 0) return;
+			string family = Sporeholm.World.StructureMatMeta.ConsumeFamily(mat);
+			string subType    = family == "Wood" ? "WoodLog"  : "StoneBlock";
+			string matSubType = family == "Wood" ? "DeadWood" : "Granite";
+			var refundItem = Sporeholm.Simulation.Items.ItemFactory.Create(
+				Sporeholm.Simulation.Items.ItemKind.Material, subType,
+				new Sporeholm.Simulation.Items.MaterialKey(family, matSubType),
+				new System.Random(),
+				0,
+				skillLevel: 0,
+				quantity: quantity);
+			refundItem.TilePos = new Godot.Vector2(
+				x * Sporeholm.World.LocalMap.TileSize + Sporeholm.World.LocalMap.TileSize * 0.5f,
+				y * Sporeholm.World.LocalMap.TileSize + Sporeholm.World.LocalMap.TileSize * 0.5f);
+			// DropItem has internal cap-bust fallback (logs a warning to the
+			// Godot console if the tile is saturated) so no return-check is
+			// needed — the item always lands somewhere.
+			map.DropItem(refundItem);
+		}
+
 		private static bool CanPlaceBlueprint(Sporeholm.World.LocalMap map, int x, int y)
 		{
 			if (!map.InBounds(x, y)) return false;
