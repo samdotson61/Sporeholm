@@ -1,6 +1,6 @@
 # Sporeholm
 
-A colony simulation game about a tribe of mushroom-people (**Shroomps**) trying to survive in a strange, fungal world. Inspired by **Dwarf Fortress** and **RimWorld** — built solo in **Godot 4.6** (C#).
+A colony simulation game about a tribe of mushroom-people (**Shroomps**) trying to survive in a strange, fungal world. Built solo in **Godot 4.6** (C#).
 
 Current version: **v0.5.84** (active development — Phase 5 / 5.5 complete, Phase 6 next).
 
@@ -41,19 +41,19 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 ### Shroomps (the colonists)
 
 - Five core needs: **Nutrition**, **Rest**, **Social**, **Magic Resonance**, **Safety**, with derived **Joy** and mood.
-- **11 skills**: Botany, Mining, Athletics, Melee, Ranged, Crafting, Construction, Magic, Social, Study, Healing. Level 0–20 with RimWorld-parity XP curves.
+- **11 skills**: Botany, Mining, Athletics, Melee, Ranged, Crafting, Construction, Magic, Social, Study, Healing. Level 0–20 with diminishing XP curves.
 - **7 roles**: Forager, Crafter, Guardian, Caretaker, Scholar, Sage, Elder. Each role has skill bonuses + default work priorities.
 - **13 mushroom-themed biological traits** (penetrance 0–1) — active ones include **MyceliumAttuned** (magic resonance lasts longer), **ClusterFruiting** (social decays slower around colony-mates), **EfficientGills** (hunger decays slower), **RapidMetabolism** (hunger decays faster — biological cost), **SporeResonant**, **CompactStature** + **WispyFrame** (carry-capacity penalties). Plus personality archetypes + backstories + the **Pacifist** trait (auto-blocks weapon equipping, ~8% incidence).
 - Full body-part hierarchy (Cap, Stalk, Gills, Spore Vent, Filter, legs, feet, hands) with damage, bleeding, downed state, natural healing.
-- Sleep on the ground / in beds with RimWorld-style mood thoughts (**WellRested**, **SleptInBedroom**, **SleptOnGround**).
+- Sleep on the ground / in beds with mood thoughts (**WellRested**, **SleptInBedroom**, **SleptOnGround**).
 - Visible animations: walking bob, sleeping (lying horizontal), eating (chew animation), bleeding (red drip).
 
 ### Work + designations
 
 - Drag-paint orders: Gather food, Excavate stone/wood, Chop trees, Cut plants, Build (walls/floors/doors/furniture), Stockpile zones, Allowed Areas, Demolish.
-- **Stockpile zones** with priority levels + per-zone item-type filters + Forbid/Allow flag (RimWorld parity).
+- **Stockpile zones** with priority levels + per-zone item-type filters + Forbid/Allow flag.
 - **Haul system** with destination reservation + crowd-aware pathing.
-- **Per-tick mining** — RimWorld-parity skill curve activates: a level-0 novice takes ~8 sec / boulder; a level-20 master with a Masterwork Pick clears it in ~0.1 sec.
+- **Per-tick mining** — skill curve activates: a level-0 novice takes ~8 sec / boulder; a level-20 master with a Masterwork Pick clears it in ~0.1 sec.
 - **Tool bonuses**: equipping the right tool for the task (Pick for mining, Sickle for cutting, Sage Staff for Attune) gives a 1.30 × QualityMul speed multiplier.
 
 ### Construction
@@ -73,7 +73,7 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 - **Food**: Cook Meal (4 of any food → 1 Prepared Meal), Juice Berries, Weave Moss Cloth, Weave Grass Linen.
 - **Tools**: Knife / Pick / Hammer / Sickle / Sage Staff (Focus) / Basket — multi-variant per material family (Bone / Wood / Stone / Fungal).
 - **Materials**: Saw Plank (3× input), Refine Pebblestone (4× input, per stone subtype).
-- **Weapons**: Spear / Club / Sling / Bow / Crossbow / Atlatl / Sword / Axe — RimWorld-scale damage + accuracy (12 dmg / 0.70 acc Spear; 20 dmg / 0.70 acc Crossbow; 6 dmg / 0.55 acc Sling).
+- **Weapons**: Spear / Club / Sling / Bow / Crossbow / Atlatl / Sword / Axe — calibrated damage + accuracy (12 dmg / 0.70 acc Spear; 20 dmg / 0.70 acc Crossbow; 6 dmg / 0.55 acc Sling).
 - **Defense**: Shield (3 material variants, 0.25 base block chance).
 - **Medicine**: Magic Herb Poultice.
 
@@ -97,17 +97,17 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 ### Pathfinding
 
 - A* on an 8-connected grid with diagonal corner-cut check.
-- RimWorld-parity crowd cost (175 × per-tile shroomp count) so paths route around crowds.
+- Crowd cost (175 × per-tile shroomp count) so paths route around crowds.
 - Reachability gating: idle destinations are never picked across walls.
 - Per-tick movement claim counter eliminates doorway pileups.
-- Stuck detection with tile-progress (not just pixel-progress), yield-on-stuck (DF-style lie-down), and re-path on pawn-blocked cooldown.
+- Stuck detection with tile-progress (not just pixel-progress), yield-on-stuck (blocker lies down to let asker climb over), and re-path on pawn-blocked cooldown.
 
 ### UI
 
-- RimWorld-style bottom task bar (Orders, Build, Zones, Areas, Jobs, Resources, Shroomps, Animals).
+- Bottom task bar (Orders, Build, Zones, Areas, Jobs, Resources, Shroomps, Animals).
 - Tile-hover info + per-tile properties panel (Terrain, Roof status, Room, Vegetation, Stone, Items, Structure).
 - Selection bracket on shroomps + tiles.
-- RimWorld-style alert pane.
+- Alert pane for urgent colony events.
 - In-game message log (births, deaths, mood drops, **starvation alerts**, joining wanderers).
 - Settings: UI scale, zoom speed, pan speed, save/load multi-slot.
 - Music player widget on main menu + in-game with playlist crossfade.
@@ -192,7 +192,7 @@ The OpenGL Compatibility renderer is locked in for wider hardware compatibility,
 2. **Build** tab — pick a structure (Wall / Floor / Door / Workbench / Bed / Hearth / Torch / Bed / Joy furniture), pick a material chip (Granite / Marble / DeadWood / etc.), drag to place blueprints.
 3. **Zones** tab — paint stockpile rectangles, set priority + accepted item types.
 4. **Areas** tab — paint per-shroomp allowed areas (or the shared *Home* area).
-5. **Jobs** tab — RimWorld-style 15-category priority grid per shroomp.
+5. **Jobs** tab — 15-category priority grid per shroomp.
 6. **Resources** tab — colony-wide item totals.
 7. **Shroomps** tab — list of all colonists with quick navigation to their card.
 
@@ -222,7 +222,7 @@ A typical first colony:
 
 ---
 
-## Inspirations + credits
+## Credits
 
 Music: see in-game **Credits** panel for full attribution. All bundled tracks are CC-BY / CC0 / royalty-free per the asset spec.
 
