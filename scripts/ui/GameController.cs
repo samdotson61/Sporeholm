@@ -805,6 +805,9 @@ public partial class GameController : Node
 					if (hasItems || hasVeg || hasStructure)
 					{
 						_card.Visible = false;        // mutually exclusive with the shroomp card
+						// v0.6.2v — also close the entity card so the
+						// top-right slot holds at most one inspector.
+						_entityCard?.Close();
 						_tileProps.Open(tile.Value.x, tile.Value.y, lmap);
 						_selOverlay.SetTileSelection(tile.Value.x, tile.Value.y);
 						return true;
@@ -1209,6 +1212,10 @@ public partial class GameController : Node
 
 	private void UpdateTileInfo()
 	{
+		// v0.6.2w — hover readout always shows under the menu button. The
+		// inspector cards (ShroompCard / EntityCard / TileProperties) all
+		// occupy the BOTTOM-right slot, not the top-right band, so the
+		// hover overlay coexists with them rather than being suppressed.
 		var map = WorldState.Instance?.CurrentLocalMap;
 		if (map == null) { _tileInfo.Clear(); return; }
 
@@ -1479,7 +1486,10 @@ public partial class GameController : Node
 		// v0.4.34 — also close the stationary-inspector card if it was
 		// open from a prior click on a tile; the two cards share screen
 		// space at top-right so they're mutually exclusive.
+		// v0.6.2v — entity card too, so click-shroomp / click-entity /
+		// click-tile all collapse to a single-inspector-visible invariant.
 		_tileProps?.Close();
+		_entityCard?.Close();
 		_selOverlay?.ClearSelection();
 		var snap = _sim.GetLastSnapshot();
 		if (snap == null) return;

@@ -59,12 +59,18 @@ namespace Sporeholm.UI
 
         public override void _Ready()
         {
-            // v0.6.2u — anchor top-right (same slot as ShroompCardPanel /
-            // TilePropertiesPanel so they share visibility space).
-            AnchorLeft   = 1; AnchorRight  = 1;
-            AnchorTop    = 0; AnchorBottom = 0;
-            OffsetLeft   = -280; OffsetRight  = -16;
-            OffsetTop    = 64;   OffsetBottom = 64 + 340;
+            // v0.6.2w — anchor matches ShroompCardPanel: bottom-right slot,
+            // 320 wide × 320 tall, 240 px above the bottom edge. Sharing
+            // these exact coordinates means the entity card and shroomp
+            // card occupy the same screen space (mutually exclusive — only
+            // one is ever open at a time per the click-handler rules) and
+            // neither overlaps the top-right TileInfoOverlay hover readout.
+            AnchorLeft   = 1f; AnchorTop    = 1f;
+            AnchorRight  = 1f; AnchorBottom = 1f;
+            OffsetLeft   = -320f;
+            OffsetRight  = -UITheme.EdgeInset;
+            OffsetBottom = -240f;
+            OffsetTop    = OffsetBottom - 320f;
             Visible      = false;
             MouseFilter  = MouseFilterEnum.Pass;
 

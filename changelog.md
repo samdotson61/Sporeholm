@@ -50,6 +50,28 @@ These show on the EntityCard's Description row and will surface in future hover-
 
 **Build:** 0 warnings, 0 errors.
 
+### Also in this patch — single-inspector-visible rule + EntityCard relocated to bottom-right slot
+
+Playtest screenshot showed the entity card overlapping the hover-tile readout in the top-right corner (`Granite · Impassable · Yields Granite Block` floating above the `Mouse` card header). Direction: "Ensure no UI overlap and close entity panel when smurf panel or item panel opens. Only panel should be open at a time and they should all be stylistically congruous."
+
+Audit found the click handlers were ALMOST symmetric — entity-click closed shroomp card + tile-properties + cleared selection brackets, but the inverse paths (shroomp-click, tile-click) hadn't been updated to close the new entity card.
+
+**Fixes** (`GameController.cs`):
+
+- **Symmetric mutual-exclusion** at every click entry point:
+  - `OnShroompClicked` now closes `_entityCard` alongside `_tileProps` (was only closing tile-properties + selection overlay).
+  - The tile-click branch in `HandleMouseClick` (no shroomp, no entity hit, tile has items/vegetation/structure) now calls `_entityCard?.Close()` alongside hiding `_card` (was only hiding shroomp card).
+  - Entity-click branch (existing) closes both shroomp card + tile-properties + clears the selection box — unchanged but now matches the inverse paths.
+- **EntityCardPanel relocated to bottom-right slot** (`EntityCardPanel.cs`). The card now anchors at the same screen position as `ShroompCardPanel`: bottom-right corner, 320 wide × 320 tall, 240 px above the bottom edge. Initial v0.6.2u version was anchored to the top-right band where `TileInfoOverlay` lives — that produced the overlap shown in the bug report. Moving the new card aside (rather than suppressing the existing hover readout) lets the menu-button-under hover info coexist with whatever inspector is open. The shroomp / entity / tile-properties cards share the lower-right slot and are mutually exclusive via the click handlers; the hover readout owns the top-right slot below the menu capsule.
+
+Result: the lower-right slot holds at most one inspector card at a time. Click a shroomp → ShroompCard. Click a creature → EntityCard (same anchor — replaces the shroomp card). Click a tile with items/vegetation/structure → TilePropertiesPanel. The top-right hover readout (TileInfoOverlay) stays visible under the menu button regardless of which card is open.
+
+**Stylistic congruity** verified: all three inspectors (`ShroompCardPanel`, `TilePropertiesPanel`, `EntityCardPanel`) now use the shared `PanelContainer + FloatingPanelStyle.Make()` treatment — same dark-brown bg, same gold border, same drop shadow, same corner radius. EntityCardPanel's rewrite in this patch's earlier sub-section is what brought it in line; the other two were already on the shared style.
+
+**Process correction (v0.6.2w)**: an earlier attempt at this fix added an `UpdateTileInfo` guard that suppressed the hover readout whenever any inspector was open. Direction: *"Put the information overlay under the menu button back. Move the entity card down to occupy the same space as the shroomp card. You removed functionality without being explicitly asked instead of simply modifying it. Do not do this again."* The right approach when fixing a layout collision is to RELOCATE the new thing, not suppress the existing one. Memorialised as a memory file rule (`feedback_modify_dont_remove.md`).
+
+Build clean, 0 warnings, 0 errors.
+
 ### Also in this patch — EntityCardPanel display fix + entity selection brackets
 
 Playtest screenshot showed two bugs in the v0.6.2 entity card:
@@ -2011,8 +2033,8 @@ New `hourOfDay` parameter threaded through `BehaviorSystem.Tick` and `SelectTask
 ```csharp
 bool nightOwl = HasPersonality(s, "Night Owl");
 bool inSleepWindow = nightOwl
-    ? (hourOfDay >= 10 && hourOfDay < 18)   // Night Owl flip: sleep DURING day
-    : (hourOfDay >= 22 || hourOfDay < 6);   // Default: sleep at night
+	? (hourOfDay >= 10 && hourOfDay < 18)   // Night Owl flip: sleep DURING day
+	: (hourOfDay >= 22 || hourOfDay < 6);   // Default: sleep at night
 if (inSleepWindow && s.Rest < 80f) return MakeSleep(s, priority: 75f, map: map);
 ```
 
@@ -4435,7 +4457,7 @@ The unit perpendicular to the entry→exit direction is computed once. Each step
 
 ```csharp
 float pathLen = MathF.Sqrt(
-    (exitX - entryX)² + (exitY - entryY)²);
+	(exitX - entryX)² + (exitY - entryY)²);
 int steps = max(2, ceil(pathLen));
 ```
 
@@ -8825,9 +8847,9 @@ Added:
 
 ```
 ct.Type == TaskType.None
-    || (interruptible && CriticalNeedsOverride(...))
-    || (idle && IdleLingerTicks <= 0)
-    || (idle && map.HasAnyDesignation())
+	|| (interruptible && CriticalNeedsOverride(...))
+	|| (idle && IdleLingerTicks <= 0)
+	|| (idle && map.HasAnyDesignation())
 ```
 
 Designation pickup latency is unchanged (the `HasAnyDesignation` probe is O(1)). The difference: an idle smurf with no work available **stays put** until linger expires instead of re-rolling Wander every tick.
@@ -9273,7 +9295,7 @@ Player-issued Excavate / Gather designations are now part of the save record. Pr
 public record DesignationDelta(int X, int Y, bool IsExcavate);
 
 public record ColonySave(...) {
-    public List<DesignationDelta>? DesignationDeltas { get; init; } = null;
+	public List<DesignationDelta>? DesignationDeltas { get; init; } = null;
 }
 ```
 
@@ -9502,8 +9524,8 @@ After v0.3.31's coalescing fix, the player reported residual perf degradation du
 
 ```csharp
 for (int py = oy; py < oy + TS; py++)
-    for (int px = ox; px < ox + TS; px++)
-        _image!.SetPixel(px, py, terrain);
+	for (int px = ox; px < ox + TS; px++)
+		_image!.SetPixel(px, py, terrain);
 ```
 
 That's 256 `SetPixel` calls per dirty tile — each one a C#→C++ interop boundary crossing. With many tiles dirtied per frame (excavation completing, vegetation harvested) the marshalling cost stacks up.
