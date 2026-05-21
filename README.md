@@ -42,7 +42,7 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 ### Shroomps (the colonists)
 
 - Five core needs: **Nutrition**, **Rest**, **Social**, **Magic Resonance**, **Safety**, with derived **Joy** and mood.
-- **11 skills**: Botany, Mining, Athletics, Melee, Ranged, Crafting, Construction, Magic, Social, Study, Healing. Level 0–20 with diminishing XP curves.
+- **12 skills**: Botany, Mining, Athletics, Melee, Ranged, Crafting, **Cooking** (new), Construction, Magic, Social, Study, Healing. Level 0–20 with diminishing XP curves. Planned additions: **Defense** + **Hunting** (Phase 7 combat) and **Husbandry** (Phase 8 farming + animals) — target roster of 15 skills by end of Phase 8.
 - **7 roles**: Forager, Crafter, Guardian, Caretaker, Scholar, Sage, Elder. Each role has skill bonuses + default work priorities.
 - **13 mushroom-themed biological traits** (penetrance 0–1) — active ones include **MyceliumAttuned** (magic resonance lasts longer), **ClusterFruiting** (social decays slower around colony-mates), **EfficientGills** (hunger decays slower), **RapidMetabolism** (hunger decays faster — biological cost), **SporeResonant**, **CompactStature** + **WispyFrame** (carry-capacity penalties). Plus personality archetypes + backstories + the **Pacifist** trait (auto-blocks weapon equipping, ~8% incidence).
 - Full body-part hierarchy (Cap, Stalk, Gills, Spore Vent, Filter, legs, feet, hands) with damage, bleeding, downed state, natural healing.
@@ -74,10 +74,11 @@ Click any creature to open the **Entity Card** — a compact inspector showing s
 ### Construction
 
 - Place blueprints; Crafters haul materials + frame the structure per-tick (skill-scaled).
-- Structure types: Wall, Floor, Door, Shelf, Workbench, Hearth, Bed, Meditation Shrine, Shroom Board, Gossip Bench, Table, **Torch** (new this patch — wood haft + flame, +2°C per torch, light emission stubbed for Phase 10).
+- Structure types: Wall, Floor, Door, Shelf, Workbench, **Cooking Table** (new — dedicated cook station for the Cooking skill split), Bonfire (renamed from Hearth — heat source + half-speed cooking fallback), Bed, Meditation Shrine, Shroom Board, Gossip Bench, Table, Torch (wood haft + flame, +2°C per torch, light emission stubbed for Phase 10).
+- **Production / Furniture tab split** in the Build panel: Workbench + Cooking Table sit in the new Production tab (where workstations belong); Bed / Table / Shelf / Bonfire / Torch stay in Furniture.
 - Material choice per blueprint: 5 stone subtypes + 3 wood subtypes + **Pebblestone** (refined cobblestone). Each material has a distinct tint + Comfort / Beauty multiplier.
 - 16-variant autotile walls so wall stretches blend horizontally.
-- Demolish refunds 50% of original material cost.
+- **Demolish is a paintable task** (rewritten in v0.6.2): paint a built structure to mark it for tear-down (red X overlay), a Crafter walks to it and performs the work over many ticks (Construction skill drives speed). Refund is **20%–60% of material cost based on Construction skill** — skilled crafters salvage more. Blueprints still cancel instantly + refund delivered materials.
 
 ### Crafting (Phase 5.5 Bills System)
 
@@ -85,19 +86,20 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 
 41 recipes across:
 
-- **Food**: Cook Meal (4 of any food → 1 Prepared Meal), Juice Berries, Weave Moss Cloth, Weave Grass Linen.
-- **Tools**: Knife / Pick / Hammer / Sickle / Sage Staff (Focus) / Basket — multi-variant per material family (Bone / Wood / Stone / Fungal).
-- **Materials**: Saw Plank (3× input), Refine Pebblestone (4× input, per stone subtype).
-- **Weapons**: Spear / Club / Sling / Bow / Crossbow / Atlatl / Sword / Axe — calibrated damage + accuracy (12 dmg / 0.70 acc Spear; 20 dmg / 0.70 acc Crossbow; 6 dmg / 0.55 acc Sling).
-- **Defense**: Shield (3 material variants, 0.25 base block chance).
-- **Medicine**: Magic Herb Poultice.
+- **Cooking** (Cooking Table; Bonfire fallback at half speed): Cook Meal (4 of any food → 1 Prepared Meal), Juice Berries. The Cooking Table is the dedicated full-speed cook station; a Bonfire can cook the same recipes at × 2.0 work-ticks so a bare colony can still feed itself before a Cooking Table is built.
+- **Crafting** (Workbench): Weave Moss Cloth, Weave Grass Linen.
+- **Tools** (Workbench): Knife / Pick / Hammer / Sickle / Sage Staff (Focus) / Basket — multi-variant per material family (Bone / Wood / Stone / Fungal).
+- **Materials** (Workbench): Saw Plank (3× input), Refine Pebblestone (4× input, per stone subtype).
+- **Weapons** (Workbench): Spear / Club / Sling / Bow / Crossbow / Atlatl / Sword / Axe — calibrated damage + accuracy (12 dmg / 0.70 acc Spear; 20 dmg / 0.70 acc Crossbow; 6 dmg / 0.55 acc Sling).
+- **Defense** (Workbench): Shield (3 material variants, 0.25 base block chance).
+- **Medicine** (Workbench): Magic Herb Poultice.
 
 ### Rooms
 
 - Auto-detected via flood-fill when walls close off a space.
-- **Room types** inferred from furniture: Bedroom (any bed), Kitchen (Hearth, no bed), Workshop (Workbench, no bed/hearth), Storage (Shelf only), Generic. Type drives mood thoughts and (future) work assignment.
+- **Room types** inferred from furniture: Bedroom (any bed), Kitchen (Bonfire OR Cooking Table, no bed), Workshop (Workbench, no bed/bonfire/cooking table), Storage (Shelf only), Generic. Type drives mood thoughts and (future) work assignment.
 - **Beauty score** from quality-weighted furniture + floors − corpses. High beauty → **BeautyPretty +3** mood; low → **BeautyUgly −3**.
-- **Room temperature** offset folds in Hearths (+10°C each) + Torches (+2°C each) + insulation baseline.
+- **Room temperature** offset folds in Bonfires (+10°C each) + Torches (+2°C each) + insulation baseline.
 - **Natural cavern roofs**: every tile inside a solid mass (Boulder, DeadLog, LivingWood, Skeleton, or cave interior) is auto-roofed at worldgen. Roofs persist when you mine the solid out — you get a real "you dug a cave" feel with a subtle dark blue tint over roofed tiles.
 
 ### Items + economy
@@ -146,7 +148,7 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 | 6 | Entity system (animals + creatures) | Shipped (v0.6.0 — 15 species + AI + sprites + save/load) |
 | **7** | **Combat** (with Healer + Rescue + Weapons/Apparel) | **Next** (stubs ready) |
 | 8 | Agricultural systems (animal husbandry, farming, hunting) | — |
-| 9 | Events + Storyteller (Balanced / Patient / Cataclysmic) | Stub |
+| 9 | Events + Storyteller (Peaceful / Random / Adventure — extensible) | Stub |
 | 10 | Weather + Environment (Insulation half done) | — |
 | 11 | Technology + Culture (research + power) | — |
 | 12 | Disease | — |
@@ -204,7 +206,7 @@ The OpenGL Compatibility renderer is locked in for wider hardware compatibility,
 ### The basic loop
 
 1. **Bottom task bar** — open **Orders** to paint Gather / Excavate / Chop / Cut / Haul / Demolish designations.
-2. **Build** tab — pick a structure (Wall / Floor / Door / Workbench / Bed / Hearth / Torch / Bed / Joy furniture), pick a material chip (Granite / Marble / DeadWood / etc.), drag to place blueprints.
+2. **Build** tab — pick a structure (Wall / Floor / Door / Workbench / Cooking Table / Bed / Bonfire / Torch / Joy furniture), pick a material chip (Granite / Marble / DeadWood / etc.), drag to place blueprints. Sub-tabs: **Structure** (walls, floors, doors), **Production** (Workbench, Cooking Table), **Furniture** (Bed, Table, Shelf, Bonfire, Torch), **Joy** (Shrine, Board, Bench).
 3. **Zones** tab — paint stockpile rectangles, set priority + accepted item types.
 4. **Areas** tab — paint per-shroomp allowed areas (or the shared *Home* area).
 5. **Jobs** tab — 15-category priority grid per shroomp.
@@ -220,9 +222,9 @@ A typical first colony:
 3. Open **Build → Structure → Wall**, pick **DeadWood** or **Fungal Wood** as material, drag a small shelter perimeter.
 4. **Build → Structure → Floor**, then **Door** for an entrance.
 5. **Build → Furniture → Bed**, place a few inside the room.
-6. **Build → Furniture → Workbench + Hearth**.
-7. Click the Workbench tile, scroll to **Bills**, and queue **Cook Meal**.
-8. Set up a **Stockpile zone** near the workbench for cooked food storage.
+6. **Build → Production → Workbench** (for crafting recipes) and **Build → Production → Cooking Table** (for meals). **Furniture → Bonfire** if you want room heat + a half-speed cooking fallback before the Cooking Table is built.
+7. Click the Cooking Table tile, scroll to **Bills**, and queue **Cook Meal**. (Workbench bills run Crafting recipes only — knives, planks, cloth, weapons, etc.)
+8. Set up a **Stockpile zone** near the kitchen for cooked food storage.
 9. As skills rise, queue better recipes: **Carve Knife**, **Craft Spear**, **Saw Plank**, **Refine Pebblestone**, **Magic Herb Poultice**, etc.
 10. Watch the **message log** — starvation alerts, mood drops, and births surface there. Mood drops to *Distressed* or below mean trouble.
 

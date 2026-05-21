@@ -51,6 +51,21 @@ New memory file `feedback_no_thirdparty_or_thirdperson.md` captures the standard
 
 Build clean, 0 warnings, 0 errors (no code touched). Both backups refreshed.
 
+### Also in this patch — README catches up with Phase 5.6 + cooking + the v0.6.2 rename batch
+
+Phase 5.6 shipped the Cooking skill (12th in the registry) and the Cooking Table + Bonfire-rename + Production-tab-split + demolish-as-paintable-task changes in the previous patch, but the README "What's in the game right now" section still described the pre-Phase-5.6 state (11 skills, Hearth-not-Bonfire, no Cooking Table, instant 50%-refund demolish). Six README sections refreshed:
+
+- **Shroomps section** — skill count 11 → 12 (Cooking added as the new skill, split off from Crafting per Phase 5.6). Plus a forward-looking note: planned additions are Defense + Hunting (Phase 7 combat) and Husbandry (Phase 8 farming + animals), targeting a 15-skill roster by end of Phase 8.
+- **Construction section** — structure list now includes Cooking Table (new dedicated cook station) and renames Hearth → Bonfire (with the v0.6.2 heat-source + half-speed-cooking-fallback role). Added a note on the Production / Furniture tab split in the Build panel.
+- **Construction section — Demolish** — replaced the stale "Demolish refunds 50%" line with the new paintable-task model: paint a structure to mark it (red X overlay), a Crafter performs the work over many ticks, refund is **20%–60% based on Construction skill**.
+- **Crafting section** — recipes regrouped by station (Cooking Table vs Workbench) so the player sees which station hosts which recipes. Cooking Table runs CookMeal + JuiceBerries at full speed; Bonfire is the half-speed fallback; Workbench runs all the Crafting recipes (tools, cloth, planks, weapons, etc.).
+- **Rooms section** — Kitchen now correctly inferred from "Bonfire OR Cooking Table" instead of "Hearth". Temperature folds in "Bonfires (+10°C each)" instead of Hearths.
+- **Roadmap table** — Phase 9 storyteller lineup updated to **Peaceful / Random / Adventure** (extensible), the v0.6.2 Q&A-driven roster instead of the old Balanced / Patient / Cataclysmic placeholders.
+- **"What to do first" walkthrough** — step 6 splits the Workbench + Cooking Table builds across Production vs Furniture tabs; step 7 routes Cook Meal bills to the Cooking Table instead of the Workbench; bills clarified as Cooking-only at the Cooking Table vs Crafting-only at the Workbench.
+- **Build → Structure / Production / Furniture / Joy sub-tab list** added to the "basic loop" section so the player sees the four sub-tabs at a glance.
+
+Pure README amend — no code, changelog historical entries, or roadmap touched. Both backups refreshed.
+
 ---
 
 ## [0.6.2] — 2026-05-21 — Entity selection + EntityCardPanel inspector + needs scaffolding
