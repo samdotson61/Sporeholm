@@ -50,6 +50,30 @@ These show on the EntityCard's Description row and will surface in future hover-
 
 **Build:** 0 warnings, 0 errors.
 
+### Also in this patch — Phase 7 + Phase 8 roadmap reflushed against current systems
+
+Docs-only edit to `SporeDes/Sporeholm_Roadmap_2026.md` reflushing the Phase 7 + Phase 8 specs against everything that's actually shipped post-Phase-6. Six block-additions, no removals:
+
+**Phase 7 — Combat updates:**
+- **§7.8 rewrite** acknowledging the v0.5.79 / v0.5.81 / v0.6.0 foundation that already ships: `BloodLoss`/`BleedRate` recomputed per tick from body-part state, `IsDowned` with per-personality threshold + hysteresis, `ComputeMovingCapacity` limp, red drip-pixel indicator. Phase 7 now extends on top of that foundation rather than redesigning it.
+- **§7.8a Entity combat parity (new)**: combat engine handles `Shroomp` and `Entity` as first-class combatants via a shared `ICombatant` interface + `CombatSystem.ApplyAttack` driver. Per-species `BodyPartTemplate` adds to `EntityDef`; wild entities get the same wound / bleed / pain / downed pipeline as shroomps (with species-tuned flee thresholds). Replaces the v0.6.0 stub `EntitySystem.ApplyEntityAttack` that wrote directly into the shroomp body-parts dict.
+- **§7.8b Visual feedback for wounds + combat (new, required)**: three effects on a shared `CombatFeedbackOverlay` — blood-spatter decals (per-species `BloodColour`; shroomps blue, mammals red, MagicWisp violet, Bonecrest Beetle pale green; pulses on active bleed, scales with Sever wounds), hit-bob animation (defender sprite jolts 2-3 px backwards along attack vector for 5 frames then settles), and damage-number floaters (`-12` red on Hit, `-24` bold red on Critical, `BLOCK` golden, `MISS` grey, floats up 16 px / fades 0.6 s).
+- **§7.8c Hunting hook (new)**: hunting and combat share one tick pipeline. Phase 8 §8.6 owns target selection + corpse hand-off; the contact exchange routes through `CombatSystem.ApplyAttack` identical to shroomp-vs-hostile. Hunting "just works" once Phase 7 lands.
+
+**Phase 8 — Agricultural updates:**
+- **§8.2 rewrite** — explicit `TaskType.Tame` driver added (acquire bait → approach → stalk-tick → resolve via skill curve). New `ReservationManager.LayerTame` for first-colonist-wins semantics. Tame outcome buckets (Success / Partial failure / Catastrophic failure) wired to existing Phase 7 hostile-transition path on catastrophic failure.
+- **§8.2.2 Husbandry skill (new)**: renames the previous `AnimalHandling` placeholder to `Husbandry` per directive. Becomes the 12th skill in the v0.5.84t-locked roster. XP curve, per-role seed weights (Caretaker primary +3), and three derived curves: `HusbandryAttemptFactor` / `HusbandryProduceQualityMul` / `HusbandryBreedSuccessMul`. Save round-trip via the existing `SkillRegistry.MigrateLegacySkillKeys` back-fill (pre-v0.7 loads get fresh lvl 0).
+- **§8.8.1 Farm Zone painting (rewrite)**: drag-paint flow in the existing Zones tab. Player picks a crop from a Botany-filtered dropdown, paints a rectangle of Mud / Grass / ForestFloor tiles, each tile becomes a `FarmPlot` cell. Sand / Stone / Boulder / Water refuse the zone with red overlay. Foragers with Botany priority ≥ 1 auto-pick `TaskType.Plant`.
+- **§8.8.1a Plant tier table (new)**: nine crops across Simple / Medium / Hard, each with min Botany level. Simple (Small Mushroom / Moss / Spring Greens) at Botany 0-1; Medium (Capberry / Sunberry / Pumpkin) at 3-5; Hard (Magic Herb / Large Mushroom / Magic Flower) at 6-9. Hard cap at Botany 9 — Phase 11 tech unlocks higher tiers. Per-plot `WorkTicks` scales with tier (80 / 200 / 400). Dropdown greys out crops above the colony's max-Botanist level with a tooltip explaining the gate.
+- **§8.8.1b Botany skill curves (new)**: `BotanyPlantSpeedFactor` (0.20 → 1.20 between lvl 0-12) and `BotanyYieldFactor` (0.70 → 1.50 between lvl 0-12). XP via existing v0.5.84t trickle pattern — 0.4 XP/tick during plant work + 40 XP on plot reaching Ripe.
+- **§8.x Jobs UI / Order toolbar (new)**: three new categories on the Jobs grid (Husbandry / Hunt / Farm) with per-role priority defaults matching the role-canonical pattern from `WorkPriorityDefaults.cs`. New Tame designation verb on the Order toolbar — drag-paint over wild Tameable entities to queue them up. Hunt designation wires to live `TaskType.Hunt` per §8.6.
+
+**Cross-cutting:**
+- **§8.y Task / Pathfinding optimization rules (new)**: ten-point hardening checklist that EVERY new `TaskType` must adopt going forward. Includes A* on all target-tile tasks (v0.5.84), region-equality gate at the picker (v0.5.83), per-task ReservationManager layer (v0.5.82), full-path re-validation (v0.5.82), symmetric yield + stuck threshold alignment (v0.5.82), path-fail cooldown (v0.5.82), drop-on-A*-fail-for-non-designation (v0.5.84), deterministic ring scan picker fallback (v0.5.84), per-tick claim counter (v0.5.76), no-corner-cutting through impassable diagonals (v0.5.77). Tasks that skip any rule MUST document the reason in code + a roadmap note. Default = adopt everything.
+- **§8.11 Cross-system integration map updated**: BehaviorSystem row now lists the new tasks (Tame, Plant, Harvest, Hunt) + the §8.y optimization-rule requirement. SkillRegistry row added with Husbandry. JobsPanel row added with Husbandry / Hunt / Farm categories + Tame verb.
+
+No code changed — purely a design-doc reflush. Build clean (no compilation impact); both backups refreshed so the v0.6.2 snapshot mirrors the updated roadmap.
+
 ### Also in this patch — single-inspector-visible rule + EntityCard relocated to bottom-right slot
 
 Playtest screenshot showed the entity card overlapping the hover-tile readout in the top-right corner (`Granite · Impassable · Yields Granite Block` floating above the `Mouse` card header). Direction: "Ensure no UI overlap and close entity panel when smurf panel or item panel opens. Only panel should be open at a time and they should all be stylistically congruous."
