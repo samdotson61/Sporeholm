@@ -64,7 +64,7 @@ namespace Sporeholm.Simulation.Entities
         int          MaxGroupSize,      // upper bound
         int          PopulationCapPerMap, // soft cap; EntitySpawnSystem won't exceed
         float        SpawnWeight,       // ambient-respawn weight if no spawn point
-        // ── drops (Phase 9 hook; consulted by EntitySystem.Butcher) ────
+        // ── drops (Phase 8 hook; consulted by EntitySystem.Butcher) ────
         // Each (itemSubType, minCount, maxCount) line drops on butcher.
         IReadOnlyList<(string SubType, int Min, int Max)> ButcherDrops
     );

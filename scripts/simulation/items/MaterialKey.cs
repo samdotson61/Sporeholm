@@ -149,12 +149,12 @@ namespace Sporeholm.Simulation.Items
             // ── Animal-derived materials (Bone live in v0.5.16, Hide v0.5.16+) ──
             // v0.5.16 — Bone promoted from placeholder to live material.
             // Drops from new Skeleton terrain (LocalMapGenerator gen pass)
-            // and from Phase 9 animal butchery. Sharp + lightweight: good
+            // and from Phase 8 animal butchery. Sharp + lightweight: good
             // for daggers / spear tips / arrowheads. Durability slightly
             // above the v0.4.x placeholder so a Bone Spear feels worth
             // crafting vs a Wooden Spear.
             new() { Key = new("Bone","Generic"),  DisplayName = "Bone",  Icon = "🦴", DurabilityMul = 1.10f, DecayRateMul = 0.75f, ValueMul = 0.90f },
-            // Hide remains a Phase 9 placeholder — needs animal corpse +
+            // Hide remains a Phase 8 placeholder — needs animal corpse +
             // butchery work-task before it can actually drop.
             new() { Key = new("Hide","Generic"),  DisplayName = "Hide",  Icon = "🟫", DurabilityMul = 0.70f, DecayRateMul = 1.30f, ValueMul = 0.90f },
             // v0.5.16 — Iron + Bronze removed. Shroomps are small mushroom

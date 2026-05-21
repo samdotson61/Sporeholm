@@ -1,19 +1,19 @@
 namespace Sporeholm.World
 {
     // v0.5.14 (Phase 5C — rimport.md N19) — wildlife spawn-point stub.
-    // Full Animal system (creature data + AI + behaviour) lands in Phase 9
+    // Full Animal system (creature data + AI + behaviour) lands in Phase 8
     // per rimport.md N12 ("Animals can ship as a strict subset of Shroomp
     // — same BodyParts + Needs + simplified BehaviorSystem"). Until then,
     // generation places `AnimalSpawnPoint` markers per biome's faunal
     // table; the markers are inert (no creature actually spawns yet) but
-    // serve as anchored locations the Phase 9 system will read when it
+    // serve as anchored locations the Phase 8 system will read when it
     // populates the map.
     //
-    // v0.5.15 — species aligned with the Phase 9 roadmap roster
-    // (Roadmap §9.1, lines 2020-2029) instead of v0.5.14's generic
+    // v0.5.15 — species aligned with the Phase 8 roadmap roster
+    // (Roadmap §8.1, lines 2020-2029) instead of v0.5.14's generic
     // placeholders (MushroomGrazer / ShroombackBeetle / WildRat). Using
     // the roadmap's specific species names means the spawn points placed
-    // now will be consumed directly by the Phase 9 implementation
+    // now will be consumed directly by the Phase 8 implementation
     // without renaming.
     //
     // Shroomp-flavoured fauna roster:
@@ -33,8 +33,8 @@ namespace Sporeholm.World
     //                     Butcherable, Breeds. Aggressive forest predator
     //                     that becomes a war mount when tamed.
     //
-    // Additional Phase 9 species (HoneyBeeSwarm, ShoreFrog, Pegasus,
-    // SkyPony) defer to the full Phase 9 implementation — they need
+    // Additional Phase 8 species (HoneyBeeSwarm, ShoreFrog, Pegasus,
+    // SkyPony) defer to the full Phase 8 implementation — they need
     // beekeeper sub-skill, biome-specific spawning rules, or late-game
     // era unlocks that don't fit the v0.5.x stub layer.
     public enum AnimalKind : byte
@@ -46,7 +46,7 @@ namespace Sporeholm.World
         ForestBoar,
     }
 
-    // Tile-anchored spawn point. The Phase 9 system will read this list
+    // Tile-anchored spawn point. The Phase 8 system will read this list
     // when populating the map and roll an actual creature at each point
     // with AnimalKind-appropriate stats. For v0.5.14 the list is just
     // generation output; nothing else consumes it yet.

@@ -3,7 +3,7 @@ using Sporeholm.Simulation;
 
 namespace Sporeholm
 {
-    // Storyteller selection — Phase 8 will give each profile a distinct event
+    // Storyteller selection — Phase 9 will give each profile a distinct event
     // weighting curve. Stubbed here so the scenario screen has a real choice
     // to display; Balanced is the only behaviour currently implemented (all
     // future storytellers fall back to Balanced behaviour for now).

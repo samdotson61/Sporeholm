@@ -12,9 +12,9 @@ namespace Sporeholm.UI
     // any global theme tweak propagates here automatically.
     //
     // Layout (top to bottom):
-    //   • Header row — close button (×) at top-right.
-    //   • Name — species DisplayName, gold, 16pt.
+    //   • Header row — species name + close button (×) at top-right.
     //   • Description — italic two-line blurb from EntityDef.Description.
+    //   • State + Disposition row.
     //   • Health   — labelled ProgressBar (current/max).
     //   • Mood     — single-word label from EntitySnapshot.MoodLabel.
     //   • Needs    — Nutrition + Rest as labelled ProgressBars.
@@ -22,10 +22,21 @@ namespace Sporeholm.UI
     // The panel is mutually exclusive with ShroompCardPanel + TilePropertiesPanel
     // (they share top-right screen space). GameController toggles `.Visible`
     // and calls Show / Refresh on snapshot ticks.
+    //
+    // v0.6.2u — rewrite. Previously used raw Panel + manual stylebox that
+    // didn't render against the world (transparent background, invisible
+    // ProgressBars). New version uses PanelContainer + FloatingPanelStyle.Make
+    // matching ShroompCardPanel's pattern, plus explicit fill + track
+    // styleboxes on each ProgressBar so the bars actually fill visibly.
     public partial class EntityCardPanel : Control
     {
-        private static readonly Color DarkWood = UITheme.TextPrimary;
+        // v0.6.2u — emitted when the card closes (× button, Esc, auto-close
+        // on selected-entity death). GameController catches this to clear
+        // the world-space selection brackets on EntityColonyView.
+        [Signal] public delegate void ClosedEventHandler();
+
         private static readonly Color Gold     = UITheme.TextAccent;
+        private static readonly Color Body     = UITheme.TextPrimary;
         private static readonly Color TextDim  = UITheme.TextMuted;
 
         // ── UI handles ────────────────────────────────────────────────
@@ -41,34 +52,50 @@ namespace Sporeholm.UI
         private Label       _restLabel        = null!;
         private Button      _closeBtn         = null!;
 
-        private Guid? _selectedId;
+        // v0.6.2u — entity id currently displayed; null when closed. Public so
+        // EntityColonyView's selection-bracket render can query "is this entity
+        // selected?" without going through a signal-back round-trip.
+        public Guid? SelectedId { get; private set; }
 
         public override void _Ready()
         {
-            // v0.6.2 — anchor top-right (same slot as ShroompCardPanel /
+            // v0.6.2u — anchor top-right (same slot as ShroompCardPanel /
             // TilePropertiesPanel so they share visibility space).
             AnchorLeft   = 1; AnchorRight  = 1;
             AnchorTop    = 0; AnchorBottom = 0;
-            OffsetLeft   = -260; OffsetRight  = -16;
-            OffsetTop    = 64;   OffsetBottom = 64 + 360;
+            OffsetLeft   = -280; OffsetRight  = -16;
+            OffsetTop    = 64;   OffsetBottom = 64 + 340;
             Visible      = false;
+            MouseFilter  = MouseFilterEnum.Pass;
 
-            var bg = new Panel { AnchorLeft = 0, AnchorTop = 0, AnchorRight = 1, AnchorBottom = 1 };
-            bg.AddThemeStyleboxOverride("panel", MakeCardStylebox());
-            bg.MouseFilter = MouseFilterEnum.Pass;
+            // ── Background ────────────────────────────────────────────
+            // v0.6.2u — PanelContainer with FloatingPanelStyle so the card
+            // gets the same dark-brown look as ShroompCardPanel + HUD +
+            // BottomTabPanel. Raw Panel + manual stylebox (the v0.6.2
+            // initial version) rendered transparently in-game; switching to
+            // PanelContainer fixes the visibility.
+            var bg = new PanelContainer();
+            bg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+            bg.AddThemeStyleboxOverride("panel", FloatingPanelStyle.Make());
             AddChild(bg);
 
-            var vbox = new VBoxContainer
-            {
-                AnchorLeft   = 0, AnchorRight  = 1,
-                AnchorTop    = 0, AnchorBottom = 1,
-                OffsetLeft   = 12, OffsetRight  = -12,
-                OffsetTop    = 10, OffsetBottom = -12,
-            };
-            AddChild(vbox);
+            var margin = new MarginContainer();
+            margin.AddThemeConstantOverride("margin_left",   8);
+            margin.AddThemeConstantOverride("margin_right",  8);
+            margin.AddThemeConstantOverride("margin_top",    8);
+            margin.AddThemeConstantOverride("margin_bottom", 8);
+            bg.AddChild(margin);
 
-            // Header row: title slot is filled by _nameLabel; close at right.
-            var headerRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End };
+            var vbox = new VBoxContainer();
+            vbox.AddThemeConstantOverride("separation", 4);
+            margin.AddChild(vbox);
+
+            // ── Header: name + close button on one row ────────────────
+            var headerRow = new HBoxContainer();
+            _nameLabel = NewTitleLabel("Unknown Creature");
+            _nameLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            headerRow.AddChild(_nameLabel);
+
             _closeBtn = new Button
             {
                 Text = "×",
@@ -76,28 +103,34 @@ namespace Sporeholm.UI
                 FocusMode = FocusModeEnum.None,
                 TooltipText = "Close",
             };
-            _closeBtn.Pressed += () => { Visible = false; _selectedId = null; };
+            _closeBtn.Pressed += () =>
+            {
+                Visible = false;
+                SelectedId = null;
+                EmitSignal(SignalName.Closed);
+            };
             headerRow.AddChild(_closeBtn);
             vbox.AddChild(headerRow);
 
-            _nameLabel = NewTitleLabel("Unknown Creature");
-            vbox.AddChild(_nameLabel);
-
+            // Description (auto-wrap) — sits below the title.
             _descLabel = NewBodyLabel("");
             _descLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
             _descLabel.AddThemeColorOverride("font_color", TextDim);
             vbox.AddChild(_descLabel);
 
-            // State row (e.g. "Wandering • Friendly")
+            // State row (e.g. "Wandering · Friendly").
             _stateLabel = NewBodyLabel("");
             _stateLabel.AddThemeColorOverride("font_color", TextDim);
             vbox.AddChild(_stateLabel);
 
             vbox.AddChild(NewDivider());
 
-            // ── Health ───────────────────────────────────────────────
+            // ── Health ────────────────────────────────────────────────
             vbox.AddChild(NewSectionLabel("Health"));
-            var (healthRow, healthBar, healthLabel) = NewLabelledBar(0, 100);
+            var (healthRow, healthBar, healthLabel) = NewLabelledBar(
+                0, 100, null,
+                fill:  new Color(0.70f, 0.20f, 0.20f),    // red fill (health)
+                track: new Color(0.25f, 0.10f, 0.10f, 0.55f));
             _healthBar = healthBar;
             _healthBarLabel = healthLabel;
             vbox.AddChild(healthRow);
@@ -107,17 +140,24 @@ namespace Sporeholm.UI
             // ── Mood ─────────────────────────────────────────────────
             vbox.AddChild(NewSectionLabel("Mood"));
             _moodLabel = NewBodyLabel("Calm");
+            _moodLabel.AddThemeColorOverride("font_color", Body);
             vbox.AddChild(_moodLabel);
 
             vbox.AddChild(NewDivider());
 
             // ── Needs ────────────────────────────────────────────────
             vbox.AddChild(NewSectionLabel("Needs"));
-            var (nutritionRow, nutritionBar, nutritionLabel) = NewLabelledBar(0, 100, "Nutrition");
+            var (nutritionRow, nutritionBar, nutritionLabel) = NewLabelledBar(
+                0, 100, "Nutrition",
+                fill:  new Color(0.55f, 0.55f, 0.20f),    // golden fill (food)
+                track: new Color(0.20f, 0.20f, 0.08f, 0.55f));
             _nutritionBar   = nutritionBar;
             _nutritionLabel = nutritionLabel;
             vbox.AddChild(nutritionRow);
-            var (restRow, restBar, restLabel) = NewLabelledBar(0, 100, "Rest");
+            var (restRow, restBar, restLabel) = NewLabelledBar(
+                0, 100, "Rest",
+                fill:  new Color(0.35f, 0.45f, 0.70f),    // muted blue (rest)
+                track: new Color(0.12f, 0.16f, 0.28f, 0.55f));
             _restBar   = restBar;
             _restLabel = restLabel;
             vbox.AddChild(restRow);
@@ -128,30 +168,31 @@ namespace Sporeholm.UI
         // health/needs/mood while the player has the card open.
         public void Show(EntitySnapshot e)
         {
-            _selectedId = e.Id;
+            SelectedId = e.Id;
             Visible = true;
             ApplySnapshot(e);
         }
 
         public void Refresh(SimulationSnapshot snap)
         {
-            if (!Visible || _selectedId == null) return;
+            if (!Visible || SelectedId == null) return;
             for (int i = 0; i < snap.Entities.Count; i++)
             {
                 var e = snap.Entities[i];
-                if (e.Id != _selectedId.Value) continue;
+                if (e.Id != SelectedId.Value) continue;
                 ApplySnapshot(e);
                 return;
             }
             // Entity is gone (died / despawned) — close the card.
-            Visible = false;
-            _selectedId = null;
+            Close();
         }
 
         public void Close()
         {
+            if (!Visible && SelectedId == null) return;
             Visible = false;
-            _selectedId = null;
+            SelectedId = null;
+            EmitSignal(SignalName.Closed);
         }
 
         private void ApplySnapshot(EntitySnapshot e)
@@ -178,25 +219,6 @@ namespace Sporeholm.UI
 
         // ── small UI helpers ──────────────────────────────────────────
 
-        private static StyleBoxFlat MakeCardStylebox()
-        {
-            return new StyleBoxFlat
-            {
-                BgColor               = UITheme.PanelBg,
-                BorderColor           = UITheme.PanelBorderColour,
-                BorderWidthLeft       = 2,
-                BorderWidthRight      = 2,
-                BorderWidthTop        = 2,
-                BorderWidthBottom     = 2,
-                CornerRadiusTopLeft   = 6,
-                CornerRadiusTopRight  = 6,
-                CornerRadiusBottomLeft  = 6,
-                CornerRadiusBottomRight = 6,
-                ShadowColor           = new Color(0, 0, 0, 0.35f),
-                ShadowSize            = 6,
-            };
-        }
-
         private static Label NewTitleLabel(string text)
         {
             var l = new Label
@@ -220,7 +242,7 @@ namespace Sporeholm.UI
         private static Label NewBodyLabel(string text)
         {
             var l = new Label { Text = text, MouseFilter = MouseFilterEnum.Pass };
-            l.AddThemeColorOverride("font_color", DarkWood);
+            l.AddThemeColorOverride("font_color", Body);
             l.AddThemeFontSizeOverride("font_size", 11);
             return l;
         }
@@ -230,19 +252,20 @@ namespace Sporeholm.UI
             return new HSeparator { CustomMinimumSize = new Vector2(0, 4) };
         }
 
-        // Returns (rowContainer, bar, label). The label sits to the right
-        // of the bar so the player gets a numeric readout alongside the
-        // visual fill. `nameOpt` is shown to the LEFT of the bar when
-        // supplied (used for Nutrition / Rest); the Health row passes
-        // null since the section header above the bar already names it.
+        // v0.6.2u — labelled ProgressBar row with explicit fill + track
+        // styleboxes so the bars render visibly. ShroompCardPanel uses the
+        // same pattern (its skill bars + need bars all override fg/bg
+        // explicitly because the default Godot ProgressBar theme is near-
+        // invisible against the dark-brown panel background).
         private static (HBoxContainer Row, ProgressBar Bar, Label NumLabel)
-            NewLabelledBar(float min, float max, string? nameOpt = null)
+            NewLabelledBar(float min, float max, string? nameOpt, Color fill, Color track)
         {
-            var row = new HBoxContainer { CustomMinimumSize = new Vector2(0, 18) };
+            var row = new HBoxContainer { CustomMinimumSize = new Vector2(0, 16) };
+            row.AddThemeConstantOverride("separation", 6);
             if (nameOpt != null)
             {
                 var n = NewBodyLabel(nameOpt);
-                n.CustomMinimumSize = new Vector2(60, 0);
+                n.CustomMinimumSize = new Vector2(58, 0);
                 row.AddChild(n);
             }
             var bar = new ProgressBar
@@ -251,9 +274,24 @@ namespace Sporeholm.UI
                 MaxValue = max,
                 Value    = max,
                 ShowPercentage = false,
-                CustomMinimumSize = new Vector2(120, 12),
+                CustomMinimumSize = new Vector2(110, 12),
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                SizeFlagsVertical   = SizeFlags.ShrinkCenter,
             };
+            var fillBox = new StyleBoxFlat
+            {
+                BgColor = fill,
+                CornerRadiusTopLeft = 2, CornerRadiusTopRight = 2,
+                CornerRadiusBottomLeft = 2, CornerRadiusBottomRight = 2,
+            };
+            var trackBox = new StyleBoxFlat
+            {
+                BgColor = track,
+                CornerRadiusTopLeft = 2, CornerRadiusTopRight = 2,
+                CornerRadiusBottomLeft = 2, CornerRadiusBottomRight = 2,
+            };
+            bar.AddThemeStyleboxOverride("fill",       fillBox);
+            bar.AddThemeStyleboxOverride("background", trackBox);
             row.AddChild(bar);
             var num = NewBodyLabel("0");
             num.CustomMinimumSize = new Vector2(48, 0);

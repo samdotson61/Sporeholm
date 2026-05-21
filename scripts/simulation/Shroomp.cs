@@ -544,11 +544,11 @@ namespace Sporeholm.Simulation
 		// all 100 at once. Assigned at the same time as TickPhase.
 		public byte TickSlot { get; set; } = 0;
 
-		// v0.3.24 — combat stub (Phase 8). When set, BehaviorSystem will route
+		// v0.3.24 — combat stub (Phase 9). When set, BehaviorSystem will route
 		// the shroomp to attack this target instead of the autonomous task. For
 		// now there is no enemy entity type, so this is data-plumbing only:
 		// the visual layer reads it to draw a sword icon over the shroomp's
-		// head, and the eventual Phase 8 combat system will fill in actions.
+		// head, and the eventual Phase 9 combat system will fill in actions.
 		public string? CombatTargetName { get; set; }
 
 		// v0.3.43 — Thoughts (RimWorld-style temporal mood entries) and

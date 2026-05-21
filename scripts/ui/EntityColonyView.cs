@@ -38,6 +38,16 @@ namespace Sporeholm.UI
         // Refreshed in UpdateFromSnapshot.
         private System.Collections.Generic.IReadOnlyList<EntitySnapshot>? _lastSnap;
 
+        // v0.6.2u — selection bracket id. Mirrors ShroompColonyView's per-shroomp
+        // Selected flag but lives at the colony-view level since EntitySnapshot
+        // is a value-type record (no mutable Selected field). GameController
+        // sets this when an entity is clicked + Card opened; clears it when
+        // the card closes or the selected entity despawns. _Draw walks the
+        // last snapshot each frame and renders white corner brackets around
+        // the selected entity's SimPos — reuses the same DrawSelectionBrackets
+        // helper as the shroomp / tile-properties selection indicators.
+        private System.Guid? _selectedId;
+
         public override void _Ready()
         {
             TextureFilter = TextureFilterEnum.Nearest;
@@ -100,7 +110,7 @@ namespace Sporeholm.UI
                 float alpha      = 0.40f + 0.60f * healthFrac;
                 // Tamed entities get a soft warm tint so the player can
                 // tell their pets apart from wild specimens of the same
-                // species at a glance. Phase 9 husbandry adds the same
+                // species at a glance. Phase 8 husbandry adds the same
                 // marker in the Animals tab.
                 Color tint = e.IsTamed
                     ? new Color(1.10f, 1.00f, 0.85f, alpha)
@@ -149,5 +159,52 @@ namespace Sporeholm.UI
         // GameController calls this after GetEntitySnapAt returns a hit.
         public void EmitEntityClicked(System.Guid id) =>
             EmitSignal(SignalName.EntityClicked, id.ToString());
+
+        // v0.6.2u — selection bracket plumbing. GameController calls
+        // SetSelection on click and ClearSelection on EntityCardPanel close.
+        // _Draw runs every frame and paints the same white corner brackets
+        // ShroompColonyView uses for selected shroomps + SelectionOverlay
+        // uses for tile-properties selections, so the visual treatment
+        // stays consistent across the three click-inspector flows.
+        public void SetSelection(System.Guid id)
+        {
+            _selectedId = id;
+            QueueRedraw();
+        }
+
+        public void ClearSelection()
+        {
+            if (_selectedId == null) return;
+            _selectedId = null;
+            QueueRedraw();
+        }
+
+        public override void _Process(double delta)
+        {
+            // Brackets sit on the selected entity's SimPos which moves as
+            // the entity wanders. Repaint each frame while a selection is
+            // active so the brackets track the entity's motion.
+            if (_selectedId != null) QueueRedraw();
+        }
+
+        public override void _Draw()
+        {
+            if (_selectedId == null || _lastSnap == null) return;
+            for (int i = 0; i < _lastSnap.Count; i++)
+            {
+                var e = _lastSnap[i];
+                if (e.Id != _selectedId.Value) continue;
+                // Frame the entity sprite with brackets sized to the species'
+                // body radius. Slight vertical offset centres the brackets on
+                // the sprite (entities render with sprite centre at SimPos).
+                var def = EntityRegistry.Get(e.Kind);
+                float r = Mathf.Max(def.BodyRadiusPx, 9f) + 2f;
+                var rect = new Rect2(e.SimPos.X - r, e.SimPos.Y - r, r * 2f, r * 2f);
+                ShroompColonyView.DrawSelectionBrackets(this, rect);
+                return;
+            }
+            // Selected entity not found in the latest snapshot — auto-clear.
+            _selectedId = null;
+        }
     }
 }

@@ -29,7 +29,7 @@ using Godot;
 // The Sim runs at any speed multiplier and pauses; CanvasModulate just
 // reads the current date each frame and applies the matching tint.
 //
-// Behavior systems (Phase 6 entity AI, Phase 7 combat visibility, Phase 9
+// Behavior systems (Phase 6 entity AI, Phase 7 combat visibility, Phase 8
 // crop growth gating) will read the same hour-of-day directly from
 // SimulationDate when those phases land — this overlay is the visual layer
 // only, not a coupled source of truth.

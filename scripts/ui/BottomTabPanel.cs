@@ -20,7 +20,7 @@ public partial class BottomTabPanel : Control
 {
     // v0.3.41 — Resources and Animals tabs added.
     // Resources sits between Jobs and Shroomps (granular ledger view).
-    // Animals is a Phase 9 stub anchored at the far right.
+    // Animals is a Phase 8 stub anchored at the far right.
     public enum Tab { None, Orders, Build, Zones, Areas, Jobs, Resources, Shroomps, Animals }
 
     private Tab _active = Tab.None;
@@ -147,7 +147,7 @@ public partial class BottomTabPanel : Control
         // Stub content for the not-yet-built tabs. Orders, Shroomps,
         // Resources, Jobs, Zones, AND Build are filled by Attach() from
         // GameController. Build became real in v0.5.19 (Phase 5B).
-        _animalsHost.AddChild(MakeStubContent("🐾 Animals", "Husbandry / taming / pens — Phase 9 stub"));
+        _animalsHost.AddChild(MakeStubContent("🐾 Animals", "Husbandry / taming / pens — Phase 8 stub"));
 
         // ── Row 2: tab bar capsule, full-width (v0.5.41) ───────────────────
         // Pre-v0.5.41 this row had a leading ExpandFill spacer that pushed

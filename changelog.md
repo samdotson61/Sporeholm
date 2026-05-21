@@ -9,7 +9,7 @@ Version format: `aa.bb.cc`
 
 ## [0.6.2] — 2026-05-21 — Entity selection + EntityCardPanel inspector + needs scaffolding
 
-Wildlife is now selectable. Click a creature in the world and a compact inspector card opens at the top-right showing species name, description, health, mood, and needs — mirrors the Shroomp card slot (mutually exclusive with the shroomp / tile-properties cards). Also adds the Nutrition + Rest simplified-needs scaffolding the Phase 6 design called for; values decay slowly per sim tick (~4 in-game days nutrition→0) but don't drive behaviour yet — Phase 9 husbandry will wire Hungry → Graze and Tired → Sleep transitions.
+Wildlife is now selectable. Click a creature in the world and a compact inspector card opens at the top-right showing species name, description, health, mood, and needs — mirrors the Shroomp card slot (mutually exclusive with the shroomp / tile-properties cards). Also adds the Nutrition + Rest simplified-needs scaffolding the Phase 6 design called for; values decay slowly per sim tick (~4 in-game days nutrition→0) but don't drive behaviour yet — Phase 8 husbandry will wire Hungry → Graze and Tired → Sleep transitions.
 
 ### Entity selection (`EntityColonyView.cs`, `GameController.cs`)
 
@@ -40,15 +40,47 @@ New `Description` field on `EntityDef`. All 15 species got a one-sentence flavor
 - *Magic Wisp:* "Rare floating mote of magical energy. Drains MagicResonance from nearby shroomps; flees when struck."
 - (etc. across the full 15)
 
-These show on the EntityCard's Description row and will surface in future hover-tooltips + Animals tab (Phase 9).
+These show on the EntityCard's Description row and will surface in future hover-tooltips + Animals tab (Phase 8).
 
 ### Simplified needs system (`Entity.cs`, `EntitySystem.cs`, `EntitySnapshot.cs`, `SaveManager.cs`)
 
-`Entity` gains `Nutrition` + `Rest` (float, 0-100, default 70). `EntitySystem.Tick` decays both per-tick at ~0.01 / sim-second (Nutrition full → 0 in ~4 in-game days at default speed; Rest decays at 0.6× that rate). Range-clamped 0-100 — no negative-overshoot. No behavioural impact yet; the card just surfaces the values so the player can see fauna state. Phase 9 husbandry wires Hungry → Graze + Tired → Sleep transitions on top of this scaffolding.
+`Entity` gains `Nutrition` + `Rest` (float, 0-100, default 70). `EntitySystem.Tick` decays both per-tick at ~0.01 / sim-second (Nutrition full → 0 in ~4 in-game days at default speed; Rest decays at 0.6× that rate). Range-clamped 0-100 — no negative-overshoot. No behavioural impact yet; the card just surfaces the values so the player can see fauna state. Phase 8 husbandry wires Hungry → Graze + Tired → Sleep transitions on top of this scaffolding.
 
 `EntitySnapshot` extended with `Nutrition`, `Rest`, and `MoodLabel` (computed on demand from the live Entity at snapshot construction). `EntitySaveData` adds nullable Nutrition + Rest init-only properties — pre-v0.6.2 saves deserialise to the default (70 fed, 70 rested), so old saves come back to a freshly-spawned-equivalent wildlife state on first load. `LoadFromSave` restores them via the same record-pattern as the rest of the entity fields.
 
 **Build:** 0 warnings, 0 errors.
+
+### Also in this patch — EntityCardPanel display fix + entity selection brackets
+
+Playtest screenshot showed two bugs in the v0.6.2 entity card:
+
+1. **Card had no visible panel background.** The card was rendering its text but the dark-brown floating-panel surface wasn't drawing — labels floated over the grass tiles directly. Root cause: the initial card used a raw `Panel` widget with a manually-built `StyleBoxFlat`, instead of the standard `PanelContainer + FloatingPanelStyle.Make()` pattern that every other floating card in the project uses (ShroompCardPanel, TilePropertiesPanel, etc.). The raw-Panel route doesn't fill its parent area predictably under the LayoutPreset.FullRect anchor pattern these cards rely on.
+2. **ProgressBars rendered as empty rails.** Health / Nutrition / Rest had numeric labels (`7 / 7`, `69`, `69`) but no visible filled bar. Godot's default ProgressBar theme uses near-transparent fill + track styleboxes that disappear against the dark panel background. ShroompCardPanel solves this with explicit `fill` + `background` StyleBoxFlat overrides on every bar; the entity card was missing them.
+3. **No selection indicator on the clicked entity.** Shroomps + tile-properties get the white corner-bracket "RimWorld-style" selection frame via `ShroompColonyView.DrawSelectionBrackets` (shared static); entities had no equivalent.
+
+**Fixes** (`EntityCardPanel.cs`, `EntityColonyView.cs`, `GameController.cs`):
+
+- **`EntityCardPanel` rewrite.** Now uses `PanelContainer + FloatingPanelStyle.Make()` matching every other card. `MarginContainer + VBoxContainer` for the inner layout. Header row puts the species name (gold 16pt) on the left + close `×` button on the right of one row instead of separate stacked rows. Each ProgressBar gets explicit `fill` + `background` styleboxes — Health = red fill on dark-red track, Nutrition = golden fill on dark-amber track, Rest = muted blue on dark-navy track. Bars now render visibly against the dark panel.
+- **`EntityCardPanel.Closed` signal.** Fires when the user clicks ×, or when `Refresh(snap)` notices the selected entity has despawned and auto-closes. GameController wires this signal at panel construction so the world-space selection brackets clear at the same moment the card disappears.
+- **Selection brackets on `EntityColonyView`** (new). `SetSelection(Guid)` / `ClearSelection()` API. `_Process` keeps the brackets repainting each frame so they track the entity's wander motion. `_Draw` reuses the shared `ShroompColonyView.DrawSelectionBrackets(canvas, rect)` static so the visual treatment is identical to the shroomp + tile-properties brackets — same white outer L-arms + 1 px black shadow, same arm length, same corner radius. Per-species `BodyRadiusPx` (with a 9 px floor for the smaller creatures) sizes the bracket rect so Wolf gets a forgiving frame and Mouse gets a tight one. Auto-clears inside `_Draw` if the selected id is no longer in the snapshot — covers the entity-died-mid-frame case before the snapshot refresh fires.
+- **Click flow updated.** `GameController.HandleMouseClick`'s entity-hit branch now also calls `_entityColonyView.SetSelection(entHit.Value.Id)` alongside opening the card.
+
+Result: clicking a Mouse or Wolf or Glowbunny now (a) opens a proper dark-brown card with visible bars and the close button in the header row, and (b) draws the same white selection brackets around the creature that selecting a shroomp or a tile would draw. Closing the card (× button) removes both the card and the brackets in the same frame.
+
+Build clean, 0 warnings, 0 errors.
+
+### Also in this patch — Phase 8 / Phase 9 roadmap swap
+
+Roadmap reorganisation: the husbandry / farming phase now lands BEFORE the events / storyteller phase. Direction: "include farming before the events structure."
+
+- **Phase 8** = Agricultural Systems (animal husbandry, farming, hunting) — was Phase 9
+- **Phase 9** = Events and the Storyteller — was Phase 8
+
+Reasoning: the agricultural surfaces (taming, breeding, milk / shear / butcher, farm plots, hunting) consume the entity primitives Phase 6 just shipped, while the storyteller controller wants both wildlife AND the agricultural tag bitmask in place before it can drive raid spawns / disease seeding / colony-stress events meaningfully. Building the food-and-livestock loop first lets the eventual storyteller pull from a richer simulation surface.
+
+**Cascade**: 109 `Phase 8` / `Phase 9` token swaps across the project (Roadmap doc, README, changelog history references, `Sporeholm_Systems.md`, 25 code files, memory `project_versioning.md`); 24 `§8.x` / `§9.x` sub-section reference swaps to keep cross-references consistent under the new numbering. The Roadmap doc's section bodies were physically reordered so the Agricultural block now appears before the Events block in numeric reading order. README roadmap table rows 8 and 9 swapped.
+
+Build clean, 0 warnings, 0 errors.
 
 ---
 
@@ -113,11 +145,11 @@ The world is now inhabited. 15 species ship spanning the full disposition / biom
 - *Neutral (4)* — Squirrel, Bonecrest Beetle, Forest Boar, Cave Lizard
 - *Hostile (5)* — Ant Soldier, Wasp Renegade, Snake, Wolf, Magic Wisp
 
-Each species carries its own MaxHealth, BaseSpeedPxPerSec, BodyRadius, AttackPower, AggroRange (hostiles only), FleeRange (friendlies only), group sizes, population cap per map, spawn weight, and butcher drops (Phase 9 hook). Per-individual stats jitter ±10 % against the species baseline at spawn so a pack of three wolves isn't three clones.
+Each species carries its own MaxHealth, BaseSpeedPxPerSec, BodyRadius, AttackPower, AggroRange (hostiles only), FleeRange (friendlies only), group sizes, population cap per map, spawn weight, and butcher drops (Phase 8 hook). Per-individual stats jitter ±10 % against the species baseline at spawn so a pack of three wolves isn't three clones.
 
-Event-only ≥10 ×-shroomp-tall species (Bear, Leopard Tortoise, Tasmanian Mauler, Dragon, Mushroom Drake) are deliberately deferred — the §6.4 rule routes them through the Phase 8 Storyteller pipeline, not the wild-spawn pathway.
+Event-only ≥10 ×-shroomp-tall species (Bear, Leopard Tortoise, Tasmanian Mauler, Dragon, Mushroom Drake) are deliberately deferred — the §6.4 rule routes them through the Phase 9 Storyteller pipeline, not the wild-spawn pathway.
 
-**Data model** (`Entity.cs`, `EntityDef.cs`, `EntityKind.cs`, `EntityRegistry.cs`): sim-side entity with Guid id, species kind, jittered stats, Pos / Target / State / Health, optional `TargetShroompId` (for Hunt / Flee), `WanderHome` anchor for ambient idle, `IsTamed` + `TamedByName` (Phase 9 hook). State machine: `Wander / Flee / Hunt / Graze / Tamed / Dead`. EntityRegistry holds the static species table — adding a 16th species means appending an EntityKind value, an EntityRegistry row, and a sprite painter.
+**Data model** (`Entity.cs`, `EntityDef.cs`, `EntityKind.cs`, `EntityRegistry.cs`): sim-side entity with Guid id, species kind, jittered stats, Pos / Target / State / Health, optional `TargetShroompId` (for Hunt / Flee), `WanderHome` anchor for ambient idle, `IsTamed` + `TamedByName` (Phase 8 hook). State machine: `Wander / Flee / Hunt / Graze / Tamed / Dead`. EntityRegistry holds the static species table — adding a 16th species means appending an EntityKind value, an EntityRegistry row, and a sprite painter.
 
 **AI driver** (`EntitySystem.cs`): per-tick state-machine driver running after BehaviorSystem.Tick so hostile entities see this tick's shroomp positions before reacting. Hostile species scan within AggroRange for the nearest non-pacifist standing shroomp; on detection they transition to Hunt and chase. On contact (BodyRadius + 12 px) they apply AttackPower damage to a weighted-random body part (Torso 35 / Head 10 / Limbs 55) routed through the existing `BodyParts` dict so bleeding + downed-state recomputation already picks it up. Attack cooldown 60 ticks (≈1 sec). Movement is direct (no A*); entities clip on walls instead of pathing around them — keeps the per-entity tick cost ≈ 5 µs (vs. shroomp's ≈ 50 µs with A*).
 
@@ -137,7 +169,7 @@ Caps + weights tuned so a default-sized map (240 × 150) carries ~6-10 friendlie
 
 **Hostile attack damage routing**: when a hostile entity contacts a target shroomp, `ApplyEntityAttack` mutates the shroomp's `BodyParts` dict directly via the same pattern `NeedsSystem` starvation and `SimulationManager.DevDamageToDown` use. Bleeding + downed-state recomputation picks this up automatically through the existing v0.5.81 bleeding + v0.5.79 downed-state pipelines. Phase 7 combat will replace this minimal hit-routing with a proper weapon-vs-armor pipeline.
 
-**Deferred to v0.6.2+:** Hediff base class, mental-breaker system, opinion ledger + relations registry, Phase 8 Storyteller event hooks, entity card / unit panel UI, Phase 9 husbandry tags (Tame / Butcher / Milk / Shear / etc.). The Phase 6 spec calls these out as "lands alongside the entity registry"; the entity registry is the foundation they all build on, and it lands first so the additions can be done in self-contained follow-up bumps.
+**Deferred to v0.6.2+:** Hediff base class, mental-breaker system, opinion ledger + relations registry, Phase 9 Storyteller event hooks, entity card / unit panel UI, Phase 8 husbandry tags (Tame / Butcher / Milk / Shear / etc.). The Phase 6 spec calls these out as "lands alongside the entity registry"; the entity registry is the foundation they all build on, and it lands first so the additions can be done in self-contained follow-up bumps.
 
 **Build:** 0 warnings, 0 errors.
 
@@ -418,7 +450,7 @@ Playtest report: dozens of 1-6-unit material drops sitting permanently on built 
 
 **Skeleton tile actually rendered** (`LocalMapRenderer.cs`). Root cause for "I've not seen skeleton formations": `ScatterSkeletons` was firing fine and placing Skeleton terrain on every map, but `LocalMapRenderer.TileColor` had no `Skeleton` case → tiles fell through to `Colors.Black` and were visually indistinguishable from the void. New three-variant `PaintSkeleton` paints disturbed-earth ground (warm brown with scattered clods) topped by a bone fragment seeded by tile coords: rib bar / skull with eye sockets / pelvis chunk with central hole. `TileColor` also gets a Skeleton fallback case (bone cream `0.86, 0.82, 0.70`) for any minimap/preview path that bypasses the specialty paint.
 
-**Guaranteed bone source per map** (`LocalMapGenerator.cs`). `ScatterSkeletons` placement floor raised from `rng.Next(0, maxSkeletons + 1)` (0-inclusive — every map had a 1/(N+1) chance of zero skeletons) to `1 + rng.Next(maxSkeletons)` so every map ships with at least 1 skeleton cluster. Bone is the only pre-Phase-9 source (Phase 9 animal butchery is the systemic supplier later); making it deterministic-per-map closes the early-game soft-lock.
+**Guaranteed bone source per map** (`LocalMapGenerator.cs`). `ScatterSkeletons` placement floor raised from `rng.Next(0, maxSkeletons + 1)` (0-inclusive — every map had a 1/(N+1) chance of zero skeletons) to `1 + rng.Next(maxSkeletons)` so every map ships with at least 1 skeleton cluster. Bone is the only pre-Phase-9 source (Phase 8 animal butchery is the systemic supplier later); making it deterministic-per-map closes the early-game soft-lock.
 
 **Build:** 0 warnings, 0 errors. Bundled into v0.5.84.
 
@@ -744,7 +776,7 @@ Big pre-playtest pass. Skill graph compacted, role bonuses rebalanced, healing r
 
 **Roadmap additions** (`Sporeholm_Roadmap_2026.md`):
 
-- **NEW Phase 5.5 — Crafting Bills System (pre-Phase 6).** Bills queue per workbench. New `Bill` record (RecipeId, RepeatMode, IngredientFilters, SkillRequirement, QualityFilter) + `RecipeRegistry` (7 initial recipes covering existing materials: Cook Meal, Brew Capberry Wine, Mossleaf Cloth, Bone Tool, Magic Herb Poultice, Stone Block refine, Fungal Wood Plank) + new `TaskType.DoBill` + Bills tab in workbench tile-properties. Enables Phase 7 weapons + Phase 7 §7.18 medicine items + Phase 9 farming-processed-food recipes.
+- **NEW Phase 5.5 — Crafting Bills System (pre-Phase 6).** Bills queue per workbench. New `Bill` record (RecipeId, RepeatMode, IngredientFilters, SkillRequirement, QualityFilter) + `RecipeRegistry` (7 initial recipes covering existing materials: Cook Meal, Brew Capberry Wine, Mossleaf Cloth, Bone Tool, Magic Herb Poultice, Stone Block refine, Fungal Wood Plank) + new `TaskType.DoBill` + Bills tab in workbench tile-properties. Enables Phase 7 weapons + Phase 7 §7.18 medicine items + Phase 8 farming-processed-food recipes.
 - **NEW Phase 7 §7.18 — Healer system + downed-pawn rescue.** Three new task types: `LieInBed` (long-lived patient task), `Rescue` (pick up + carry downed pawn to bed, uses v0.5.84o held-item layer with a special "carried-pawn" sprite), `TreatPatient` (Healer walks to patient, consumes 1 medicine item per wound, applies `TendQuality` from `SkillCurve.HealingTendFactor(skill) × MedicineItem.Potency`). Medicine items crafted via Phase 5.5 (initial: Magic Herb Poultice — 2 RawEssence + 1 HerbCluster). Bed comfort × material × tend quality compound into ~10× natural heal rate at the high end. New thoughts: TendedBy / Untended / NursedTo.
 
 Phase 14.5 §14.5.4 Stage 4 already noted the held-weapon layer; same pattern applies for the carried-pawn sprite in the Rescue task.
@@ -972,12 +1004,12 @@ Memory updates: `reference_sporeholm_backup.md` documents the new command + fold
 
 Pure design-doc edit to `SporeDes/Sporeholm_Roadmap_2026.md` — no code changes. Cross-references span four roadmap sections:
 
-- **Phase 8 events.** Three new entries under "Negative": **Cordyceps Outbreak** (seeds the disease into a random shroomp or tame animal via spore inhalation), **Infected Wanderer** (a wanderer arrives Stage 1 already — player chooses between welcome + risk vs turn-away + mood cost for Empath shroomps), **Cordyceps Field** (a 3-5 tile fruiting bloom appears at map edge; clearable but the spore-cloud rolls catch on the clearing shroomp).
+- **Phase 9 events.** Three new entries under "Negative": **Cordyceps Outbreak** (seeds the disease into a random shroomp or tame animal via spore inhalation), **Infected Wanderer** (a wanderer arrives Stage 1 already — player chooses between welcome + risk vs turn-away + mood cost for Empath shroomps), **Cordyceps Field** (a 3-5 tile fruiting bloom appears at map edge; clearable but the spore-cloud rolls catch on the clearing shroomp).
 - **Phase 12 disease catalogue.** New **Cordyceps Bloom** row, severity **Apocalyptic** — 3-stage progression: Stage 1 confusion + occasional ally attacks; Stage 2 full zombification (hostile AI, lurch-and-bite, every melee hit transmits); Stage 3 fruiting body bursts at death, spore cloud spreads. Curable only in Stage 1.
 - **Phase 12.4 vectors.** New entry for the Cordyceps-specific catch paths: Phase 7 melee bite from Stage 2 (catch ≈ 0.6 per hit — the colony-killer attribute), and Stage 3 death-burst spore cloud (catch ≈ 0.4 in the 3×3 around the death tile, lingering as a temporary Cordyceps Field with 0.05 passing-shroomp catch for ~6 in-game hours).
 - **Phase 12.5 treatment.** New "Magic-only cures" subsection. Cordyceps Stage 1 needs the **Mage Quench** task (not Caretaker Treat) with Fungal Antibiotic or Fae Dust — drains 40 % of the Mage's MagicResonance per attempt, ImmunityRate bonus scales with Mage Arcane skill × Medicine Quality × patient MagicResonance. Once severity > 50 (Stage 2 boundary) the cure stops working — the patient becomes a containment problem (wall off / kill / burn). Same subsection covers Magic Resonance Sickness as the second Mage-only disease, which already existed in the catalogue but wasn't grouped with the magic-cure path.
 
-Phase 8 storyteller is intended to gate Cordyceps Outbreak behind colony-has-a-Mage prerequisites so the event doesn't fire before the player has any counter. Acts as Sporeholm's signature colony-killer event.
+Phase 9 storyteller is intended to gate Cordyceps Outbreak behind colony-has-a-Mage prerequisites so the event doesn't fire before the player has any counter. Acts as Sporeholm's signature colony-killer event.
 
 ### Also in this patch — more mushroom-themed names
 
@@ -2275,7 +2307,7 @@ Night tint values picked so dropped items, designation glyphs, and smurf sprites
 
 ### What this does NOT change
 
-- Game mechanics — sleep schedules, behavior tier priorities, plant growth, combat — none consume the day/night state yet. The pure-helper API is there for future phases (Phase 6 entity nocturnal spawn rules, Phase 9 crop growth gating by daylight hours) to read directly from `SimulationDate.Hour` or `DayNightOverlay.IsNightHour`
+- Game mechanics — sleep schedules, behavior tier priorities, plant growth, combat — none consume the day/night state yet. The pure-helper API is there for future phases (Phase 6 entity nocturnal spawn rules, Phase 8 crop growth gating by daylight hours) to read directly from `SimulationDate.Hour` or `DayNightOverlay.IsNightHour`
 - HUD time display — already showed Hour via `SimulationDate.ToString()` since the original SimulationDate.cs, no changes needed
 - Save format — no new persisted state, the tint is derived from `SimulationDate` which already serialises
 
@@ -2599,11 +2631,11 @@ Added to §6.2 Non-Hostile (Friendly / Passive) table directly after ✦ Spore H
 | Disposition | Very friendly to smurfs — no flee distance; greets foragers with a chirp |
 | Primary product | **Shroomalo Milk** *(new Phase 4 item)* — cooks into Shroomalo Cheese / Shroomalo Butter / Shroomalo Custard (curative) |
 | Provoked behaviour | Mildly dangerous — kicks back with hind legs (low Blunt damage) and puffs a small spore cloud (mild mood -2 for ~120 ticks on attacker) |
-| Phase 9 tags | Tameable (very easy — almost wants to be tamed), Pet, Grazer, Milkable (daily cooldown), Butcherable (Meat + SmallMushroom + Hide), Breeds |
+| Phase 8 tags | Tameable (very easy — almost wants to be tamed), Pet, Grazer, Milkable (daily cooldown), Butcherable (Meat + SmallMushroom + Hide), Breeds |
 
-### §9.1 sync
+### §8.1 sync
 
-Added Shroomalo line to the canonical Phase 9 fauna tag list (`scripts/world/AnimalKind.cs` reference section) directly after the Mushroom Goat entry. Both are milkable mushroom-derived mammals; Mushroom Goat produces Fungal Milk + Spore Wool, Shroomalo produces Shroomalo Milk + Hide. They differ in tier: Mushroom Goat is harder to tame and produces both milk + wool; Shroomalo is the friendliest livestock candidate in the registry and produces milk only.
+Added Shroomalo line to the canonical Phase 8 fauna tag list (`scripts/world/AnimalKind.cs` reference section) directly after the Mushroom Goat entry. Both are milkable mushroom-derived mammals; Mushroom Goat produces Fungal Milk + Spore Wool, Shroomalo produces Shroomalo Milk + Hide. They differ in tier: Mushroom Goat is harder to tame and produces both milk + wool; Shroomalo is the friendliest livestock candidate in the registry and produces milk only.
 
 ### Design notes
 
@@ -2613,7 +2645,7 @@ The Hamster-variant lineage is intentional — Hamster (baseline) → Spore Hams
 
 ### Files touched
 
-- `Smurfulation_Cloud/SmurfCloudDes/SmurfulationC_Roadmap_2026.md` — new species row in §6.2 Passive table + new Phase 9 §9.1 tag-list line
+- `Smurfulation_Cloud/SmurfCloudDes/SmurfulationC_Roadmap_2026.md` — new species row in §6.2 Passive table + new Phase 8 §8.1 tag-list line
 - `SmurfulationC/scripts/ui/MainMenuController.cs` — version label v0.5.50 → v0.5.51
 - `SmurfulationC/changelog.md` — this entry
 - Memory file `project_versioning.md` — current/previous version lines
@@ -2632,7 +2664,7 @@ Pure roadmap edit. Only code change is the version label on `MainMenuController.
 
 ### Scale-gated event-only rule (≥10×)
 
-Added rule paragraph in §6.2 (right after biome legend): any species ≥10× smurf-tall is event-only — does not appear via the normal `ScatterAnimalSpawnPoints` / wild-spawn pathway, only enters the map through a scripted Storyteller event in Phase 8. Marked with ⚡ in the registry. Rationale spelled out in the rule body: at ~10× smurf-height the encounter changes from "wildlife hazard" → "narrative event," and stumbling onto one while foraging is bad design.
+Added rule paragraph in §6.2 (right after biome legend): any species ≥10× smurf-tall is event-only — does not appear via the normal `ScatterAnimalSpawnPoints` / wild-spawn pathway, only enters the map through a scripted Storyteller event in Phase 9. Marked with ⚡ in the registry. Rationale spelled out in the rule body: at ~10× smurf-height the encounter changes from "wildlife hazard" → "narrative event," and stumbling onto one while foraging is bad design.
 
 Species promoted from "very rare wild spawn" → "scripted event-only":
 - ⚡ **Bear** (~12× smurf-tall, Forest / Mountain)
@@ -2675,7 +2707,7 @@ Two new neutral events for the new mushroom tameables:
 - ✦ Mushroom Tortoise (existing) — added Tameable + Pet + Grazer tags
 - ✦ Magic Chameleon (existing) — added Tameable + carrier mood +3 (novelty)
 
-All 5 new mushroom species marked ✦ for the variant convention; Phase 9 tags written into the Notes column so the Phase 6 entry + Phase 9 §9.1 surface stay in sync.
+All 5 new mushroom species marked ✦ for the variant convention; Phase 8 tags written into the Notes column so the Phase 6 entry + Phase 8 §8.1 surface stay in sync.
 
 ### Files touched
 
@@ -2698,7 +2730,7 @@ Pure roadmap edit — no code changed beyond the version label on the main menu.
 
 ### Phase 6 §6.2 Entity Registry — full rewrite
 
-Removed every Smurfs-canon-specific entity from the planned Phase 6 roster: Bee People, Pussywillow Pixies, Unicorn, Pegasus, Woodsprites, Gnomes, Mermen / Mermaids, Purple Fly, Goblins, Imps, Ogres, Gray Smurfs, Azrael, Nemesis, Trolls. Cross-references throughout the roadmap (Phase 7 combat narratives, Phase 8 events, Phase 9 fauna roster, Phase 12 disease vectors, Phase 13 era unlocks, Section 5 lore) walked and rewritten in the same patch.
+Removed every Smurfs-canon-specific entity from the planned Phase 6 roster: Bee People, Pussywillow Pixies, Unicorn, Pegasus, Woodsprites, Gnomes, Mermen / Mermaids, Purple Fly, Goblins, Imps, Ogres, Gray Smurfs, Azrael, Nemesis, Trolls. Cross-references throughout the roadmap (Phase 7 combat narratives, Phase 9 events, Phase 8 fauna roster, Phase 12 disease vectors, Phase 13 era unlocks, Section 5 lore) walked and rewritten in the same patch.
 
 Preserved (per directive) — all 9 SmurfulationC originals stay in the registry:
 - Mushroom Goat, Glow Bunny, Bonecrest Beetle, Cave Lizard, Forest Boar, Shore Frog, Honey Bee Swarm, Sky Pony, Grumper
@@ -2733,9 +2765,9 @@ Every place the old canon roster leaked into the roadmap was rewritten:
 - **§7.2** combat hit-location example: "Pegasus diving on a goblin from above" → "Sky Pony diving on a Wasp Renegade from above"
 - **§7.9** combat narrative log: Goblin parry/bash examples → Wasp Renegade dodge/bash examples
 - **§8** Storyteller events table: removed Bee People Trade Offer, Pixie Alliance, Purple Fly Outbreak, Gargamel's Scouts, Troll Night Raid, Goblin Kidnapping, Woodsprite Prank, Gnome Encounter; added Honey Swarm Migration, Glow Bunny Bloom, Wasp Renegade Raid, Sand Cat Stalker, Mole Lord Tunnel, Buffalo Weaver Flock, Sky Pony Visitation, Spore Lemur Arrival, Mushroom Drake Stirring
-- **§9.1** Phase 9 fauna roster: Pegasus removed; small-animals-roster tameables added (Pygmy Rabbit, Hamster, Quokka, Pygmy Marmoset, Royal Antelope, Leopard Tortoise, Fennec Fox, Northern Pygmy Owl, Meerkat Sentry, Pygmy Tortoise)
-- **§9.6** Hunt task example: "killing a Boar uses identical rolls as killing a Goblin" → "killing a Forest Boar uses identical rolls as killing a hostile Snake"
-- **§9.7** Mounts: Phase 13 era unlocks now reference "magic-grove rare mounts, late-game mythicals" rather than Pegasus
+- **§8.1** Phase 8 fauna roster: Pegasus removed; small-animals-roster tameables added (Pygmy Rabbit, Hamster, Quokka, Pygmy Marmoset, Royal Antelope, Leopard Tortoise, Fennec Fox, Northern Pygmy Owl, Meerkat Sentry, Pygmy Tortoise)
+- **§8.6** Hunt task example: "killing a Boar uses identical rolls as killing a Goblin" → "killing a Forest Boar uses identical rolls as killing a hostile Snake"
+- **§8.7** Mounts: Phase 13 era unlocks now reference "magic-grove rare mounts, late-game mythicals" rather than Pegasus
 - **§12.3** Cat Fever vector: Azrael → Sand Cat / Tasmanian Mauler
 - **§12.3** Fairy Fever vector: pixie / faerie → Magic Wisp / Spore Lemur
 - **§12.4** Vector / animal contact: Cat/Pixie → Sand Cat/Tasmanian Mauler/Spore Lemur/Magic Wisp
@@ -3667,7 +3699,7 @@ Comprehensive audit of all enums + UI surfaces + render pipelines at v0.5.25. Mo
 - `MaterialKey.AllStones` (16 subtypes) — display names + icons + LocalMapGenerator placement + LocalMapRenderer colours
 - `DesignationTool` (16 entries) — buttons in DesignationToolbar / ZonesPanel / BuildPanel + handlers in SimulationManager.DesignateRect
 - `BiomeType` (11 entries) — distinct vegetation pools + gen behaviour
-- `AnimalKind` (5 stubs) — placed by ScatterAnimalSpawnPoints, full implementation in Phase 9 N12 per roadmap (intentional stub)
+- `AnimalKind` (5 stubs) — placed by ScatterAnimalSpawnPoints, full implementation in Phase 8 N12 per roadmap (intentional stub)
 - All BottomTabPanel tabs (Orders/Build/Zones/Jobs/Resources/Smurfs/Animals) populated
 - All overlays (DesignationOverlay, StockpileOverlay, StructureOverlay, SelectionOverlay, ItemDropOverlay, OrderQueueOverlay) produce visible output
 - HUD top-bar elements all live-data
@@ -3697,7 +3729,7 @@ These remain stubs but each has an explicit roadmap home (§4.y rimport tracker)
 - N9 Opinion ledger → Phase 6 (partial via Preferences)
 - N10 Storyteller event injector → Phase 7
 - N11 Combat → Phase 7
-- N12 Animals (full system) → Phase 9
+- N12 Animals (full system) → Phase 8
 - N13 Temperature + spoilage → Phase 10 (per-tile diffusion; per-room landed in v0.5.24)
 - N14 Power network → Phase 11
 - N20 Guard task → Phase 7 (NEW v0.5.26)
@@ -3790,7 +3822,7 @@ The decision to consolidate: all five sub-versions depend on the same StructureS
 
 ### v0.5.20 — Phase 5C: Allowed Area + Frame Polish + Demolish Refund + Door
 
-**N6 — Allowed-area bitmap per smurf.** `Smurf.AllowedArea` (`bool[]?`) + `AllowedAreaWidth` fields. Null = no restriction (default). When set, `BehaviorSystem.IsTileInAllowedArea` gates work-target selection — the smurf won't accept Build / Excavate / Gather etc. tasks for tiles outside the painted area. Pathfinder may still route through outside tiles. ZonesPanel painter UI (the `▥ Allowed Area (stub)` button from v0.5.4) → live in v0.6 when scope allows; the field + gate are wired now so animal AI in Phase 9 can use the same restriction model.
+**N6 — Allowed-area bitmap per smurf.** `Smurf.AllowedArea` (`bool[]?`) + `AllowedAreaWidth` fields. Null = no restriction (default). When set, `BehaviorSystem.IsTileInAllowedArea` gates work-target selection — the smurf won't accept Build / Excavate / Gather etc. tasks for tiles outside the painted area. Pathfinder may still route through outside tiles. ZonesPanel painter UI (the `▥ Allowed Area (stub)` button from v0.5.4) → live in v0.6 when scope allows; the field + gate are wired now so animal AI in Phase 8 can use the same restriction model.
 
 **Construction Frame stage.** v0.5.19 collapsed Frame → Built into one tick. v0.5.20 splits into the proper three-stage state machine:
 1. Blueprint (BuildProgress=0): Crafter arrives, consumes materials, flips to Frame (BuildProgress=1).
@@ -4112,7 +4144,7 @@ Direction: add 'Bone' material as a drop by animals into the roadmap, and also a
 
 Two drop sources now wired:
 1. **Skeleton terrain** (live this release — see below)
-2. **Animal butchery** — Phase 9 wire-in. Roadmap §9.1 Butcherable species (MushroomGoat, GlowBunny, ForestBoar, BonecrestBeetle, etc.) now explicitly list Bone in their drop tables.
+2. **Animal butchery** — Phase 8 wire-in. Roadmap §8.1 Butcherable species (MushroomGoat, GlowBunny, ForestBoar, BonecrestBeetle, etc.) now explicitly list Bone in their drop tables.
 
 ### Added — `TerrainType.Skeleton` + `ScatterSkeletons` gen pass
 
@@ -4128,7 +4160,7 @@ Each cluster is **1-3 connected Skeleton tiles** placed via short random walk on
 
 The renderer treats Skeleton as impassable terrain (falls back to default tinting until v0.5.17 polish adds a distinct bone-glyph paint). Selection / tile-info panels see it as TerrainType.Skeleton; future polish can surface "Partial Skeleton" name + Bone yield estimate.
 
-This is the early-game Bone material source — Phase 9 animal butchery is months out, but Skeleton tiles let the player accumulate Bone now for future Phase 6/7 crafting recipes.
+This is the early-game Bone material source — Phase 8 animal butchery is months out, but Skeleton tiles let the player accumulate Bone now for future Phase 6/7 crafting recipes.
 
 ### Added — Character screen (Backstory + Skills sections)
 
@@ -4171,7 +4203,7 @@ Documented in roadmap §5.13.1.1.
 `SmurfulationC_Roadmap_2026.md`:
 - **Phase 5.13 (Discoveries)** — added v0.5.16 Skeleton terrain to the N15-N19 list, added §5.13.1.1 character-screen subsection.
 - **Phase 5.13.1 (material palette)** — restored Quartz description, documented Iron/Bronze removal, added Bone-as-live-material note.
-- **Phase 9 §9.1 (animal species)** — Mushroom Goat + Bonecrest Beetle entries now mention Bone in their Butcherable drop tables. Added "Bone material drops (v0.5.16 wire-in)" subsection covering both drop sources (Skeleton terrain + animal butchery) with cross-refs to the Phase 6 hediff system + Phase 7 combat (downed-then-killed butcher pipeline).
+- **Phase 8 §8.1 (animal species)** — Mushroom Goat + Bonecrest Beetle entries now mention Bone in their Butcherable drop tables. Added "Bone material drops (v0.5.16 wire-in)" subsection covering both drop sources (Skeleton terrain + animal butchery) with cross-refs to the Phase 6 hediff system + Phase 7 combat (downed-then-killed butcher pipeline).
 
 ---
 
@@ -4209,11 +4241,11 @@ Pre-v0.5.15 picked Gold or Sapphire 50/50 at 0.15% per Boulder. Now per-biome we
 
 Excavation drops a standard StoneBlock with the subtype intact, so HUD totals + future crafting recipes can read these as distinct materials. Special drops parallel to MagicCrystal → CrystalShard can be added in Phase 5D / Phase 6 when crafting needs them.
 
-### Changed — Animal spawn-point species aligned with Phase 9 roadmap roster
+### Changed — Animal spawn-point species aligned with Phase 8 roadmap roster
 
-`scripts/world/AnimalKind.cs` — replaced the v0.5.14 generic placeholders (`MushroomGrazer` / `ShroombackBeetle` / `WildRat`) with the specific species the roadmap §9.1 already plans:
+`scripts/world/AnimalKind.cs` — replaced the v0.5.14 generic placeholders (`MushroomGrazer` / `ShroombackBeetle` / `WildRat`) with the specific species the roadmap §8.1 already plans:
 
-| Old (v0.5.14) | New (v0.5.15) | Phase 9 tags (from roadmap §9.1) |
+| Old (v0.5.14) | New (v0.5.15) | Phase 8 tags (from roadmap §8.1) |
 |---|---|---|
 | MushroomGrazer | **MushroomGoat** | Tameable, Grazer, Milkable (Fungal Milk), Shearable (Spore Wool), Butcherable, Breeds |
 | ShroombackBeetle | **BonecrestBeetle** | Tameable, Pack, Carnivore (feeds on Meat) |
@@ -4221,14 +4253,14 @@ Excavation drops a standard StoneBlock with the subtype intact, so HUD totals + 
 | — | **GlowBunny** (NEW) | Tameable, Pet, Butcherable (Meat, Glow-Fur), Grazer, Breeds |
 | — | **ForestBoar** (NEW) | Tameable (hard), War Animal, Omnivore, Butcherable (Pork, Hide, Tusk), Breeds |
 
-Spawn points placed by `ScatterAnimalSpawnPoints` will now be consumed directly by the Phase 9 implementation without renaming. Biome faunal tables rebuilt around tag-driven role weighting:
+Spawn points placed by `ScatterAnimalSpawnPoints` will now be consumed directly by the Phase 8 implementation without renaming. Biome faunal tables rebuilt around tag-driven role weighting:
 - MushroomGoat — primary livestock anchor → forest + grove biomes
 - GlowBunny — passive small prey → forest + meadow + grove + coast
 - BonecrestBeetle — pack/scavenger → swamp + mountain + coast
 - CaveLizard — predator → mountain + desert + cave biomes
 - ForestBoar — aggressive omnivore → forest + hills
 
-Outstanding species (HoneyBeeSwarm, ShoreFrog, Pegasus, SkyPony) defer to the full Phase 9 implementation — they need beekeeper sub-skill, biome-specific spawning rules, or late-game era unlocks that don't fit the v0.5.x stub layer. Documented in roadmap §9.1.
+Outstanding species (HoneyBeeSwarm, ShoreFrog, Pegasus, SkyPony) defer to the full Phase 8 implementation — they need beekeeper sub-skill, biome-specific spawning rules, or late-game era unlocks that don't fit the v0.5.x stub layer. Documented in roadmap §8.1.
 
 ### Changed — `rimport.md` deprecated; planned tables merged into roadmap
 
@@ -4237,19 +4269,19 @@ Outstanding species (HoneyBeeSwarm, ShoreFrog, Pegasus, SkyPony) defer to the fu
 The planned-items tables (Optimization O1-O5, Gameplay G1-G8, New Systems N1-N19, Edge cases E1-E10, and the Recommended path forward) merged into `SmurfulationC_Roadmap_2026.md` as new section **§4.y "rimport.md tracker (live status, post-deprecation home)"** between Phase 4.x and Phase 5. Each row carries a status (✅ shipped / 🟡 partial / ⏳ scheduled / ❌ not started) reflecting v0.5.15 code analysis:
 
 - **Shipped:** O1 (LOD), G2 (open Converse), G3 (skill XP), G4 (Joy need), G6 (backstories), G8 (trait conflicts), N1 (stockpile zones), N5 (Forbid flag), N15 (ruins), N16 (resource clusters), N17 (caves), E2 (TastyMeal cook gating), E5 (role-canonical items), E6 (life-threat overrides player order), E7 (death-pipeline GC), E9 (crowd-cost staleness documented).
-- **Partial / stubbed:** N9 (Preferences exist, full opinion ledger pending), N10 (one auto-accept event ships), N12 (spawn-point markers placed, full Animal system Phase 9), N18 (buried treasure done; sleeping creatures stub), N19 (spawn points placed, AI stub), E1 (haul-to-stockpile partial v0.5.6), E8 (re-validate-on-apply partial).
+- **Partial / stubbed:** N9 (Preferences exist, full opinion ledger pending), N10 (one auto-accept event ships), N12 (spawn-point markers placed, full Animal system Phase 8), N18 (buried treasure done; sleeping creatures stub), N19 (spawn points placed, AI stub), E1 (haul-to-stockpile partial v0.5.6), E8 (re-validate-on-apply partial).
 - **Not started:** O2-O5, G1, G5, G7, N2-N4, N6, N7, N8, N11, N13, N14, E3, E4, E10.
 
 The §1-22 system-by-system comparison stays in the deprecated doc as a snapshot of where systems stood at v0.4.60 — useful for *why* an item was proposed, not for *whether it's done*.
 
-### Added — Roadmap Phase 5.13 "Discoveries" sub-phase + Phase 9 spawn-point notes
+### Added — Roadmap Phase 5.13 "Discoveries" sub-phase + Phase 8 spawn-point notes
 
 `SmurfulationC_Roadmap_2026.md` Phase 5 now includes a new sub-phase **5.13 — Discoveries (gen-time encounters)** documenting all v0.5.14-v0.5.15 work as ✅ COMPLETE. Includes:
 - The 5 implemented passes (N15-N19) with file references.
 - §5.13.1 — material palette table (the new Kentucky-inspired minerals with their Dur/Val/role).
 - §5.13.2 — stubs deferred to later phases (with grep markers `// v0.5.14` for the wire-in points).
 
-Phase 9 §9.1 species list gains a "Pre-existing spawn-point markers (v0.5.15 — Phase 5C N19 stub)" subsection noting the 5-species enum already shipped + outstanding species (HoneyBeeSwarm, ShoreFrog, Pegasus, SkyPony) for Phase 9 to add.
+Phase 8 §8.1 species list gains a "Pre-existing spawn-point markers (v0.5.15 — Phase 5C N19 stub)" subsection noting the 5-species enum already shipped + outstanding species (HoneyBeeSwarm, ShoreFrog, Pegasus, SkyPony) for Phase 8 to add.
 
 ### Changed — Memory references
 
@@ -4301,7 +4333,7 @@ Excavation drops a standard StoneBlock with the subtype intact, so HUD totals an
 
 Excavation hook in `BehaviorSystem.GatherMaterial` (line ~2549, parallel to the MagicCrystal hook at line ~2540): when a smurf excavates a tile flagged with `HasBuriedTreasure`, an `ItemKind.Trinket` "AncientRelic" item drops alongside the standard StoneBlock, the marker is removed (one-shot), and a `FoundTreasure` thought (+8 mood, 2400-tick duration — bigger than VisitedSpot because the discovery is rare and gameplay-meaningful) fires.
 
-Sleeping creatures (also rimport.md N18) deferred until the Phase 9 animal system lands. The marker mechanism here is the same one creatures will use — just with a different on-excavate effect.
+Sleeping creatures (also rimport.md N18) deferred until the Phase 8 animal system lands. The marker mechanism here is the same one creatures will use — just with a different on-excavate effect.
 
 #### N19 — Wildlife spawn-point stubs
 
@@ -4309,9 +4341,9 @@ Sleeping creatures (also rimport.md N18) deferred until the Phase 9 animal syste
 
 `LocalMapGenerator.ScatterAnimalSpawnPoints` runs a biome-weighted faunal table — Mountains favour WildRat predators, MagicGrove favours MushroomGrazer herds, Swamp is balanced — and places 2-6 spawn points per map on passable non-water terrain.
 
-`LocalMap` gains `_animalSpawns` list + `AddAnimalSpawn / SnapshotAnimalSpawns / AnimalSpawnCount` accessors. The Phase 9 animal system (rimport.md N12 — "Animals can ship as a strict subset of Smurf — same BodyParts + Needs + simplified BehaviorSystem") will consume the snapshot to populate creatures.
+`LocalMap` gains `_animalSpawns` list + `AddAnimalSpawn / SnapshotAnimalSpawns / AnimalSpawnCount` accessors. The Phase 8 animal system (rimport.md N12 — "Animals can ship as a strict subset of Smurf — same BodyParts + Needs + simplified BehaviorSystem") will consume the snapshot to populate creatures.
 
-Until then the list is just generation output. No creatures actually spawn. The spawn points are the gameplay-stable interface so Phase 9 can swap in actual creature placement without touching gen code.
+Until then the list is just generation output. No creatures actually spawn. The spawn points are the gameplay-stable interface so Phase 8 can swap in actual creature placement without touching gen code.
 
 ### Changed — `rimport.md`: new Section 22 (World/Map Generation) + N15-N19 + v0.5.14 milestone
 
@@ -6664,7 +6696,7 @@ Combat raids (Phase 7) will inherit this for free: any death the combat system c
 `TickCorpseDecay` previously deleted a corpse outright when its `AvgCondition` hit 0. Now it leaves a single Material/Bone item behind:
 
 - **One bone pile per corpse** — Quantity 1, Quality Normal, fresh condition, `MaterialKey("Bone", "Generic")` (already registered in `MaterialRegistry` with × 0.80 decay mul + 🦴 icon).
-- **SubType `"Bones"`** — `ItemRegistry` has no def for this yet so the display name falls back to the SubType literal ("Bones"). Phase 9 husbandry will likely register a proper def with crafting recipes.
+- **SubType `"Bones"`** — `ItemRegistry` has no def for this yet so the display name falls back to the SubType literal ("Bones"). Phase 8 husbandry will likely register a proper def with crafting recipes.
 - **Drop happens AFTER the lock** — the corpse-decay walk now accumulates `bonesToSpawn` coords during the iteration and calls `DropItem` outside the lock. Spawning inside would mutate `_droppedItems` mid-foreach, a classic iteration-during-modification bug. The standard v0.4.30 cap + spiral overflow rules apply: a bone may overflow to a neighbour tile if the corpse site now has a different type at the cap.
 - **The hover obituary disappears with the corpse** — bones are a Material item, not a Corpse, so they show as a plain "Bones (Bone)" hover line. That's the intended hand-off: the dead smurf's identity decays alongside the body.
 
@@ -6672,7 +6704,7 @@ Combat raids (Phase 7) will inherit this for free: any death the combat system c
 
 The fourth follow-up needs the Phase 5 stockpile-zone designation tooling (a "Graveyard" zone the player paints, with smurfs auto-hauling corpses into it). The zone system itself doesn't exist yet — Roadmap §5.11.a covers it but only as Phase 5 scope. Re-tabled here so the v0.4.33 follow-up list stays explicitly tracked:
 
-> **Burial / cremation tasks** — Caretaker / Guardian task that hauls fresh corpses to a Graveyard zone (Phase 5.11.a) and either buries (deletes after a graveyard animation) or cremates (turns into Ash material, Phase 9-overlap). Will land alongside the zone system.
+> **Burial / cremation tasks** — Caretaker / Guardian task that hauls fresh corpses to a Graveyard zone (Phase 5.11.a) and either buries (deletes after a graveyard animation) or cremates (turns into Ash material, Phase 8-overlap). Will land alongside the zone system.
 
 #### Version
 
@@ -6777,7 +6809,7 @@ Patch `0.4.32` → `0.4.33`. `MainMenuController.cs` + `memory/project_versionin
 - **Save/load:** the new `CorpseInfo` sidecar is not yet serialised — corpses themselves persist (they're Items in the dropped-items dict) but the bio data is lost across save/reload, falling back to the "Smurf corpse" placeholder. Add a `CorpseInfo` block to `ItemSaveData` next pass.
 - **WitnessedDeath thoughts:** the `WitnessedDeath` thought def has been live since v0.3.43 but isn't currently triggered by anything. Now that corpses persist on the map, a follow-up could scan tile-radius around each living smurf for fresh corpses and add the thought for nearby colony-mates' deaths. Phase 7 combat may need this for raid trauma anyway.
 - **Burial / cremation tasks:** a Caretaker / Guardian task to haul corpses to a designated "Graveyard" zone (Phase 5 zones) and either bury (delete) or cremate (turn into ash material). Would close the long-term loop where corpses just decay to nothing on the work tile.
-- **Skeleton / bones drop on full decay:** at 0 condition the corpse currently vanishes; could leave a single `Bone` material item (Phase 9 husbandry overlap).
+- **Skeleton / bones drop on full decay:** at 0 condition the corpse currently vanishes; could leave a single `Bone` material item (Phase 8 husbandry overlap).
 
 ---
 
@@ -6799,7 +6831,7 @@ A settings toggle reveals a floating right-side dev panel with categorised debug
   - **Spawn at Cursor:** 50 Smurfberries, 50 Granite blocks, 50 DeadWood blocks, 10 Raw Essence, fresh adult Smurf (random traits/personality/role via the same registries as `BirthSystem`). Drops route through `LocalMap.DropItem` so the v0.4.30 cap + single-type-per-tile + spiral overflow rules all run as in real play.
   - **Map:** rebuild regions + force redraw (mostly stubs at this point — regions rebuild lazily on query).
   - **Visualize (stubs):** disabled toggles for pathfinding / region / occupancy / claims overlays — will light up when each renderer hook lands.
-  - **Future systems (stubs):** disabled buttons with phase-tagged tooltips — Combat raids (Phase 7), Weather storms (Phase 10), Trader caravans (Phase 11), Fire (Phase 10), Disease (Phase 9), Hostile mobs (Phase 7). Buttons sit in place so wiring them up later is a one-line change.
+  - **Future systems (stubs):** disabled buttons with phase-tagged tooltips — Combat raids (Phase 7), Weather storms (Phase 10), Trader caravans (Phase 11), Fire (Phase 10), Disease (Phase 8), Hostile mobs (Phase 7). Buttons sit in place so wiring them up later is a one-line change.
   - Live status row at the bottom echoes the result of the most recent action ("Spawned 50× Smurfberry at (12,17)", "Sim paused", etc.).
 - **`SimulationManager`** — new `Dev*` method family:
   - `DevFindSmurfByName`, `DevKillSmurf`, `DevFillNeeds`, `DevDrainNeeds`, `DevAddThought`, `DevForceYield` — direct mutations under SimulationCore's smurf lock.
@@ -6821,7 +6853,7 @@ Patch `0.4.31` → `0.4.32`. `MainMenuController.cs` + `memory/project_versionin
 
 #### Follow-ups
 
-- The Visualize / Future-systems stubs are intentionally non-functional placeholders — wire them up as each system lands (Phase 7 raids, Phase 9 disease, Phase 10 weather/fire, Phase 11 traders). The dev panel layout already has slots for them so it's a one-line `Pressed` handler each.
+- The Visualize / Future-systems stubs are intentionally non-functional placeholders — wire them up as each system lands (Phase 7 raids, Phase 8 disease, Phase 10 weather/fire, Phase 11 traders). The dev panel layout already has slots for them so it's a one-line `Pressed` handler each.
 - Map section's "Rebuild regions" / "Force redraw" are placeholder buttons — the underlying APIs exist but aren't exposed yet. Light wiring follow-up.
 - Dev panel does not (yet) trap mouse input outside its bounds — clicking through the panel still hits the world below. If that proves annoying, add a `MouseFilter = Stop` overlay band behind the buttons.
 
@@ -8532,7 +8564,7 @@ Sub-B closes out Phase 4 (≈ 90 % complete) by landing every queued deliverable
 - Food gate: colonies with < 15 food/smurf and > 5 smurfs don't attract wanderers — fed colonies are more attractive than starving ones. Founding (≤ 5 smurfs) gets a grace pass so the first female has a path in.
 - Spawns near a random alive colony member (so wanderers don't appear at (0,0)).
 - New `SimulationCore.PendingWanderers` queue; `SimulationManager` drains and emits `WandererArrived(name, sex, role, age)` signal.
-- `GameController.OnWandererArrived` writes to `MessageLog` and pushes an Info-level entry to `AlertsPane`. The Phase 8 storyteller will gain Accept/Decline UI; for sub-B, every wanderer auto-joins.
+- `GameController.OnWandererArrived` writes to `MessageLog` and pushes an Info-level entry to `AlertsPane`. The Phase 9 storyteller will gain Accept/Decline UI; for sub-B, every wanderer auto-joins.
 
 #### 3. Birth refinement — `Systems/BirthSystem.cs`
 
@@ -8917,7 +8949,7 @@ Patch bumped from `0.3.41` → `0.3.42`. `MainMenuController.cs` version string 
 
 ### Added — Collapsible HUD resource categories, Resources + Animals bottom tabs; Phase 4 roadmap rewrite for procedural item generation
 
-Scaffolds the resource UI for the upcoming Phase 4 procedural item system. The HUD's resource readout becomes per-category expandable; a new bottom-bar tab gives a granular sortable ledger; an Animals tab stub anchors the future Phase 9 husbandry tab. The Phase 4 roadmap section is rewritten to specify a Dwarf-Fortress-style starting-item flow and a full 9-category item taxonomy.
+Scaffolds the resource UI for the upcoming Phase 4 procedural item system. The HUD's resource readout becomes per-category expandable; a new bottom-bar tab gives a granular sortable ledger; an Animals tab stub anchors the future Phase 8 husbandry tab. The Phase 4 roadmap section is rewritten to specify a Dwarf-Fortress-style starting-item flow and a full 9-category item taxonomy.
 
 ---
 
@@ -8925,7 +8957,7 @@ Scaffolds the resource UI for the upcoming Phase 4 procedural item system. The H
 
 - **Scenario starting items** — was a hard-coded gift list; now specifies a 6-step procedural roll (Category → Sub-type → Material → Quality → Condition+Age → Visual). All starter items go through `ItemFactory.Create(kind, materialFamily, quality, ...)` — no starter-only paths — and the player gets an 8-point budget with per-category costs (Tool=2, Apparel=2, Weapon=3, Food=1, Material=1, Trinket=1).
 - **Item categorisation + UI** — full taxonomy added: 🍓 Food, 🪨 Material, 🔨 Tool, ⚔ Weapon, 🧥 Apparel, 🪑 Furniture, ✨ Magic, 💰 Trade Good, 🌟 Trinket. Each category gets a HUD caret + collapsible sub-list and a row in the Resources tab.
-- **Animals tab** — added as a Phase 9 deliverable with column spec: Camera, Name, Species, Age, Trained-for, Allow-orders, Slaughter-toggle, Mood+needs. v0.3.41 lands the stub host.
+- **Animals tab** — added as a Phase 8 deliverable with column spec: Camera, Name, Species, Age, Trained-for, Allow-orders, Slaughter-toggle, Mood+needs. v0.3.41 lands the stub host.
 
 ---
 
@@ -8944,12 +8976,12 @@ The expansion mechanism is local-capture-safe: a `captured` reference is bound p
 
 #### BottomTabPanel — `scripts/ui/BottomTabPanel.cs`
 
-`Tab` enum extended to `{ None, Orders, Build, Zones, Jobs, Resources, Smurfs, Animals }`. Resources sits between Jobs and Smurfs (granular ledger view); Animals anchors the far-right slot (Phase 9 stub).
+`Tab` enum extended to `{ None, Orders, Build, Zones, Jobs, Resources, Smurfs, Animals }`. Resources sits between Jobs and Smurfs (granular ledger view); Animals anchors the far-right slot (Phase 8 stub).
 
 - New host panels `_resourcesHost`, `_animalsHost`; new tab buttons `📦 Resources`, `🐾 Animals`.
 - `Attach(toolbar, roster, resources)` — signature widened by one argument; `GameController` updated. Detach/reattach in `OnUIScaleChanged` extended to cover the new panel so it survives UI-scale rebuilds the same way the toolbar and roster do.
 - `SetActiveTab`, `RefreshTabButtons`, `IsMouseOverContent` all cover the two new hosts.
-- Animals host carries a stub label (`"🐾 Animals — Husbandry / taming / pens — Phase 9 stub"`); Resources host receives the new `ResourcesPanel` content via `Attach`.
+- Animals host carries a stub label (`"🐾 Animals — Husbandry / taming / pens — Phase 8 stub"`); Resources host receives the new `ResourcesPanel` content via `Attach`.
 
 ---
 
@@ -8972,7 +9004,7 @@ Category   Sub-type   Material   Quality   Condition   Count   Avg age   Locatio
 
 #### Animals tab stub
 
-A `MakeStubContent` panel anchored at the far-right of the bottom tab row. Carries the Phase 9 marker text only — the actual roster, training, allow-orders, and slaughter-toggle columns land alongside the husbandry rollout. The slot is here so the player and roadmap reviewers see the structural shape of the bottom bar settling toward the final tab row.
+A `MakeStubContent` panel anchored at the far-right of the bottom tab row. Carries the Phase 8 marker text only — the actual roster, training, allow-orders, and slaughter-toggle columns land alongside the husbandry rollout. The slot is here so the player and roadmap reviewers see the structural shape of the bottom bar settling toward the final tab row.
 
 ---
 
@@ -9439,7 +9471,7 @@ Without claims, all wandering smurfs see the same flagged tile as "closest unwor
 
 **Edge case — smurf death:**
 
-If a smurf dies mid-walk to a claimed designation, the claim stays until either the underlying designation is cleared (player Remove, or another smurf eventually picks it up after the stuck-give-up rotation completes) or the SetXDesignation re-set re-acquires it. Window is small; explicit cleanup deferred until Phase 8 wiring adds a death-handler hook on the sim thread.
+If a smurf dies mid-walk to a claimed designation, the claim stays until either the underlying designation is cleared (player Remove, or another smurf eventually picks it up after the stuck-give-up rotation completes) or the SetXDesignation re-set re-acquires it. Window is small; explicit cleanup deferred until Phase 9 wiring adds a death-handler hook on the sim thread.
 
 **Files touched:**
 - `world/LocalMap.cs` — designation indexes, claim map, `FindNearest*` and `SnapshotDesignations` API, `using Godot` for `Vector2`.
@@ -9675,7 +9707,7 @@ Columns:
 | Mood | Coloured emoji + state name (Inspired / Content / Stressed / …) | Phase 2 (present) |
 | 🍓 💤 👥 ✨ 🛡 | Need bars — green ≥ 60, amber 30–60, red < 30 | Phase 2 (present) |
 | Activity | Verb form of `CurrentTask` ("Eating", "Excavating", "Idle", …) | Phase 3 (present) |
-| ⚔ | Sword glyph when `CombatTargetName != null` | Phase 8 stub (data-plumbed) |
+| ⚔ | Sword glyph when `CombatTargetName != null` | Phase 9 stub (data-plumbed) |
 
 Apparel / Food / Drug / Reading policy columns are intentionally omitted — none of those systems exist in SmurfulationC yet, and empty stub columns would only clutter. Work priorities live in their own ⚙ Jobs tab (still a stub label until Phase 3.10 fills it in).
 
@@ -9778,7 +9810,7 @@ No layout changes required — the content panel's height stays fixed, all hosts
 
 ### Added — Tabbed bottom UI; RTS box-select; combat order stub; per-order visual feedback; Smurfs roster tab
 
-Big interaction-model overhaul. The bottom of the screen is now a two-tab shell (Orders / Smurfs) instead of a standalone designation toolbar. The non-combat orders the player can issue all live inside the Orders tab; right-click is reserved for combat orders (stubbed until Phase 8) and move orders to the currently selected smurfs. RTS-style box-select lets the player sweep multiple smurfs in one drag, and every order produces a short flash so the player knows the click was received.
+Big interaction-model overhaul. The bottom of the screen is now a two-tab shell (Orders / Smurfs) instead of a standalone designation toolbar. The non-combat orders the player can issue all live inside the Orders tab; right-click is reserved for combat orders (stubbed until Phase 9) and move orders to the currently selected smurfs. RTS-style box-select lets the player sweep multiple smurfs in one drag, and every order produces a short flash so the player knows the click was received.
 
 **1. Bottom UI shell — `BottomTabPanel`.**
 
@@ -9814,7 +9846,7 @@ The combat-order code path is plumbed but inactive — no enemy entities exist y
 - `SimulationCore.Run` drains the queue each tick and sets the flag on the named smurf — no behavior reads it yet.
 - `SmurfColonyView.DrawSmurf` draws a red ⚔ glyph above the head while the flag is non-null. The icon is sized to remain readable when smurfs cluster.
 
-When Phase 8 lands, the behavior system will:
+When Phase 9 lands, the behavior system will:
 - Detect non-null `CombatTargetName` as a Tier-0 override.
 - Resolve target → enemy entity → route attack task.
 - Clear the flag on target death or player cancel.
@@ -10190,7 +10222,7 @@ Shared constants and `StyleBoxFlat` factory used by every new Phase-3.x panel. S
 **New floating panels:**
 
 - **`DesignationToolbar.cs`** (bottom-centre) — the player's primary tool selector. Six categories: Move, Excavate, Storage (stubbed), Wall (stubbed), Priorities (stubbed), Remove. Holds the active-tool state (`Tool` enum); other systems read `_toolbar.ActiveTool` to dispatch map clicks correctly. Active tool gets a brighter pressed-state style; re-clicking the active tool deselects (returns to `Tool.None`).
-- **`AlertsPane.cs`** (top-right under smurf card) — colony alerts list. Public `AddAlert(text, level)` API for Phase 4 / Phase 8 / Phase 12 systems to push alerts (Info / Warning / Critical colour scales). Ships with a "All systems nominal." placeholder until live alerts wire in.
+- **`AlertsPane.cs`** (top-right under smurf card) — colony alerts list. Public `AddAlert(text, level)` API for Phase 4 / Phase 9 / Phase 12 systems to push alerts (Info / Warning / Critical colour scales). Ships with a "All systems nominal." placeholder until live alerts wire in.
 - **`ResourceHUD.cs`** (top-centre, under existing era / date bar) — live readout of `SimulationManager.GetResourcesSnapshot()` (Food / Stone / Wood / MagicEssence). `(unstored — Phase 5 will gate)` qualifier reminds the player the number is the placeholder pool until Phase 5 storage tagging lands.
 
 **Wiring — `GameController.cs`:**
@@ -10225,14 +10257,14 @@ Hover tooltip now adds a second line of `°C · classification` (e.g. `18 °C ·
 **Code changes (minor):**
 
 - `ScenarioPanel.cs` — random smurf sex roll changed from `0.5 / 0.5` to canonical **1 female per 49 males** (~2 %). New constant `FemaleSpawnChance = 1.0 / 49.0` used in both `MakeRandomTemplate()` and `RandomizeOne()`. Matches the existing `BirthSystem` 1:49 birth ratio and the Smurfs-Fandom canon. The legacy hard-coded Smurfette female in `SimulationManager.SeedColony`'s founding-seven stays intact — it's an explicit exception, not a random roll.
-- `BirthSystem.ComputeFoodCapacity` — placeholder formula updated from `max(7, foragers × 3)` to `max(30, 30 + foragers × 5)`. v0.1's formula capped a default 2-Forager colony at 7 smurfs, blocking any growth from the founding seven. The new placeholder allows a 5-Forager colony to support ~55 smurfs, which is the headroom the Phase 4 §"Demographic growth model" math expects. Phase 9 farming replaces the placeholder with biome + farm-plot driven capacity.
+- `BirthSystem.ComputeFoodCapacity` — placeholder formula updated from `max(7, foragers × 3)` to `max(30, 30 + foragers × 5)`. v0.1's formula capped a default 2-Forager colony at 7 smurfs, blocking any growth from the founding seven. The new placeholder allows a 5-Forager colony to support ~55 smurfs, which is the headroom the Phase 4 §"Demographic growth model" math expects. Phase 8 farming replaces the placeholder with biome + farm-plot driven capacity.
 
 **Roadmap — new Phase 4 sub-section: Demographic growth model:**
 
 Appended to Phase 4 (just before the existing Estimated-scope footer). Documents the two growth pathways:
 
 - **Birth system** (refines existing `BirthSystem`) — per-season check fires *once per eligible mother* (not once per colony), scaling growth with female count. 1-female colony ≈ 1 birth/year; 3-female colony ≈ 3 births/year. Food capacity gate uses Phase 4 stockpile totals.
-- **Wandering-in event** (new Phase 8 storyteller event with catch math owned by Phase 4) — 2–4 wanderers/year for small colonies (≤30), tapering to 0 past 200. Every wanderer rolls 1:49 sex ratio, so a long-running male-only colony statistically gains its first female via wandering. Player accepts / declines through a Phase 3.x alert.
+- **Wandering-in event** (new Phase 9 storyteller event with catch math owned by Phase 4) — 2–4 wanderers/year for small colonies (≤30), tapering to 0 past 200. Every wanderer rolls 1:49 sex ratio, so a long-running male-only colony statistically gains its first female via wandering. Player accepts / declines through a Phase 3.x alert.
 - **Growth targets** — math sanity-check shows 7 → 50 by year 10 on a standard playthrough with the default founding seven (Smurfette included).
 - **Colony caps** — 250 smurfs is the recommended late-game target on a 320 × 200 map (the WorldGenPanel "Recommended" preset). 1 000 is the theoretical max on a 480 × 300 map. Storyteller pressure (raids, disease, weather) scales with colony size so growth has a real cost.
 
@@ -10265,7 +10297,7 @@ All cross-references in earlier phases that pointed at the old numbers automatic
 
 ## [0.3.12] — 2026-05-11
 
-### Roadmap — Phase 7 Combat and Phase 9 Husbandry/Farming fleshed out
+### Roadmap — Phase 7 Combat and Phase 8 Husbandry/Farming fleshed out
 
 No code changes — roadmap-only expansion of two phases that were previously sketched at high level.
 
@@ -10289,7 +10321,7 @@ Detailed simulation combat adapted to SmurfulationC's existing systems. Combat i
 - **7.14** Hostile-entity catalogue — Phase 6 entities tagged with combat attributes (Weapon / Armor / Aggression / Pack / StatusEffectOnHit / Drops)
 - **7.15** Save & determinism — per-part Wounds / Blood / Pain / Status serialise on save; combat rolls use per-smurf RNG so save reload reproduces outcomes
 
-**Phase 9 — Animal Husbandry, Farming, and Hunting (fully expanded, 11 sub-sections):**
+**Phase 8 — Animal Husbandry, Farming, and Hunting (fully expanded, 11 sub-sections):**
 
 Deep-sim animal + farming systems adapted to existing simulation systems.
 
@@ -10309,9 +10341,9 @@ Deep-sim animal + farming systems adapted to existing simulation systems.
   - **9.8.6** Irrigation — water-adjacency (≤4 tiles from any Water tile) gives +0.10 effective Fertility and Heat Wave resistance. Phase 11 tech: Irrigation Channels (Crafter builds Water tiles from a river source)
   - **9.8.7** Weather integration — Rain accelerates, Cold Snap pauses / wilts, Heat Wave dries / ripens early, Heavy Rain trampling chance, Magical Storm boosts magic crops, lightning burns plots
   - **9.8.8** Above-ground vs Underground — Cave Building Zones unlock fungal crops (Small/Large Mushroom × 1.5 yield underground)
-- **9.9** Fishing (preserved from original Phase 9 text)
+- **9.9** Fishing (preserved from original Phase 8 text)
 - **9.10** Aquatic creatures (preserved list)
-- **9.11** Cross-system integration map — table showing every system that hooks into Phase 9 (Phase 3 BehaviorSystem tasks, Phase 4 Items, Phase 5 Buildings, Phase 5.x Temperature, Phase 6 Entities, Phase 7 Combat, Phase 10 Weather, Phase 11 Tech, Phase 12 Era)
+- **9.11** Cross-system integration map — table showing every system that hooks into Phase 8 (Phase 3 BehaviorSystem tasks, Phase 4 Items, Phase 5 Buildings, Phase 5.x Temperature, Phase 6 Entities, Phase 7 Combat, Phase 10 Weather, Phase 11 Tech, Phase 12 Era)
 
 `Last Updated` line refreshed.
 
@@ -10321,16 +10353,16 @@ Deep-sim animal + farming systems adapted to existing simulation systems.
 
 ### Roadmap — Weather promoted to its own top-level phase (Phase 10), downstream phases renumbered
 
-No code changes — phase renumbering only. The v0.3.10 release docked Weather as Phase 9.5 (between Animal Husbandry and Technology); this release promotes it to its own top-level phase by shifting every downstream phase up by one.
+No code changes — phase renumbering only. The v0.3.10 release docked Weather as Phase 8.5 (between Animal Husbandry and Technology); this release promotes it to its own top-level phase by shifting every downstream phase up by one.
 
 **Renaming:**
-- **Phase 9.5 — Weather and Environment** → **Phase 10 — Weather and Environment**
+- **Phase 8.5 — Weather and Environment** → **Phase 10 — Weather and Environment**
 - Phase 10 — Technology and Culture → **Phase 11 — Technology and Culture**
 - Phase 11 — Era System and Campaign Mode → **Phase 12 — Era System and Campaign Mode**
 - Phase 12 — Polish and Individual Mode → **Phase 13 — Polish and Individual Mode**
 - Phase 12.5 — Sprite and Texture Pass → **Phase 13.5 — Sprite and Texture Pass**
 
-Weather sub-section numbers shift from `9.5.1`–`9.5.8` to `10.1`–`10.8`. Internal `§9.5.x` cross-references in §10.x text updated to `§10.x`.
+Weather sub-section numbers shift from `9.5.1`–`9.5.8` to `10.1`–`10.8`. Internal `§8.5.x` cross-references in §10.x text updated to `§10.x`.
 
 **Roadmap cross-references updated** wherever earlier phases referenced now-shifted phases:
 - Phase 1 "Recommendation: Option B through Phase 12; transition to Option A in Phase 13.5" (was 11 / 12.5)
@@ -10339,7 +10371,7 @@ Weather sub-section numbers shift from `9.5.1`–`9.5.8` to `10.1`–`10.8`. Int
 - Phase 5 "Knowledge (Phase 11): specific tech nodes" (was 10)
 - Phase 5 Enables footer "Phase 11 tech-gated furniture tiers" + "Phase 5.x temperature system gates Phase 10 weather + fire" (were 10 / 9.5)
 - Phase 7 "Iron Blade — Iron (Phase 11 resource)" (was 10)
-- Phase 8 Storyteller weather hooks "(Phase 10)" + body refs (were 9.5)
+- Phase 9 Storyteller weather hooks "(Phase 10)" + body refs (were 9.5)
 - Phase 10 (Weather) goal/prereq/enables block — internal "Phase 11 technology" / "Phase 12/13 era-scoped weather variability" / "Phase 11 weather-mitigation tech tier" (were 10 / 11/12 / 10)
 - Phase 10.2 weather table "Eclipse (Phase 11 magic prereq)" (was 10)
 - Phase 13.5 prereq "Phase 12 (all tile, entity, and building types finalized)" + enables "Phase 13 (release candidate)" (were 11 / 12)
@@ -10348,9 +10380,9 @@ Weather sub-section numbers shift from `9.5.1`–`9.5.8` to `10.1`–`10.8`. Int
 
 **Code references updated** in `ScenarioPanel.cs` `ItemCatalog`:
 - `trade.*` category description: "Phase 10 (Technology & Culture) sets exchange rates" → **Phase 11**
-- `misc.lantern` description: "Phase 9.5 weather" → **Phase 10 weather**
+- `misc.lantern` description: "Phase 8.5 weather" → **Phase 10 weather**
 
-The v0.3.10 changelog entry is left untouched — it describes the as-of-that-version state (Phase 9.5) and is historical record.
+The v0.3.10 changelog entry is left untouched — it describes the as-of-that-version state (Phase 8.5) and is historical record.
 
 `Last Updated` line refreshed.
 
@@ -10358,11 +10390,11 @@ The v0.3.10 changelog entry is left untouched — it describes the as-of-that-ve
 
 ## [0.3.10] — 2026-05-11
 
-### Roadmap — Phase 8.x Fire lifted out into dedicated Phase 9.5 Weather and Environment
+### Roadmap — Phase 9.x Fire lifted out into dedicated Phase 8.5 Weather and Environment
 
-No code changes — major roadmap restructure. The Fire System added in v0.3.9 as a sub-phase of Phase 8 (Events / Storyteller) is moved into a dedicated new phase between Phase 9 (Animal Husbandry / Farming / Hunting) and Phase 10 (Technology and Culture), where it joins a full weather simulation.
+No code changes — major roadmap restructure. The Fire System added in v0.3.9 as a sub-phase of Phase 9 (Events / Storyteller) is moved into a dedicated new phase between Phase 8 (Animal Husbandry / Farming / Hunting) and Phase 10 (Technology and Culture), where it joins a full weather simulation.
 
-**New — Phase 9.5 Weather and Environment**:
+**New — Phase 8.5 Weather and Environment**:
 
 - **9.5.1 Weather state model** — singleton `LocalWeatherState` on `WorldState` with `Current` (WeatherType enum), `Intensity`, `Wind (Direction, Speed)`, per-tile `Moisture` and `SnowDepth`, `SkyCover`, `Visibility`, `LightningCharge`, `ElapsedTicks`. Weather is map-level; per-tile state is on `LocalTile`.
 
@@ -10370,9 +10402,9 @@ No code changes — major roadmap restructure. The Fire System added in v0.3.9 a
 
 - **9.5.3 Weather selection** — Markov chain transitioning every 1–6 in-game hours, weighted by current state × biome × season × storyteller pressure. Table-driven so it can be tuned without touching sim code.
 
-- **9.5.4 Fire System (relocated)** — full migration of the v0.3.9 Phase 8.x design: `LocalTile.FireStage` enum, `Flammability` derivation, heat injection into the Phase 5.x temperature field for radiant ignition, smoke filling adjacent indoors, firefighter task via Designate → Extinguish, Build → Firebreak, Mage Quench. All five ignition sources (Hearth/Kiln overflow, lightning, combat, Crafter accident, storyteller Wildfire) and the spread model (Flammability × wind × temperature × moisture) preserved.
+- **9.5.4 Fire System (relocated)** — full migration of the v0.3.9 Phase 9.x design: `LocalTile.FireStage` enum, `Flammability` derivation, heat injection into the Phase 5.x temperature field for radiant ignition, smoke filling adjacent indoors, firefighter task via Designate → Extinguish, Build → Firebreak, Mage Quench. All five ignition sources (Hearth/Kiln overflow, lightning, combat, Crafter accident, storyteller Wildfire) and the spread model (Flammability × wind × temperature × moisture) preserved.
 
-- **9.5.5 Temperature integration** — outdoor tiles read `WeatherOffset` from the §9.5.2 table each tick. Cold Snap / Heat Wave are how Phase 5.x's extreme-weather × 1.5–2.0 deterioration multipliers actually get triggered.
+- **9.5.5 Temperature integration** — outdoor tiles read `WeatherOffset` from the §8.5.2 table each tick. Cold Snap / Heat Wave are how Phase 5.x's extreme-weather × 1.5–2.0 deterioration multipliers actually get triggered.
 
 - **9.5.6 Smurf response** — new `SeekShelter` behavior task (Tier 1, priority 88 during Heavy Rain / Thunderstorm / Cold Snap / Heat Wave at Intensity ≥ 0.7). WetClothes mood penalty; heatstroke / hypothermia carry over from Phase 5.x.3. Crop responses: Cold Snap freezes growth, Heat Wave dries soil, Heavy Rain can trample.
 
@@ -10380,16 +10412,16 @@ No code changes — major roadmap restructure. The Fire System added in v0.3.9 a
 
 - **9.5.8 Save & determinism** — `LocalWeatherState` serialises directly; per-tile Moisture / SnowDepth / FireStage as delta lists; Markov rolls seeded `Random(WorldSeed ^ ColonyTick)` so save reload reproduces the exact weather sequence.
 
-**Phase 8 (Events and the Storyteller) updated** — `8.x Fire System` removed entirely. New paragraph after the event-table notes that the Storyteller can *trigger* weather events (`Wildfire`, `Flashstorm`, `Cold Wave`, `MountainEruption`) but the weather state machine itself lives in Phase 9.5; Storyteller is a scheduling layer. `Harsh Winter` becomes a wrapper that pushes Phase 9.5 state to Cold Snap for one season.
+**Phase 9 (Events and the Storyteller) updated** — `8.x Fire System` removed entirely. New paragraph after the event-table notes that the Storyteller can *trigger* weather events (`Wildfire`, `Flashstorm`, `Cold Wave`, `MountainEruption`) but the weather state machine itself lives in Phase 8.5; Storyteller is a scheduling layer. `Harsh Winter` becomes a wrapper that pushes Phase 8.5 state to Cold Snap for one season.
 
-**Cross-references updated** in earlier phases that referenced "Phase 8 weather" or "Phase 8.x":
-- Phase 3.x.5 tooltip importance note → "Phase 9.5 weather + fire"
-- Phase 4 deterioration formula insulation row → "Phase 9.5 weather"
-- Phase 5.10 roof collapse trigger → "Phase 7 combat / Phase 9.5 storms"
-- Phase 5.11.b Building Zones combat/collapse → "Phase 9.5 storms"
-- Phase 5.x.1 outdoor temperature inputs → "weather (Phase 9.5)"
-- Phase 5 Enables footer → "Phase 9.5 weather + fire"
-- ScenarioPanel `misc.lantern` description → "Phase 9.5 weather"
+**Cross-references updated** in earlier phases that referenced "Phase 9 weather" or "Phase 9.x":
+- Phase 3.x.5 tooltip importance note → "Phase 8.5 weather + fire"
+- Phase 4 deterioration formula insulation row → "Phase 8.5 weather"
+- Phase 5.10 roof collapse trigger → "Phase 7 combat / Phase 8.5 storms"
+- Phase 5.11.b Building Zones combat/collapse → "Phase 8.5 storms"
+- Phase 5.x.1 outdoor temperature inputs → "weather (Phase 8.5)"
+- Phase 5 Enables footer → "Phase 8.5 weather + fire"
+- ScenarioPanel `misc.lantern` description → "Phase 8.5 weather"
 
 `Last Updated` line refreshed.
 
@@ -10397,17 +10429,17 @@ No code changes — major roadmap restructure. The Fire System added in v0.3.9 a
 
 ## [0.3.9] — 2026-05-11
 
-### Roadmap — Tile-hover temperature promoted; Phase 8.x organic Fire System added
+### Roadmap — Tile-hover temperature promoted; Phase 9.x organic Fire System added
 
 No code changes — roadmap-only release.
 
 **Phase 3.x.5 — Tile tooltip gets explicit temperature line:**
 
-The brief mention buried in Phase 5.x.5 is promoted to a primary feature of the Phase 3.x tile tooltip. Hovering any tile for 400 ms now surfaces `Mud · Fertility 0.68 · Underbrush · 18 °C` (terrain · fertility · vegetation · **°C**). A `Indoors / Outdoors / Pavilion` classification line is added on the row below, since the deterioration and temperature math read from it. The tooltip line is wired with a placeholder biome-baseline °C value before Phase 5.x lands the real `LocalTile.Temperature` field, so the UI doesn't shift layout when the real value arrives. Note in the section explicitly calls out that this tooltip is the player's primary feedback channel for the entire Phase 5.x temperature, Phase 8 weather, Phase 8.x fire, and Phase 4 deterioration loop — every system gating on °C surfaces here first.
+The brief mention buried in Phase 5.x.5 is promoted to a primary feature of the Phase 3.x tile tooltip. Hovering any tile for 400 ms now surfaces `Mud · Fertility 0.68 · Underbrush · 18 °C` (terrain · fertility · vegetation · **°C**). A `Indoors / Outdoors / Pavilion` classification line is added on the row below, since the deterioration and temperature math read from it. The tooltip line is wired with a placeholder biome-baseline °C value before Phase 5.x lands the real `LocalTile.Temperature` field, so the UI doesn't shift layout when the real value arrives. Note in the section explicitly calls out that this tooltip is the player's primary feedback channel for the entire Phase 5.x temperature, Phase 9 weather, Phase 9.x fire, and Phase 4 deterioration loop — every system gating on °C surfaces here first.
 
-**Phase 8.x — Fire System (sub-phase of Weather):**
+**Phase 9.x — Fire System (sub-phase of Weather):**
 
-Organic fire start + spread + extinguish, sitting inside Phase 8 because weather (wind, moisture, lightning) drives ignition and the per-tile temperature field from Phase 5.x is its substrate. Six sub-sections:
+Organic fire start + spread + extinguish, sitting inside Phase 9 because weather (wind, moisture, lightning) drives ignition and the per-tile temperature field from Phase 5.x is its substrate. Six sub-sections:
 
 - **8.x.1 Ignition sources** — Hearth / Kiln overflow (heat source sparks adjacent flammables), lightning strikes on flammable terrain, Phase 7 incendiary combat, low-skill Crafter accidents, explicit Wildfire storyteller event.
 - **8.x.2 Per-tile fire state** — new `LocalTile.FireStage: byte` (None / Smouldering / Burning / Inferno / Charred), per-tile `Flammability` derived from terrain + structure + vegetation + item pile. Burning tiles inject heat into the Phase 5.x temperature field (radiant ignition of nearby tiles). Smurfs / items / structures take per-tick damage on burning tiles; indoor neighbours fill with smoke (Safety / Lung damage).
@@ -10504,7 +10536,7 @@ No code changes — roadmap-only release documenting four interconnected intenti
 - **Auto-roof** option in Phase 3.x build toolbar: enclosed rooms auto-queue a roof when the perimeter walls finish. Players almost never place roofs manually.
 - **Manual roof / un-roof** tools for awnings, courtyards, mixed open-roof structures.
 - A tile is **Indoors** iff `HasRoof = true` AND inside a RoomDetector-identified enclosed region. Otherwise Outdoors. Roof-only (pavilion) tiles get partial × 0.7 protection.
-- **Roof collapse** when supporting walls are destroyed (Phase 7 combat / Phase 8 storms) — drops chunk damage on anything underneath and re-classifies tiles as Outdoors.
+- **Roof collapse** when supporting walls are destroyed (Phase 7 combat / Phase 9 storms) — drops chunk damage on anything underneath and re-classifies tiles as Outdoors.
 
 **Phase 5.11 — Zones (Songs-of-Syx-style structured zoning, NOT "open zones"):**
 - The existing §5.4–5.9 room / building system (enclosed walls + role-defining furniture, Songs-of-Syx-style capacity + explicit role assignment) **stays exactly as written** per the user's intent. Zones below are a complement, not a replacement.
@@ -10527,7 +10559,7 @@ No code changes — roadmap-only release adding a `5.x — Level-wide Temperatur
 **Model: per-tile diffusion + room insulation hybrid:**
 - Per-tile temperatures updated on a slow 1 Hz heat-diffusion pass — every passable tile exchanges a fraction with its 4-connected neighbours.
 - Room insulation: Phase 5's room scanner identifies enclosed regions; tiles in a sealed room share a fast-equalising pool and leak through walls at a per-material rate (Boulder 0.02 °C/tick … cloth wall 0.20 … open doorway 0.40).
-- Outdoor temperature driven by seasonal curve + biome + Phase 8 weather + latitude (existing `WorldTile.Temperature`), with daily diurnal cycle.
+- Outdoor temperature driven by seasonal curve + biome + Phase 9 weather + latitude (existing `WorldTile.Temperature`), with daily diurnal cycle.
 
 **Sub-sections specified:**
 - **5.x.1 Per-tile temperature field** — `LocalTile.Temperature: float`, new `TemperatureSystem` on the sim thread, heat sources injecting +Δ that diffuses outward.
@@ -10537,7 +10569,7 @@ No code changes — roadmap-only release adding a `5.x — Level-wide Temperatur
 - **5.x.5 Visualisation** — Temperature overlay toggled from the Phase 3.x designation toolbar (blue → red gradient); `TileInfoOverlay` adds tile temperature; smurf card adds `Comfort` row.
 - **5.x.6 Save & determinism** — Per-tile temperature delta list (same pattern as Phase 2.5 terrain / vegetation deltas); building-anchored heat sources persist via the existing building serialisation.
 
-**Phase 5 wrap-up updated** to note that 5.x temperature gates Phase 8 weather events (storms / heat waves / blizzards) — all weather flows through the same temperature field rather than living in a parallel system.
+**Phase 5 wrap-up updated** to note that 5.x temperature gates Phase 9 weather events (storms / heat waves / blizzards) — all weather flows through the same temperature field rather than living in a parallel system.
 
 `Last Updated` line refreshed to note the new intention.
 
@@ -10634,7 +10666,7 @@ No code changes — roadmap-only release documenting two large intentions surfac
 
 **`scripts/ScenarioConfig.cs`** — data model:
 - `ColonyName` (default `"Colony MM-dd-yy"` of the current date)
-- `Storyteller` (enum: `Balanced`, `Patient`, `Random`, `Cataclysmic` — only Balanced is functional; rest stubbed and disabled in the dropdown until Phase 8 lands)
+- `Storyteller` (enum: `Balanced`, `Patient`, `Random`, `Cataclysmic` — only Balanced is functional; rest stubbed and disabled in the dropdown until Phase 9 lands)
 - `Smurfs: List<SmurfTemplate>` — per smurf: `Name`, `Sex`, `Role`, `Age`, `Personality`, `StartingItems` (last is a Phase 4 stub)
 - `MinSmurfs = 1`, `MaxSmurfs = 25`
 
@@ -10653,7 +10685,7 @@ No code changes — roadmap-only release documenting two large intentions surfac
 
 **Roadmap updates:**
 - Phase 4: starting-items picker now planned as the resolution of the Scenario screen's Items… stub. `SmurfTemplate.StartingItems` model field already in place.
-- Phase 8: storyteller dropdown wiring documented; four storyteller classes specified.
+- Phase 9: storyteller dropdown wiring documented; four storyteller classes specified.
 
 ---
 
@@ -10981,7 +11013,7 @@ Root cause: `HasPassableNeighbor` only protected the *tile being placed*. It nev
 
 **SmurfulationC_Roadmap_2026.md — Phase 2.6 River Generation added:**
 - New roadmap section documents planned river generation (world-map `HasRiver` marking, local-map Pass 4h meandering carve, vegetation ecology, shallow ford crossings, mud silt border, rendering).
-- Notes connection to Phase 9 Crawdad habitat prerequisite.
+- Notes connection to Phase 8 Crawdad habitat prerequisite.
 
 ---
 
@@ -11144,7 +11176,7 @@ Root cause: `HasPassableNeighbor` only protected the *tile being placed*. It nev
 - `PineShroom` → "Pine Shroom" / "Food".
 
 **Roadmap:**
-- Phase 9 expanded with fishing system (Coastal/Island Dock + Fisher specialisation) and five aquatic/amphibious creature entries (Hermit Crab, Crawdad, Tide Beetle, Sandhopper, Shore Frog).
+- Phase 8 expanded with fishing system (Coastal/Island Dock + Fisher specialisation) and five aquatic/amphibious creature entries (Hermit Crab, Crawdad, Tide Beetle, Sandhopper, Shore Frog).
 
 ---
 

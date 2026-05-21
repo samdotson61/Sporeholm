@@ -348,7 +348,7 @@ namespace Sporeholm.UI
             _content.AddChild(MakeStubBtn("Force storm",        "Phase 10 — Weather"));
             _content.AddChild(MakeStubBtn("Spawn trader",       "Phase 11 — Trade caravans"));
             _content.AddChild(MakeStubBtn("Start fire",         "Phase 10 — Fire propagation"));
-            _content.AddChild(MakeStubBtn("Cause disease",      "Phase 9 — Health / disease"));
+            _content.AddChild(MakeStubBtn("Cause disease",      "Phase 8 — Health / disease"));
             _content.AddChild(MakeStubBtn("Spawn hostile mob",  "Phase 7 — Hostile entities"));
         }
 

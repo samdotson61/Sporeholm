@@ -50,7 +50,7 @@ namespace Sporeholm.Simulation.Entities
         // v0.6.0 — cooldown ticks between attacks (Phase 7 combat hooks
         // here when it lands). Decremented per sim tick.
         public int AttackCooldownTicks { get; set; }
-        // v0.6.0 — Phase 9 husbandry hook: tamed entity follows a
+        // v0.6.0 — Phase 8 husbandry hook: tamed entity follows a
         // designated shroomp. Untamed entities ignore this field.
         public bool   IsTamed     { get; set; }
         public string? TamedByName { get; set; }
@@ -64,7 +64,7 @@ namespace Sporeholm.Simulation.Entities
         // v0.6.2 — simplified needs system. Wild entities track Nutrition +
         // Rest only (no Magic / Social / Joy — they can't Attune or Converse).
         // Decay is purely display today: EntityCardPanel reads these so the
-        // player can see fauna state. No behaviour impact yet — Phase 9
+        // player can see fauna state. No behaviour impact yet — Phase 8
         // husbandry adds Hungry → Graze transitions and Tired → Sleep.
         // Range 0-100. Spawn at 70 (default fed + rested). Decay rates
         // tuned slow so a wild entity doesn't visibly starve in the first
@@ -74,7 +74,7 @@ namespace Sporeholm.Simulation.Entities
         // v0.6.2 — derived "mood" classification. Not stored; computed
         // on demand from Health %, Nutrition, Rest, and AI state so the
         // EntityCardPanel can surface a single human-readable label.
-        // Phase 9 husbandry will replace this with a real Tamed-creature
+        // Phase 8 husbandry will replace this with a real Tamed-creature
         // mood model alongside the trainability system.
         public string MoodLabel
         {

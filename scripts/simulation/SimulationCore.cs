@@ -103,7 +103,7 @@ namespace Sporeholm.Simulation
 		// v0.3.47 (Phase 4 sub-B) — wandering-in arrivals. WanderingInSystem
 		// enqueues; SimulationManager drains and re-emits to the AlertsPane
 		// as a "Wanderer joined" notification. For sub-B the prompt
-		// auto-accepts; Phase 8's storyteller will gain Accept/Decline UI.
+		// auto-accepts; Phase 9's storyteller will gain Accept/Decline UI.
 		public ConcurrentQueue<ShroompSnapshot> PendingWanderers { get; } = new();
 
 		private readonly Random _rng = new();
@@ -162,7 +162,7 @@ namespace Sporeholm.Simulation
 			if (cmd != null) PendingCommands.Enqueue(cmd);
 		}
 
-		// v0.3.24 — combat order queue (Phase 8 stub). Drained from
+		// v0.3.24 — combat order queue (Phase 9 stub). Drained from
 		// BehaviorSystem.Tick alongside PendingPlayerOrders: each entry sets
 		// the named shroomp's CombatTargetName (null = clear). The behavior
 		// system does not yet act on this — only the visual layer reads it.

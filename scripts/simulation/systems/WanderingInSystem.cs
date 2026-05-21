@@ -21,7 +21,7 @@ namespace Sporeholm.Simulation.Systems
     //     arrival (per-shroomp inventory lands in Phase 5 alongside Haul).
     //
     // Auto-accepts for now — the player prompt with Accept / Decline lands
-    // alongside the Phase 8 storyteller event system. AlertsPane gets a
+    // alongside the Phase 9 storyteller event system. AlertsPane gets a
     // "Wanderer joined: <name>" entry via SimulationManager → main thread
     // signal flow.
     public static class WanderingInSystem

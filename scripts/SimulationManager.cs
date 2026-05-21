@@ -449,7 +449,7 @@ namespace Sporeholm
 			}
 		}
 
-		// v0.3.24 — combat order stub. Phase 8 will wire the BehaviorSystem
+		// v0.3.24 — combat order stub. Phase 9 will wire the BehaviorSystem
 		// to read CombatTargetName and route an attack task. For now this
 		// only sets the flag so the visual layer draws a sword icon over the
 		// shroomp — it's deliberately data-plumbing-only until enemies exist.

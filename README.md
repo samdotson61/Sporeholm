@@ -25,7 +25,7 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 | **Wildlife (15 species: friendly + neutral + hostile)** | **Shipped — v0.6.0** |
 | Save / load | Shipped |
 | **Combat** | Hostile-creature contact damage only — full Phase 7 next |
-| **Husbandry & farming** | Stubs only — Phase 9 |
+| **Husbandry & farming** | Stubs only — Phase 8 |
 | **Weather & temperature** | Insulation half — Phase 10 |
 | **Disease, research, eras** | Future phases |
 
@@ -59,7 +59,7 @@ The map is populated with 15 species across friendly, neutral, and hostile dispo
 
 AI state machine: Wander / Flee / Hunt / Graze / Tamed / Dead. Hostiles aggro on the nearest non-pacifist shroomp within their range and attack on contact, applying damage that flows through the existing body-part / bleeding / downed pipelines — wolves will actually injure you. Friendlies flee from threats. Spawning is biome-tagged and population-capped; the map respawns ambient fauna on day boundaries to keep the world feeling alive.
 
-Event-only big creatures (Bear / Leopard Tortoise / Tasmanian Mauler / Dragon / Mushroom Drake) are deferred until the Phase 8 Storyteller layer — they're scripted events, not random spawns.
+Event-only big creatures (Bear / Leopard Tortoise / Tasmanian Mauler / Dragon / Mushroom Drake) are deferred until the Phase 9 Storyteller layer — they're scripted events, not random spawns.
 
 Click any creature to open the **Entity Card** — a compact inspector showing species, description, health, mood (derived from health % + needs + AI state), and the simplified Nutrition + Rest needs. Updates in real time while open.
 
@@ -145,8 +145,8 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 | 5.5 | Crafting bills | Complete |
 | 6 | Entity system (animals + creatures) | Shipped (v0.6.0 — 15 species + AI + sprites + save/load) |
 | **7** | **Combat** (with Healer + Rescue + Weapons/Apparel) | **Next** (stubs ready) |
-| 8 | Events + Storyteller (Balanced / Patient / Cataclysmic) | Stub |
-| 9 | Agricultural systems (animal husbandry, farming, hunting) | — |
+| 8 | Agricultural systems (animal husbandry, farming, hunting) | — |
+| 9 | Events + Storyteller (Balanced / Patient / Cataclysmic) | Stub |
 | 10 | Weather + Environment (Insulation half done) | — |
 | 11 | Technology + Culture (research + power) | — |
 | 12 | Disease | — |

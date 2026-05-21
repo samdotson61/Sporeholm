@@ -1,7 +1,7 @@
 namespace Sporeholm.Simulation.Entities
 {
     // v0.6.0 (Phase 6 — Roadmap §6.2) — canonical species identifier.
-    // Stored on Entity rows + on Phase 9 husbandry tags + on
+    // Stored on Entity rows + on Phase 8 husbandry tags + on
     // SaveManager.EntitySaveData. Adding a species ALWAYS requires a new
     // enum value (never reuse a slot) so old saves can round-trip.
     //
@@ -14,13 +14,13 @@ namespace Sporeholm.Simulation.Entities
     // additions land in v0.6.0+ once the core data model + AI + spawn
     // pipeline + sprite rendering have all been play-tested. Event-only
     // ≥10× species (Bear / Leopard Tortoise / Mauler / Dragon /
-    // Mushroom Drake) deliberately deferred — they spawn via Phase 8
+    // Mushroom Drake) deliberately deferred — they spawn via Phase 9
     // Storyteller events, not the wild-spawn pathway.
     public enum EntityKind : byte
     {
         // Non-Hostile (Friendly / Passive)
-        Glowbunny       = 0,   // F/G/H  herbivore (Phase 9 livestock candidate)
-        Shroomgoat      = 1,   // H/F/G  herbivore (Phase 9 primary livestock)
+        Glowbunny       = 0,   // F/G/H  herbivore (Phase 8 livestock candidate)
+        Shroomgoat      = 1,   // H/F/G  herbivore (Phase 8 primary livestock)
         Shroomalo       = 2,   // ALL biomes; very friendly Sporeholm canon
         Mouse           = 3,   // F/P/H/V tiny passive scavenger
         Ladybug         = 4,   // F/P/G  friendly insect pest control

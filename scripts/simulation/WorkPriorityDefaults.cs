@@ -24,9 +24,9 @@ namespace Sporeholm.Simulation
             "Construct",   // build structures — Phase 5+
             "Mine",        // excavate
             "PlantCut",    // cut/clear plants
-            "Grow",        // farm — Phase 9+
+            "Grow",        // farm — Phase 8+
             "Cook",        // cook meals — Phase 5+
-            "Hunt",        // hunt — Phase 9+
+            "Hunt",        // hunt — Phase 8+
             "Forage",      // gather wild food
             "Chop",        // chop wood
             "Haul",        // carry items to stockpiles — Phase 5+
@@ -136,8 +136,8 @@ namespace Sporeholm.Simulation
             "Craft"     => "Take recipes from workbench bills queues and produce items (food / cloth / tools / medicine). Set to '-' to forbid this shroomp from crafting at workbenches.",
             "Patient"   => "Be a patient when injured (rest, accept tending). Set to '-' if this shroomp should not rest when injured.",
             "BedRest"   => "Sleep in a bed when Rest is low. v0.5.35 wired bed-routing through this priority.",
-            "Grow"      => "Plant + harvest farm plots. Set to '-' to forbid farming (Phase 9 lands the full surface).",
-            "Hunt"      => "Hunt wild creatures for meat / hide. Set to '-' to forbid (Phase 9 lands the full surface).",
+            "Grow"      => "Plant + harvest farm plots. Set to '-' to forbid farming (Phase 8 lands the full surface).",
+            "Hunt"      => "Hunt wild creatures for meat / hide. Set to '-' to forbid (Phase 8 lands the full surface).",
             "Clean"     => "Clean dirty tiles. Set to '-' to forbid (Phase 5+ polish; currently a stub).",
             "Study"  => "Research at a research bench. Set to '-' to forbid (Phase 11 lands the tech tree).",
             "Attune"    => "Mage attunement — restores MagicResonance. Set to '-' to forbid.",

@@ -322,6 +322,11 @@ public partial class GameController : Node
 		// exclusive (toggled via Visible).
 		_entityCard = new EntityCardPanel { Name = "EntityCard" };
 		ul.AddChild(_entityCard);
+		// v0.6.2u — wire the card's Closed signal so the world-space
+		// selection brackets on EntityColonyView disappear when the player
+		// dismisses the card (× button) or the selected entity despawns.
+		_entityCard.Connect(EntityCardPanel.SignalName.Closed,
+			Callable.From(() => _entityColonyView.ClearSelection()));
 
 		_tileInfo = new TileInfoOverlay { Name = "TileInfo" };
 		ul.AddChild(_tileInfo);
@@ -442,7 +447,7 @@ public partial class GameController : Node
 	//   • Tool active                     → designation drag-box (existing).
 	//
 	// Right-click semantics with one-or-more shroomps selected:
-	//   • Right-click on enemy            → combat order stub (Phase 8 stub).
+	//   • Right-click on enemy            → combat order stub (Phase 9 stub).
 	//   • Right-click on passable tile    → move order to all selected.
 	// v0.4.3 — context-aware right-click action descriptor. Resolved by
 	// `ResolveRightClickActions` for the (tile, click-world-pos) under
@@ -772,6 +777,11 @@ public partial class GameController : Node
 				_tileProps?.Close();
 				_selOverlay?.ClearSelection();
 				_entityCard.Show(entHit.Value);
+				// v0.6.2u — also paint the white corner brackets around the
+				// selected entity. Reuses the same DrawSelectionBrackets
+				// renderer as shroomps + tile-properties so the selection
+				// visual is identical across click-inspector flows.
+				_entityColonyView.SetSelection(entHit.Value.Id);
 				return true;
 			}
 			// v0.4.34 — no shroomp hit. If the clicked tile has items or
@@ -1491,7 +1501,7 @@ public partial class GameController : Node
 		_msgLog.Post($"{name} has joined the colony.", MessageLog.Category.Birth, _lastDate);
 	}
 
-	// v0.3.47 — wandering-in event. Auto-accepts for sub-B; Phase 8
+	// v0.3.47 — wandering-in event. Auto-accepts for sub-B; Phase 9
 	// will gain Accept/Decline prompts via the storyteller event pipeline.
 	private void OnWandererArrived(string name, string sex, string role, int age)
 	{

@@ -28,7 +28,7 @@ namespace Sporeholm.World
         // representing fragments of larger creatures, scaled to shroomp
         // perspective. Sam: "imitate the look of a rib bone or partial
         // animal skull poking out of the ground." Provides early-game
-        // Bone material before Phase 9 animal butchery lands.
+        // Bone material before Phase 8 animal butchery lands.
         Skeleton,
     }
 }

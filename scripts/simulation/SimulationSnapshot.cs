@@ -105,7 +105,7 @@ namespace Sporeholm.Simulation
 		Vector2                            SimPos,
 		Vector2                            SimTarget,
 		TaskType                           CurrentTask,
-		// v0.3.24 — combat stub (Phase 8 fill-in). Non-null name = shroomp is
+		// v0.3.24 — combat stub (Phase 9 fill-in). Non-null name = shroomp is
 		// in combat with that target; visual layer draws a sword icon.
 		string?                            CombatTargetName,
 		// v0.4.2 — carry-visual + equipment overlay payload. Snapshot

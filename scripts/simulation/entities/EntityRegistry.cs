@@ -56,7 +56,7 @@ namespace Sporeholm.Simulation.Entities
                 MaxHealth: 6f, BaseSpeedPxPerSec: 18f, BodyRadiusPx: 4f,
                 AttackPower: 0f, AggroRangePx: 0f, FleeRangePx: 50f,
                 MinGroupSize: 1, MaxGroupSize: 3, PopulationCapPerMap: 6, SpawnWeight: 0.7f,
-                ButcherDrops: new[] { ("BoneFragment", 1, 1) }));   // chitin substitute pre-Phase 9
+                ButcherDrops: new[] { ("BoneFragment", 1, 1) }));   // chitin substitute pre-Phase 8
 
             Register(new EntityDef(
                 EntityKind.HermitCrab, "Hermit Crab", "Coastal forager carrying a borrowed shell. Pinches lightly when cornered; otherwise placid.", EntityClass.Crustacean, Disposition.Friendly,

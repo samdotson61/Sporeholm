@@ -22,7 +22,7 @@ namespace Sporeholm.Simulation.Systems
     //
     // Event-only ≥10× species (Bear / Mauler / Tortoise / Dragon / Drake)
     // are NEVER instantiated via this system — they're owned by the
-    // Phase 8 Storyteller pipeline.
+    // Phase 9 Storyteller pipeline.
     public static class EntitySpawnSystem
     {
         // v0.6.0 — map AnimalKind (the v0.5.14 gen-time roster, which

@@ -2662,7 +2662,7 @@ namespace Sporeholm.World
 		// bonus Trinket alongside the standard StoneBlock when a marked
 		// tile is mined. Sam: "what will I find under there?"
 		//
-		// Stub: sleeping creatures (also N18) deferred until Phase 9 animal
+		// Stub: sleeping creatures (also N18) deferred until Phase 8 animal
 		// system lands. The marker mechanism here is the same one creatures
 		// would use — just with a different on-excavate effect.
 		private static void ScatterBuriedTreasure(LocalMap map, WorldTile worldTile)
@@ -2736,7 +2736,7 @@ namespace Sporeholm.World
 			};
 
 			// v0.5.84t — at least 1 skeleton per map so Bone is reliably findable
-			// before Phase 9 animal butchery lands (pre-Phase 6 the only Bone
+			// before Phase 8 animal butchery lands (pre-Phase 6 the only Bone
 			// source is excavating Skeleton terrain). Sam: "Bone impossible to
 			// find pre-phase 6." Range now `[1, maxSkeletons]` inclusive.
 			int count = 1 + rng.Next(maxSkeletons);
@@ -2778,12 +2778,12 @@ namespace Sporeholm.World
 
 		// N19 — Wildlife spawn-point stubs. Per-biome faunal table picks
 		// AnimalKind weights; this pass scatters 2-6 spawn points on
-		// passable terrain. The Phase 9 animal system (rimport.md N12 +
+		// passable terrain. The Phase 8 animal system (rimport.md N12 +
 		// Roadmap §9) will consume these to populate creatures. Until
 		// then the list is just generation output; no creatures actually
 		// spawn.
 		//
-		// v0.5.15 — biome tables rebuilt around the Phase 9 species
+		// v0.5.15 — biome tables rebuilt around the Phase 8 species
 		// roster (MushroomGoat / BonecrestBeetle / CaveLizard / GlowBunny
 		// / ForestBoar) instead of the v0.5.14 generic placeholders.
 		// Tag-driven role weighting (rough mapping):

@@ -89,7 +89,7 @@ namespace Sporeholm.Simulation.Systems
                         if (e.AttackCooldownTicks <= 0) { e.State = EntityState.Wander; e.TargetShroompId = null; }
                         break;
                     case EntityState.Tamed:
-                        // Phase 9 husbandry — follow tamer. No-op for now;
+                        // Phase 8 husbandry — follow tamer. No-op for now;
                         // tamed entities just stand near their wander home.
                         break;
                 }

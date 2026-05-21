@@ -3980,7 +3980,7 @@ namespace Sporeholm.Simulation.Systems
                             // skull). Sam: "imitate the look of a rib bone
                             // or partial animal skull poking out of the
                             // ground." Provides early-game Bone material
-                            // before Phase 9 animal butchery lands.
+                            // before Phase 8 animal butchery lands.
                             if (tile.Terrain == TerrainType.Skeleton)
                             {
                                 mapping = (ItemKind.Material, "BoneFragment",
@@ -4040,7 +4040,7 @@ namespace Sporeholm.Simulation.Systems
                             // by ScatterBuriedTreasure drops a bonus Trinket
                             // alongside the standard StoneBlock. Same
                             // mechanism the future "sleeping creatures"
-                            // hook (Phase 9) will use — different on-excavate
+                            // hook (Phase 8) will use — different on-excavate
                             // effect. Sam: "what will I find under there?"
                             if (tile.Terrain == TerrainType.Boulder
                                 && map.HasBuriedTreasure(t.TargetTileX, t.TargetTileY))

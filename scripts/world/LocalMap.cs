@@ -141,7 +141,7 @@ namespace Sporeholm.World
 
         // v0.5.14 (Phase 5C — rimport.md N19) — wildlife spawn-point stubs.
         // Generation places these per-biome; the full Animal system in
-        // Phase 9 (rimport.md N12) will consume the list to populate
+        // Phase 8 (rimport.md N12) will consume the list to populate
         // creatures. Until then the list is just generation output.
         private readonly System.Collections.Generic.List<AnimalSpawnPoint> _animalSpawns = new();
 
@@ -784,7 +784,7 @@ namespace Sporeholm.World
             }
             // v0.4.35 — leave bones behind. One Material/Bone item per
             // fully-decayed corpse so the death site has a lasting trace
-            // (and so the player can haul / trade bones once Phase 9
+            // (and so the player can haul / trade bones once Phase 8
             // husbandry / Phase 11 trade open the loop). Drops route
             // through the standard DropItem pipeline so v0.4.30 stack
             // rules apply: the bone may overflow to an adjacent tile if
@@ -1362,7 +1362,7 @@ namespace Sporeholm.World
         }
 
         // v0.5.14 — wildlife spawn-point accessors. AddAnimalSpawn called by
-        // LocalMapGenerator.ScatterAnimalSpawnPoints at gen time. Phase 9's
+        // LocalMapGenerator.ScatterAnimalSpawnPoints at gen time. Phase 8's
         // animal system will read SnapshotAnimalSpawns to populate creatures.
         public void AddAnimalSpawn(AnimalSpawnPoint p)
         {

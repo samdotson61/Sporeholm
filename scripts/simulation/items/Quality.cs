@@ -5,7 +5,7 @@ namespace Sporeholm.Simulation.Items
     // the crafter's relevant skill; gathered items (raw food / raw
     // materials) usually roll Normal but can hit Fine on a lucky pick.
     // Legendary is reserved for named artifacts — never rolled at
-    // creation, only awarded by Phase 8 storyteller events.
+    // creation, only awarded by Phase 9 storyteller events.
     public enum Quality : byte
     {
         Crude,
