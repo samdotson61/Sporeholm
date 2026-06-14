@@ -56,6 +56,9 @@ public partial class DesignationToolbar : Control
         BuildTorch     = DesignationTool.BuildTorch,
         // v0.6.2 (Phase 5.6 ship) — Cooking Table painter.
         BuildCookingTable = DesignationTool.BuildCookingTable,
+        // v0.7.2 (Phase 7) — combat-practice furniture painters.
+        BuildSparringYard  = DesignationTool.BuildSparringYard,
+        BuildTrainingDummy = DesignationTool.BuildTrainingDummy,
         // v0.5.25 (Phase 5C polish) — Allowed-area painter (per-shroomp).
         AllowedArea    = DesignationTool.AllowedArea,
         Demolish   = DesignationTool.Demolish,
@@ -111,6 +114,8 @@ public partial class DesignationToolbar : Control
         Tool.BuildTable     => DesignationTool.BuildTable,       // v0.5.37
         Tool.BuildTorch     => DesignationTool.BuildTorch,       // v0.5.84t
         Tool.BuildCookingTable => DesignationTool.BuildCookingTable, // v0.6.2 (Phase 5.6)
+        Tool.BuildSparringYard  => DesignationTool.BuildSparringYard,  // v0.7.2
+        Tool.BuildTrainingDummy => DesignationTool.BuildTrainingDummy, // v0.7.2
         Tool.AllowedArea    => DesignationTool.AllowedArea,      // v0.5.25
         Tool.Demolish   => DesignationTool.Demolish,    // v0.5.19
         Tool.Remove    => DesignationTool.Remove,

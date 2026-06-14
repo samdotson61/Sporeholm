@@ -840,6 +840,14 @@ namespace Sporeholm.Simulation.Systems
                     s.PathWaypoints.Clear();
                     s.PrevSimPos = s.SimPos;
                     if (s.CombatTargetName == "enemy") s.CombatTargetName = null;   // v0.7.0 — drop ⚔ while downed
+                    // v0.7.2 — a downed colonist can't carry anyone: release its
+                    // rescue link so the would-be rescuee isn't left frozen.
+                    if (s.CarriedShroompId.HasValue)
+                    {
+                        var carried = FindShroompById(shroomps, s.CarriedShroompId.Value);
+                        if (carried != null) carried.IsBeingCarried = false;
+                        s.CarriedShroompId = null;
+                    }
                     continue;   // skip the rest of the per-shroomp tick
                 }
 
@@ -865,6 +873,13 @@ namespace Sporeholm.Simulation.Systems
                 if (s.AttackCooldownTicks > 0)
                     s.AttackCooldownTicks -= tickInterval;
                 if (TryHandleCombat(s, map, effectiveDt, rng))
+                    continue;
+
+                // v0.7.2 (Phase 7) — rescue pass: carry a downed colonist to a
+                // bed. After combat (a rescuer under attack defends first),
+                // before the medical pass (so the wounded get moved to safety
+                // before being tended in place).
+                if (TryHandleRescue(s, map, shroomps, effectiveDt))
                     continue;
 
                 // v0.7.1 (Phase 7) — medical pass: a Doctor / Caretaker tends the
@@ -1517,6 +1532,141 @@ namespace Sporeholm.Simulation.Systems
             (-1.000000f,  0.000000f),  // 180°
         };
 
+        // ── v0.7.2 (Phase 7) — Rescue pass ────────────────────────────────
+        // A Doctor / Caretaker carries a DOWNED colonist to the nearest bed and
+        // deposits them there to rest + be treated. Self-contained movement
+        // (CombatStepToward); the downed victim cannot move itself, so the
+        // carrier drives the victim's SimPos each tick.
+        private const float RescuePickupRangeTiles = 1.6f;
+
+        private static bool TryHandleRescue(Shroomp s, LocalMap? map,
+            IReadOnlyList<Shroomp> shroomps, float dt)
+        {
+            if (map == null || !s.IsAlive || s.IsDowned || s.IsBeingCarried) return false;
+            if (s.CombatTargetId != null) return false;                       // combat preempts
+            if (!(JobPriorityOn(s, "Doctor") || s.Role == "Caretaker")) return false;
+
+            // Resolve the current carry victim (if any).
+            Shroomp? victim = s.CarriedShroompId.HasValue
+                ? FindShroompById(shroomps, s.CarriedShroompId.Value) : null;
+            if (victim != null && !victim.IsAlive)
+            {
+                victim.IsBeingCarried = false;
+                s.CarriedShroompId = null;
+                victim = null;
+            }
+
+            if (victim == null)
+            {
+                // No bed anywhere → nothing to carry them to; leave the downed
+                // for the medical pass to treat in place.
+                int rtx = (int)(s.SimPos.X / LocalMap.TileSize);
+                int rty = (int)(s.SimPos.Y / LocalMap.TileSize);
+                if (!map.FindNearestBed(rtx, rty).HasValue) return false;
+
+                victim = FindRescuee(s, shroomps, map);
+                if (victim == null)
+                {
+                    if (s.CurrentTask is { Type: TaskType.Rescue }) s.CurrentTask = null;
+                    return false;
+                }
+            }
+
+            bool carrying = s.CarriedShroompId == victim.Id;
+
+            if (!carrying)
+            {
+                // Phase 1 — walk to the downed victim, then pick up.
+                s.CurrentTask = new BehaviorTask(TaskType.Rescue, victim.SimPos, 90f,
+                    interruptible: true, targetId: victim.Id.ToString());
+                float r = RescuePickupRangeTiles * LocalMap.TileSize;
+                if (s.SimPos.DistanceSquaredTo(victim.SimPos) <= r * r)
+                {
+                    s.CarriedShroompId = victim.Id;
+                    victim.IsBeingCarried = true;
+                }
+                else
+                {
+                    CombatStepToward(s, victim.SimPos, map, dt);
+                }
+                return true;
+            }
+
+            // Phase 2 — carrying: head to the nearest bed + deposit.
+            int tx = (int)(s.SimPos.X / LocalMap.TileSize);
+            int ty = (int)(s.SimPos.Y / LocalMap.TileSize);
+            var bed = map.FindNearestBed(tx, ty);
+            if (!bed.HasValue)
+            {
+                DepositCarried(s, victim, s.SimPos);   // bed vanished mid-carry — set down here
+                return true;
+            }
+            Vector2 dest = new Vector2(
+                bed.Value.X * LocalMap.TileSize + LocalMap.TileSize * 0.5f,
+                bed.Value.Y * LocalMap.TileSize + LocalMap.TileSize * 0.5f);
+            s.CurrentTask = new BehaviorTask(TaskType.Rescue, dest, 90f,
+                interruptible: false, tileX: bed.Value.X, tileY: bed.Value.Y,
+                targetId: victim.Id.ToString());
+
+            float arrive = 0.75f * LocalMap.TileSize;
+            if (s.SimPos.DistanceSquaredTo(dest) <= arrive * arrive)
+            {
+                s.SimPos = dest;
+                s.PrevSimPos = dest;
+                DepositCarried(s, victim, dest);
+                return true;
+            }
+
+            CombatStepToward(s, dest, map, dt);
+            // The downed victim cannot move itself, so drag it along.
+            victim.SimPos = s.SimPos;
+            victim.PrevSimPos = s.SimPos;
+            victim.SimTarget = s.SimPos;
+            victim.PathWaypoints.Clear();
+            return true;
+        }
+
+        private static void DepositCarried(Shroomp carrier, Shroomp victim, Vector2 at)
+        {
+            victim.SimPos = at;
+            victim.PrevSimPos = at;
+            victim.SimTarget = at;
+            victim.PathWaypoints.Clear();
+            victim.IsBeingCarried = false;
+            carrier.CarriedShroompId = null;
+            carrier.CurrentTask = null;
+        }
+
+        // Nearest downed colonist that needs carrying to a bed (reachable, not
+        // already on a bed, not already being carried).
+        private static Shroomp? FindRescuee(Shroomp rescuer, IReadOnlyList<Shroomp> shroomps, LocalMap map)
+        {
+            int dx = (int)(rescuer.SimPos.X / LocalMap.TileSize);
+            int dy = (int)(rescuer.SimPos.Y / LocalMap.TileSize);
+            Shroomp? best = null; float bd = float.MaxValue;
+            for (int i = 0; i < shroomps.Count; i++)
+            {
+                var p = shroomps[i];
+                if (ReferenceEquals(p, rescuer) || !p.IsAlive) continue;
+                if (!p.IsDowned || p.IsBeingCarried) continue;
+                int px = (int)(p.SimPos.X / LocalMap.TileSize);
+                int py = (int)(p.SimPos.Y / LocalMap.TileSize);
+                // Already lying on a bed → no need to move them.
+                if (map.InBounds(px, py) && map.GetStructure(px, py).Type == StructureType.Bed) continue;
+                if (!map.IsWorkReachable(dx, dy, px, py)) continue;
+                float d2 = rescuer.SimPos.DistanceSquaredTo(p.SimPos);
+                if (d2 < bd) { bd = d2; best = p; }
+            }
+            return best;
+        }
+
+        private static Shroomp? FindShroompById(IReadOnlyList<Shroomp> shroomps, Guid id)
+        {
+            for (int i = 0; i < shroomps.Count; i++)
+                if (shroomps[i].Id == id) return shroomps[i];
+            return null;
+        }
+
         // ── v0.7.1 (Phase 7) — Medical pass ───────────────────────────────
         // A Doctor (or Caretaker) walks to the nearest wounded colonist and tends
         // their worst wound in place, consuming a Magic Herb Poultice if the
@@ -1581,6 +1731,7 @@ namespace Sporeholm.Simulation.Systems
             {
                 var p = shroomps[i];
                 if (ReferenceEquals(p, doctor) || !p.IsAlive) continue;
+                if (p.IsBeingCarried) continue;   // v0.7.2 — let the rescuer get them to a bed first
                 if (!NeedsTreatment(p)) continue;
                 // Don't lock onto an unreachable patient (across walls / sealed
                 // rooms) — the greedy treat-walk can't path there and would freeze.
@@ -2001,10 +2152,10 @@ namespace Sporeholm.Simulation.Systems
                 // false so the renderer keeps the shroomp upright. Sam:
                 // "Ensure pawns move to and sleep on the same tile as the
                 // bed they're sleeping on."
-                if (s.CurrentTask is { Type: TaskType.Sleep } st
+                if (s.CurrentTask is { Type: TaskType.Sleep or TaskType.Rescue } st
                     && st.TargetTileX >= 0 && st.TargetTileY >= 0)
                 {
-                    s.SimPos = walkTo;
+                    s.SimPos = walkTo;   // land ON the bed tile (sleep, or rescue-deposit)
                 }
                 s.PrevSimPos = s.SimPos;
                 s.StuckTicks = 0;
@@ -3319,6 +3470,11 @@ namespace Sporeholm.Simulation.Systems
             int wConverse  = 10;
             int wMeditate  = 4;
             int wVisitFav  = 5;
+            // v0.7.2 — combat drill. Small base so off-duty colonists
+            // occasionally train; Guardians get a big nudge below. Only
+            // actually fires when a training building is reachable
+            // (NewTrainTask returns null → wander fallback otherwise).
+            int wTrain     = 2;
 
             // Personality nudges.
             if (HasPersonality(s, "Introvert"))     { wConverse  =  3; wObserve   += 6; }
@@ -3333,6 +3489,7 @@ namespace Sporeholm.Simulation.Systems
             if (s.Role == "Sage")    wMeditate += 12;
             if (s.Role == "Scholar") wObserve  +=  6;
             if (s.Role == "Forager") wWander   +=  6;
+            if (s.Role == "Guardian") wTrain  += 18;   // v0.7.2 — Guardians drill
 
             // Preference nudges.
             var prefs = s.Preferences;
@@ -3374,8 +3531,9 @@ namespace Sporeholm.Simulation.Systems
             if (wConverse < 0) wConverse = 0;
             if (wMeditate < 0) wMeditate = 0;
             if (wVisitFav < 0) wVisitFav = 0;
+            if (wTrain    < 0) wTrain    = 0;
 
-            int total = wWander + wLoiter + wObserve + wConverse + wMeditate + wVisitFav;
+            int total = wWander + wLoiter + wObserve + wConverse + wMeditate + wVisitFav + wTrain;
             if (total <= 0) return NewWanderTask(s.SimPos, map, rng);
 
             int roll = rng.Next(total);
@@ -3389,6 +3547,9 @@ namespace Sporeholm.Simulation.Systems
             if ((roll -= wObserve)  < 0) return NewObserveTask (s.SimPos, map, rng);
             if ((roll -= wConverse) < 0) return NewConverseTask(s, map, rng, shroomps);
             if ((roll -= wMeditate) < 0) return NewMeditateTask(s.SimPos, map, rng);
+            // v0.7.2 — Train when a building is reachable, else fall back to a
+            // multi-hop wander (no in-place drill — the equipment is the point).
+            if ((roll -= wTrain)    < 0) return NewTrainTask(s, map, rng) ?? NewWanderTask(s, map, rng);
             return NewVisitFavoriteTask(s, map, rng);
         }
 
@@ -3398,7 +3559,8 @@ namespace Sporeholm.Simulation.Systems
             || t == TaskType.Observe
             || t == TaskType.Converse
             || t == TaskType.Meditate
-            || t == TaskType.VisitFavorite;
+            || t == TaskType.VisitFavorite
+            || t == TaskType.Train;   // v0.7.2 — idle-selected; needs may interrupt
 
         // v0.5.60 — allocation-free JoyTolerance decay. Uses a small static
         // buffer instead of allocating a new key list per shroomp per tick.
@@ -3705,6 +3867,11 @@ namespace Sporeholm.Simulation.Systems
         private const int LingerConverse  = 300;   // ≈ 5 sec
         private const int LingerMeditate  = 540;   // ≈ 9 sec
         private const int LingerVisitFav  = 300;   // ≈ 5 sec
+        private const int LingerTrain     = 600;   // ≈ 10 sec — v0.7.2 drill session
+        // v0.7.2 — combat drill XP, per second of training. Slower than live
+        // combat (CombatXpPerSwing ≈ 8/sec) so fighting still outpaces the
+        // yard, but a peacetime colony can build Guardians up over time.
+        private const float TrainXpPerSecond = 2.4f;
 
         private static BehaviorTask NewWanderTask(Vector2 from, LocalMap? map, Random rng)
         {
@@ -3843,6 +4010,30 @@ namespace Sporeholm.Simulation.Systems
             }
             return new BehaviorTask(TaskType.Meditate, from, 6f,
                 interruptible: true, arrivalLinger: LingerMeditate);
+        }
+
+        // v0.7.2 (Phase 7) — combat drill. Routes an idle colonist to the
+        // nearest reachable Sparring Yard (Melee) or Training Dummy (Ranged).
+        // Returns null when no training building is reachable, so the caller
+        // falls back to a normal idle activity rather than queueing a doomed
+        // walk — unlike Meditate, training has NO in-place fallback (the whole
+        // point is the equipment). The skill trained is resolved at
+        // ApplyTaskEffect time from the structure type at the target tile.
+        private static BehaviorTask? NewTrainTask(Shroomp s, LocalMap? map, Random rng)
+        {
+            if (map == null) return null;
+            int tx = (int)(s.SimPos.X / LocalMap.TileSize);
+            int ty = (int)(s.SimPos.Y / LocalMap.TileSize);
+            var furn = map.FindNearestJoyFurniture(tx, ty,
+                new[] { StructureType.SparringYard, StructureType.TrainingDummy });
+            if (!furn.HasValue) return null;
+            if (!map.AreReachable(tx, ty, furn.Value.X, furn.Value.Y)) return null;
+            var pos = new Vector2(
+                furn.Value.X * LocalMap.TileSize + LocalMap.TileSize * 0.5f,
+                furn.Value.Y * LocalMap.TileSize + LocalMap.TileSize * 0.5f);
+            return new BehaviorTask(TaskType.Train, pos, 6f,
+                tileX: furn.Value.X, tileY: furn.Value.Y,
+                interruptible: true, arrivalLinger: LingerTrain);
         }
 
         // VisitFavorite: today this is "walk to a slightly farther random
@@ -4863,6 +5054,23 @@ namespace Sporeholm.Simulation.Systems
                     BumpJoyTolerance(s, TaskType.Meditate);
                     break;
 
+                case TaskType.Train:
+                {
+                    // v0.7.2 (Phase 7) — combat drill. A Sparring Yard trains
+                    // Melee; a Training Dummy trains Ranged. Skill is resolved
+                    // from the structure standing at the target tile (the same
+                    // tile NewTrainTask walked us to) so one task type serves
+                    // both buildings. No real damage; slow, steady XP plus a
+                    // small purposeful-activity Joy nudge.
+                    bool ranged = map != null
+                        && map.GetStructure(t.TargetTileX, t.TargetTileY).Type
+                           == StructureType.TrainingDummy;
+                    SkillRegistry.GainXp(s, ranged ? "Ranged" : "Melee", TrainXpPerSecond * dt);
+                    ThoughtRegistry.Add(s, "Trained");
+                    s.Joy = MathF.Min(100f, s.Joy + JoyRate * dt * 0.4f);
+                    break;
+                }
+
                 case TaskType.VisitFavorite:
                     // Phase 4 will route this to a remembered location; for
                     // now the activity is just a longer-distance wander
@@ -5141,6 +5349,8 @@ namespace Sporeholm.Simulation.Systems
                                     StructureType.TablePlanned      => StructureType.Table,       // v0.5.37
                                     StructureType.TorchPlanned      => StructureType.Torch,       // v0.5.84t — was missing, completed as Floor
                                     StructureType.CookingTablePlanned => StructureType.CookingTable, // v0.6.2 (Phase 5.6)
+                                    StructureType.SparringYardPlanned  => StructureType.SparringYard,  // v0.7.2
+                                    StructureType.TrainingDummyPlanned => StructureType.TrainingDummy, // v0.7.2
                                     _                               => StructureType.Floor,       // FloorPlanned + safety default
                                 };
                                 built.BuildProgress = StructureSlot.BuildProgressTarget;

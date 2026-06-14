@@ -800,6 +800,19 @@ namespace Sporeholm.Simulation
 			// shroomps from picking up the work. The unified ReservationManager
 			// makes this a single sweep across all layers.
 			ReservationManager.Active?.ClearStaleForClaimant(s.Id);
+			// v0.7.2 — clear any rescue carry-links involving the dead shroomp
+			// (as carrier or as the carried) so no colonist is left frozen.
+			if (s.CarriedShroompId.HasValue)
+			{
+				var carried = _shroomps.Find(o => o.Id == s.CarriedShroompId.Value);
+				if (carried != null) carried.IsBeingCarried = false;
+				s.CarriedShroompId = null;
+			}
+			if (s.IsBeingCarried)
+			{
+				s.IsBeingCarried = false;
+				foreach (var o in _shroomps) if (o.CarriedShroompId == s.Id) o.CarriedShroompId = null;
+			}
 			PendingDeaths.Enqueue(new ShroompSnapshot(s));
 		}
 

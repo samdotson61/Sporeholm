@@ -134,6 +134,10 @@ namespace Sporeholm.World
                         // needing a Bonfire in the room (it just gets the
                         // Phase 5.6 Cooking-Table-driven cooks instead).
                         case StructureType.CookingTable:     furnitureCount++; cookingTableCount++; furnitureBeauty += qMul; break;
+                        // v0.7.2 (Phase 7) — combat-practice furniture counts toward
+                        // room furniture/beauty like any other interior piece.
+                        case StructureType.SparringYard:     furnitureCount++; furnitureBeauty += qMul; break;
+                        case StructureType.TrainingDummy:    furnitureCount++; furnitureBeauty += qMul; break;
                     }
 
                     // 4-neighbour expansion. Diagonal not used (keeps room

@@ -86,6 +86,11 @@ namespace Sporeholm.UI
         // speed here. Bonfire is a half-speed fallback so a bare colony can
         // still cook before a Cooking Table is built.
         BuildCookingTable,
+        // v0.7.2 (Phase 7) — combat-practice furniture painters. Sparring
+        // Yard trains Melee; Training Dummy trains Ranged. Guardians (and
+        // idle colonists) drill here for combat XP with no real damage.
+        BuildSparringYard,
+        BuildTrainingDummy,
         // Demolish removes built structures (Wall / Floor / Door / Shelf
         // / Workbench / Bonfire / Bed / Joy furniture / Table) AND cancels
         // pending blueprints. v0.5.20 added partial material refund (50%

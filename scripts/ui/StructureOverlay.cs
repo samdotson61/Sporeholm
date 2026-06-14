@@ -47,6 +47,8 @@ namespace Sporeholm.UI
         private MultiMeshInstance2D _tableMmi     = null!;   // v0.5.37
         private MultiMeshInstance2D _torchMmi     = null!;   // v0.5.84t
         private MultiMeshInstance2D _cookingTableMmi = null!; // v0.6.2 (Phase 5.6)
+        private MultiMeshInstance2D _sparringYardMmi  = null!; // v0.7.2
+        private MultiMeshInstance2D _trainingDummyMmi = null!; // v0.7.2
         private MultiMeshInstance2D _blueprintMmi = null!;
         // v0.6.2 — Demolish-as-task. Red X overlay drawn over any built
         // structure whose StructureSlot.MarkedForDemolition flag is set.
@@ -156,6 +158,8 @@ namespace Sporeholm.UI
             _tableMmi       = CreateMmi(quad, BakeTableSprite());         // v0.5.37
             _torchMmi       = CreateMmi(quad, BakeTorchSprite());         // v0.5.84t
             _cookingTableMmi = CreateMmi(quad, BakeCookingTableSprite()); // v0.6.2 (Phase 5.6)
+            _sparringYardMmi  = CreateMmi(quad, BakeSparringYardSprite());  // v0.7.2
+            _trainingDummyMmi = CreateMmi(quad, BakeTrainingDummySprite()); // v0.7.2
             _blueprintMmi   = CreateMmi(quad, BakeBlueprintSprite());
             _demolishMarkMmi = CreateMmi(quad, BakeDemolishMarkSprite()); // v0.6.2 — demolish-as-task
         }
@@ -280,6 +284,7 @@ namespace Sporeholm.UI
                 bedCount = 0, shrineCount = 0, boardCount = 0, benchCount = 0,
                 tableCount = 0, torchCount = 0,
                 cookingTableCount = 0,   // v0.6.2 (Phase 5.6)
+                sparringYardCount = 0, trainingDummyCount = 0,   // v0.7.2
                 demolishMarkCount = 0;   // v0.6.2 — demolish-as-task
             for (int y = 0; y < _map.Height; y++)
             for (int x = 0; x < _map.Width;  x++)
@@ -473,6 +478,16 @@ namespace Sporeholm.UI
                         _cookingTableMmi.Multimesh.SetInstanceColor(cookingTableCount, tint);
                         cookingTableCount++;
                         break;
+                    case StructureType.SparringYard when sparringYardCount < MaxInstances:   // v0.7.2
+                        _sparringYardMmi.Multimesh.SetInstanceTransform2D(sparringYardCount, new Transform2D(0f, origin));
+                        _sparringYardMmi.Multimesh.SetInstanceColor(sparringYardCount, tint);
+                        sparringYardCount++;
+                        break;
+                    case StructureType.TrainingDummy when trainingDummyCount < MaxInstances:   // v0.7.2
+                        _trainingDummyMmi.Multimesh.SetInstanceTransform2D(trainingDummyCount, new Transform2D(0f, origin));
+                        _trainingDummyMmi.Multimesh.SetInstanceColor(trainingDummyCount, tint);
+                        trainingDummyCount++;
+                        break;
                     case StructureType.WallPlanned:
                     case StructureType.FloorPlanned:
                     case StructureType.DoorPlanned:
@@ -486,6 +501,8 @@ namespace Sporeholm.UI
                     case StructureType.TablePlanned:             // v0.5.37
                     case StructureType.TorchPlanned:             // v0.5.84t
                     case StructureType.CookingTablePlanned:      // v0.6.2 (Phase 5.6)
+                    case StructureType.SparringYardPlanned:      // v0.7.2
+                    case StructureType.TrainingDummyPlanned:     // v0.7.2
                         if (blueprintCount < MaxInstances)
                         {
                             _blueprintMmi.Multimesh.SetInstanceTransform2D(blueprintCount, new Transform2D(0f, origin));
@@ -534,6 +551,8 @@ namespace Sporeholm.UI
             _tableMmi      .Multimesh.VisibleInstanceCount = tableCount;      // v0.5.37
             _torchMmi      .Multimesh.VisibleInstanceCount = torchCount;      // v0.5.84t
             _cookingTableMmi.Multimesh.VisibleInstanceCount = cookingTableCount; // v0.6.2 (Phase 5.6)
+            _sparringYardMmi .Multimesh.VisibleInstanceCount = sparringYardCount;  // v0.7.2
+            _trainingDummyMmi.Multimesh.VisibleInstanceCount = trainingDummyCount; // v0.7.2
             _blueprintMmi  .Multimesh.VisibleInstanceCount = blueprintCount;
             _demolishMarkMmi.Multimesh.VisibleInstanceCount = demolishMarkCount; // v0.6.2 — demolish-as-task
         }
@@ -1599,6 +1618,104 @@ namespace Sporeholm.UI
             // White-hot core.
             img.SetPixel(7, 3, flameW);
             img.SetPixel(8, 3, flameW);
+            return ImageTexture.CreateFromImage(img);
+        }
+
+        // v0.7.2 (Phase 7) — Sparring Yard sprite. A padded practice mat
+        // (sandy/canvas square) with two crossed wooden practice swords
+        // forming an X on top. Reads as a melee-drill spot. 16×16, sits in
+        // the same furniture-tier MMI as the other interior pieces.
+        private static ImageTexture BakeSparringYardSprite()
+        {
+            var mat      = new Color(0.74f, 0.66f, 0.44f, 1f);   // canvas/sand mat
+            var matEdge  = new Color(0.52f, 0.44f, 0.26f, 1f);   // rope-bound edge
+            var matWeave = new Color(0.66f, 0.58f, 0.38f, 1f);   // subtle weave fleck
+            var wood     = new Color(0.60f, 0.40f, 0.20f, 1f);   // practice-sword wood
+            var woodHi   = new Color(0.78f, 0.56f, 0.30f, 1f);
+            var grip     = new Color(0.30f, 0.18f, 0.08f, 1f);   // wrapped grip
+            var dark     = new Color(0f, 0f, 0f, 0f);
+
+            var img = Image.CreateEmpty(TS, TS, false, Image.Format.Rgba8);
+            for (int y = 0; y < TS; y++)
+            for (int x = 0; x < TS; x++)
+                img.SetPixel(x, y, dark);
+
+            // Padded mat fills the inner square (rows/cols 1..14).
+            for (int y = 1; y < TS - 1; y++)
+            for (int x = 1; x < TS - 1; x++)
+                img.SetPixel(x, y, mat);
+            // Rope-bound edge.
+            for (int x = 1; x < TS - 1; x++) { img.SetPixel(x, 1, matEdge); img.SetPixel(x, TS - 2, matEdge); }
+            for (int y = 1; y < TS - 1; y++) { img.SetPixel(1, y, matEdge); img.SetPixel(TS - 2, y, matEdge); }
+            // Weave flecks for texture.
+            for (int y = 3; y < TS - 3; y += 3)
+            for (int x = 3; x < TS - 3; x += 3)
+                img.SetPixel(x, y, matWeave);
+
+            // Two crossed practice swords forming an X (top-left↘ and top-right↙).
+            for (int i = 2; i <= 13; i++)
+            {
+                // "\" diagonal (blade)
+                img.SetPixel(i, i, wood);
+                if (i < 13) img.SetPixel(i + 1, i, woodHi);
+                // "/" diagonal (blade)
+                img.SetPixel(TS - 1 - i, i, wood);
+                if (i < 13) img.SetPixel(TS - 2 - i, i, woodHi);
+            }
+            // Wrapped grips at the lower ends of each sword.
+            img.SetPixel(12, 12, grip); img.SetPixel(13, 13, grip);
+            img.SetPixel(3, 12, grip);  img.SetPixel(2, 13, grip);
+            return ImageTexture.CreateFromImage(img);
+        }
+
+        // v0.7.2 (Phase 7) — Training Dummy sprite. A straw-stuffed pell on a
+        // wooden post: round burlap head, crossbar shoulders, a body sack, and
+        // a base. Reads as a ranged/strike practice target. 16×16.
+        private static ImageTexture BakeTrainingDummySprite()
+        {
+            var post     = new Color(0.46f, 0.32f, 0.18f, 1f);   // wooden post
+            var postEd   = new Color(0.28f, 0.18f, 0.08f, 1f);
+            var burlap   = new Color(0.80f, 0.68f, 0.42f, 1f);   // straw/burlap body
+            var burlapLo = new Color(0.62f, 0.50f, 0.30f, 1f);
+            var tie      = new Color(0.40f, 0.26f, 0.14f, 1f);   // rope ties
+            var target   = new Color(0.78f, 0.22f, 0.18f, 1f);   // red target ring
+            var dark      = new Color(0f, 0f, 0f, 0f);
+
+            var img = Image.CreateEmpty(TS, TS, false, Image.Format.Rgba8);
+            for (int y = 0; y < TS; y++)
+            for (int x = 0; x < TS; x++)
+                img.SetPixel(x, y, dark);
+
+            // Central post (rows 2..15, x=7-8).
+            for (int y = 2; y <= 15; y++)
+            {
+                img.SetPixel(7, y, post);
+                img.SetPixel(8, y, post);
+                img.SetPixel(6, y, postEd);
+                img.SetPixel(9, y, postEd);
+            }
+            // Crossbar shoulders (row 6, x=3..12).
+            for (int x = 3; x <= 12; x++) img.SetPixel(x, 6, post);
+            img.SetPixel(3, 7, postEd); img.SetPixel(12, 7, postEd);
+
+            // Burlap head (rows 2..4, x=6..9).
+            for (int y = 2; y <= 4; y++)
+            for (int x = 6; x <= 9; x++)
+                img.SetPixel(x, y, burlap);
+            img.SetPixel(6, 4, burlapLo); img.SetPixel(9, 4, burlapLo);
+            // Neck tie.
+            img.SetPixel(7, 5, tie); img.SetPixel(8, 5, tie);
+
+            // Burlap body sack (rows 7..11, x=5..10).
+            for (int y = 7; y <= 11; y++)
+            for (int x = 5; x <= 10; x++)
+                img.SetPixel(x, y, burlap);
+            for (int x = 5; x <= 10; x++) img.SetPixel(x, 11, burlapLo);
+            // Waist tie.
+            for (int x = 5; x <= 10; x++) img.SetPixel(x, 9, tie);
+            // Red target ring centred on the chest.
+            img.SetPixel(7, 8, target); img.SetPixel(8, 8, target);
+            img.SetPixel(7, 7, target); img.SetPixel(8, 7, target);
             return ImageTexture.CreateFromImage(img);
         }
 

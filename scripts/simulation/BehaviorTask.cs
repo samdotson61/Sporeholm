@@ -69,6 +69,9 @@ namespace Sporeholm.Simulation
         // place, consuming medicine if available. Handled by BehaviorSystem's
         // medical pass (like combat) — no ApplyTaskEffect case.
         TreatPatient,
+        // v0.7.2 (Phase 7) — Rescue: carry a downed colonist to a bed. Handled
+        // by BehaviorSystem's rescue pass (no ApplyTaskEffect case).
+        Rescue,
         // Tier 3 — idle. Wander still exists as the "go somewhere new"
         // baseline; v0.3.43 adds five more idle behaviours so shroomps stop
         // jittering in place between commands:
@@ -78,6 +81,11 @@ namespace Sporeholm.Simulation
         //   • Meditate — Mages, Daydreamers — stand and boost MagicResonance.
         //   • VisitFavorite — head to a remembered favourite spot.
         Wander, Loiter, Observe, Converse, Meditate, VisitFavorite,
+        // v0.7.2 (Phase 7) — Train: an idle Guardian (or off-duty colonist)
+        // drills at a Sparring Yard (Melee) or Training Dummy (Ranged) to gain
+        // combat XP in peacetime. Selected by SelectIdleActivity; has its own
+        // ApplyTaskEffect case (unlike the combat-pass tasks Attack/Flee).
+        Train,
         // Tier 0 — player override
         PlayerOrder,
     }

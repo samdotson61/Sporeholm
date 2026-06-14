@@ -845,7 +845,7 @@ public partial class ShroompColonyView : Node2D
             foreach (var (slotName, payload) in s.Equipment)
             {
                 if (slotName == carrySlot) continue;
-                DrawEquipmentSlotOn(_extrasNode!, pos, slotName, payload.Kind, payload.SubType);
+                DrawEquipmentSlotOn(_extrasNode!, pos, slotName, payload.Kind, payload.SubType, payload.MaterialFamily);
             }
         }
 
@@ -937,20 +937,30 @@ public partial class ShroompColonyView : Node2D
     // between ShroompColonyView and `_extrasNode` in the tree, so equipment,
     // tools, carry icons, and name labels need to live on `_extrasNode`
     // to appear on top of the body.
-    private static void DrawEquipmentSlotOn(CanvasItem ci, Vector2 pos, string slotName, string kind, string subType)
+    private static void DrawEquipmentSlotOn(CanvasItem ci, Vector2 pos, string slotName, string kind, string subType, string matFamily)
     {
+        // Hands always draw the held weapon/tool. Other slots draw worn apparel
+        // (v0.7.2), gated on Kind == "Apparel" and tinted by material family.
+        bool apparel = kind == "Apparel";
+        Color tint = ApparelTint(matFamily);
         switch (slotName)
         {
             case "Head":
-                // Hat overlays the existing pointed cap with a band of
-                // colour at the brim line.
-                ci.DrawRect(new Rect2(pos.X - 4f, pos.Y - 5f, 8f, 1.5f),
-                    new Color(0.85f, 0.55f, 0.30f, 0.90f));
+                if (apparel)
+                {
+                    // Shroomp hat: a brim band + small crown on the cap apex.
+                    ci.DrawRect(new Rect2(pos.X - 4.5f, pos.Y - 10f, 9f, 1.5f), tint);   // brim
+                    ci.DrawRect(new Rect2(pos.X - 2.5f, pos.Y - 13f, 5f, 3f), tint);     // crown
+                }
                 break;
             case "Torso":
-                // Apparel band across the torso.
-                ci.DrawRect(new Rect2(pos.X - 5f, pos.Y + 1f, 10f, 2f),
-                    new Color(0.65f, 0.45f, 0.30f, 0.85f));
+                if (apparel)
+                {
+                    // Cloak: a draped cloth panel over the stalk + a shoulder line.
+                    ci.DrawRect(new Rect2(pos.X - 5f, pos.Y - 3f, 10f, 6f), tint);
+                    ci.DrawRect(new Rect2(pos.X - 5f, pos.Y - 3.5f, 10f, 1f),
+                        new Color(tint.R * 0.8f, tint.G * 0.8f, tint.B * 0.8f, tint.A));
+                }
                 break;
             case "LeftHand":
                 DrawHandItemOn(ci, pos + new Vector2(-5.5f, 2.5f), kind, subType);
@@ -959,31 +969,37 @@ public partial class ShroompColonyView : Node2D
                 DrawHandItemOn(ci, pos + new Vector2(5.5f, 2.5f), kind, subType);
                 break;
             case "LeftFoot":
-                ci.DrawRect(new Rect2(pos.X - 4f, pos.Y + 6f, 3f, 2f),
-                    new Color(0.45f, 0.30f, 0.20f, 0.95f));
+                if (apparel) ci.DrawRect(new Rect2(pos.X - 4f, pos.Y + 6f, 3f, 2f), tint);
                 break;
             case "RightFoot":
-                ci.DrawRect(new Rect2(pos.X + 1f, pos.Y + 6f, 3f, 2f),
-                    new Color(0.45f, 0.30f, 0.20f, 0.95f));
+                if (apparel) ci.DrawRect(new Rect2(pos.X + 1f, pos.Y + 6f, 3f, 2f), tint);
                 break;
             case "LeftArm":
-                ci.DrawRect(new Rect2(pos.X - 6f, pos.Y + 0.5f, 2f, 4f),
-                    new Color(0.55f, 0.40f, 0.25f, 0.85f));
+                if (apparel) ci.DrawRect(new Rect2(pos.X - 6f, pos.Y + 0.5f, 2f, 4f), tint);
                 break;
             case "RightArm":
-                ci.DrawRect(new Rect2(pos.X + 4f, pos.Y + 0.5f, 2f, 4f),
-                    new Color(0.55f, 0.40f, 0.25f, 0.85f));
+                if (apparel) ci.DrawRect(new Rect2(pos.X + 4f, pos.Y + 0.5f, 2f, 4f), tint);
                 break;
             case "LeftLeg":
-                ci.DrawRect(new Rect2(pos.X - 3f, pos.Y + 4f, 2f, 3f),
-                    new Color(0.50f, 0.35f, 0.20f, 0.85f));
+                if (apparel) ci.DrawRect(new Rect2(pos.X - 3f, pos.Y + 4f, 2f, 3f), tint);
                 break;
             case "RightLeg":
-                ci.DrawRect(new Rect2(pos.X + 1f, pos.Y + 4f, 2f, 3f),
-                    new Color(0.50f, 0.35f, 0.20f, 0.85f));
+                if (apparel) ci.DrawRect(new Rect2(pos.X + 1f, pos.Y + 4f, 2f, 3f), tint);
                 break;
         }
     }
+
+    // v0.7.2 — apparel colour by material family (no MaterialDef tint path is
+    // wired, so it is derived here, matching the DrawCarriedIconOn idiom).
+    private static Color ApparelTint(string matFamily) => matFamily switch
+    {
+        "Cloth" => new Color(0.45f, 0.55f, 0.80f, 0.92f),   // woven cloth — cool blue
+        "Hide"  => new Color(0.55f, 0.38f, 0.24f, 0.92f),   // tanned hide — brown
+        "Plant" => new Color(0.42f, 0.58f, 0.30f, 0.92f),   // fibre — green
+        "Bone"  => new Color(0.86f, 0.84f, 0.74f, 0.92f),   // bone plate — cream
+        "Stone" => new Color(0.62f, 0.62f, 0.68f, 0.92f),   // stone — grey
+        _       => new Color(0.60f, 0.50f, 0.40f, 0.90f),
+    };
 
     // Hand-held tool / weapon. v0.7.1 (Phase 7) — per-weapon-type glyphs so the
     // wielded weapon reads at a glance (spear / sword / axe / club / bow / sling).

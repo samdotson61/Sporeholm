@@ -775,6 +775,29 @@ namespace Sporeholm
 							AutoAddPrepDesignations(map, x, y);
 						}
 						break;
+					// v0.7.2 (Phase 7) — combat-practice furniture blueprints.
+					// Sparring Yard (Melee drill, 4 units) + Training Dummy
+					// (Ranged drill, 2 units). Built from wood by default.
+					case Sporeholm.UI.DesignationTool.BuildSparringYard:
+						if (CanPlaceBlueprint(map, x, y))
+						{
+							map.SetStructure(x, y,
+								Sporeholm.World.StructureSlot.Blueprint(
+									Sporeholm.World.StructureType.SparringYardPlanned,
+									buildMaterial ?? Sporeholm.World.StructureMat.DeadWood));
+							AutoAddPrepDesignations(map, x, y);
+						}
+						break;
+					case Sporeholm.UI.DesignationTool.BuildTrainingDummy:
+						if (CanPlaceBlueprint(map, x, y))
+						{
+							map.SetStructure(x, y,
+								Sporeholm.World.StructureSlot.Blueprint(
+									Sporeholm.World.StructureType.TrainingDummyPlanned,
+									buildMaterial ?? Sporeholm.World.StructureMat.DeadWood));
+							AutoAddPrepDesignations(map, x, y);
+						}
+						break;
 					case Sporeholm.UI.DesignationTool.Demolish:
 						// v0.6.2 — Demolish is now a paintable task instead of
 						// an instant action. Paint marks the structure for

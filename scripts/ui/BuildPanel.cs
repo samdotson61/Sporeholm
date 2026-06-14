@@ -35,6 +35,8 @@ namespace Sporeholm.UI
         private Button              _tableBtn    = null!;   // v0.5.37
         private Button              _torchBtn    = null!;   // v0.5.84t
         private Button              _cookingTableBtn = null!; // v0.6.2 (Phase 5.6)
+        private Button              _sparringYardBtn  = null!; // v0.7.2
+        private Button              _trainingDummyBtn = null!; // v0.7.2
         private Button              _demolishBtn = null!;
         // v0.5.32 — material picker chips. One per StructureMat option.
         // Visibility + enabled state filtered per-tool by RefreshMaterialChips.
@@ -265,6 +267,19 @@ namespace Sporeholm.UI
             _torchBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.BuildTorch);
             row.AddChild(_torchBtn);
 
+            // v0.7.2 (Phase 7) — combat-practice furniture. Sparring Yard
+            // trains Melee; Training Dummy trains Ranged. Idle Guardians (and
+            // off-duty colonists) drill here for combat XP — no real damage.
+            _sparringYardBtn = MakeButton("🤺 Sparring Yard",
+                tips ? "Plan a Sparring Yard. Guardians and idle colonists drill here to gain Melee skill. Costs 4 wood. No real damage is dealt." : "");
+            _sparringYardBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.BuildSparringYard);
+            row.AddChild(_sparringYardBtn);
+
+            _trainingDummyBtn = MakeButton("🎯 Training Dummy",
+                tips ? "Plan a Training Dummy. Guardians and idle colonists practise strikes here to gain Ranged skill. Costs 2 wood. No real damage is dealt." : "");
+            _trainingDummyBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.BuildTrainingDummy);
+            row.AddChild(_trainingDummyBtn);
+
             // v0.5.35 — Bed.
             _bedBtn = MakeButton("🛏 Bed",
                 tips ? "Plan a bed. Shroomps sleeping on beds restore Rest faster + get WellRested mood (vs SleptOnGround penalty)." : "");
@@ -416,6 +431,9 @@ namespace Sporeholm.UI
             // v0.5.84t — Torch lives in Furniture sub-cat (cheap floor-tile
             // decoration + light + small heat). Joy/Structure don't fit.
             _torchBtn    .Visible = _subCat == SubCat.Furniture;
+            // v0.7.2 — combat-practice furniture lives in the Furniture sub-cat.
+            _sparringYardBtn .Visible = _subCat == SubCat.Furniture;
+            _trainingDummyBtn.Visible = _subCat == SubCat.Furniture;
             _shrineBtn   .Visible = _subCat == SubCat.Joy;
             _boardBtn    .Visible = _subCat == SubCat.Joy;
             _benchBtn    .Visible = _subCat == SubCat.Joy;
@@ -473,7 +491,9 @@ namespace Sporeholm.UI
                 t == DesignationToolbar.Tool.BuildGossipBench       ||
                 t == DesignationToolbar.Tool.BuildTable              ||
                 t == DesignationToolbar.Tool.BuildTorch              ||
-                t == DesignationToolbar.Tool.BuildCookingTable;       // v0.6.2 (Phase 5.6)
+                t == DesignationToolbar.Tool.BuildCookingTable      ||  // v0.6.2 (Phase 5.6)
+                t == DesignationToolbar.Tool.BuildSparringYard      ||  // v0.7.2
+                t == DesignationToolbar.Tool.BuildTrainingDummy;       // v0.7.2
             _matRow.Visible = isBuildTool;
             if (!isBuildTool) return;
 
@@ -584,7 +604,8 @@ namespace Sporeholm.UI
             Button[] all = {
                 _wallBtn, _floorBtn, _doorBtn, _shelfBtn, _workbenchBtn,
                 _bonfireBtn, _bedBtn, _shrineBtn, _boardBtn, _benchBtn,
-                _tableBtn, _torchBtn, _cookingTableBtn, _demolishBtn,   // v0.6.2 (Phase 5.6)
+                _tableBtn, _torchBtn, _cookingTableBtn,                 // v0.6.2 (Phase 5.6)
+                _sparringYardBtn, _trainingDummyBtn, _demolishBtn,      // v0.7.2
             };
             foreach (var b in all)
             {
@@ -607,6 +628,8 @@ namespace Sporeholm.UI
                 DesignationToolbar.Tool.BuildTable             => _tableBtn,
                 DesignationToolbar.Tool.BuildTorch             => _torchBtn,   // v0.5.84t
                 DesignationToolbar.Tool.BuildCookingTable      => _cookingTableBtn, // v0.6.2 (Phase 5.6)
+                DesignationToolbar.Tool.BuildSparringYard      => _sparringYardBtn,  // v0.7.2
+                DesignationToolbar.Tool.BuildTrainingDummy     => _trainingDummyBtn, // v0.7.2
                 DesignationToolbar.Tool.Demolish               => _demolishBtn,
                 _                                              => null,
             };

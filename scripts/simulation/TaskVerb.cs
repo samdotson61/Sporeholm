@@ -36,6 +36,7 @@ namespace Sporeholm.Simulation
             TaskType.Attack         => "Fighting",
             TaskType.Flee           => "Fleeing",
             TaskType.TreatPatient   => "Treating the wounded",
+            TaskType.Rescue         => "Rescuing the wounded",
             // Tier 3 — idle (v0.3.43 rewrite)
             TaskType.Wander         => "Wandering",
             TaskType.Loiter         => "Loitering",
@@ -43,6 +44,7 @@ namespace Sporeholm.Simulation
             TaskType.Converse       => "Chatting",
             TaskType.Meditate       => "Meditating",
             TaskType.VisitFavorite  => "Visiting a favourite spot",
+            TaskType.Train          => "Training",   // v0.7.2 (Phase 7)
             // Tier 0 — player override
             TaskType.PlayerOrder    => "On orders",
             TaskType.None           => "Idle",

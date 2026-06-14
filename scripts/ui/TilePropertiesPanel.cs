@@ -258,6 +258,11 @@ public partial class TilePropertiesPanel : Control
             // (Library hint via Bill section).
             Sporeholm.World.StructureType.CookingTable            or
             Sporeholm.World.StructureType.CookingTablePlanned     => "Cooking Table",
+            // v0.7.2 (Phase 7) — combat-practice furniture labels.
+            Sporeholm.World.StructureType.SparringYard            or
+            Sporeholm.World.StructureType.SparringYardPlanned     => "Sparring Yard",
+            Sporeholm.World.StructureType.TrainingDummy           or
+            Sporeholm.World.StructureType.TrainingDummyPlanned    => "Training Dummy",
             _                                                     => s.Type.ToString(),
         };
         // v0.5.55 — show the actual sub-material (FungalWood / DeadWood /

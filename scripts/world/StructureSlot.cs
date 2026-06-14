@@ -126,6 +126,9 @@ namespace Sporeholm.World
             // v0.5.37 — Tables: 2 units (4 chairs nearby is implicit).
             StructureType.TablePlanned      or StructureType.Table     => 2,
             StructureType.FloorPlanned      or StructureType.Floor     => 1,
+            // v0.7.2 — combat-practice furniture.
+            StructureType.SparringYardPlanned  or StructureType.SparringYard  => 4,
+            StructureType.TrainingDummyPlanned or StructureType.TrainingDummy => 2,
             _ => 1,
         };
 
@@ -142,7 +145,9 @@ namespace Sporeholm.World
                                 || Type == StructureType.GossipBenchPlanned         // v0.5.36
                                 || Type == StructureType.TablePlanned              // v0.5.37
                                 || Type == StructureType.TorchPlanned              // v0.5.84t
-                                || Type == StructureType.CookingTablePlanned;      // v0.6.2 (Phase 5.6)
+                                || Type == StructureType.CookingTablePlanned       // v0.6.2 (Phase 5.6)
+                                || Type == StructureType.SparringYardPlanned       // v0.7.2
+                                || Type == StructureType.TrainingDummyPlanned;     // v0.7.2
         public bool IsBuilt    => Type == StructureType.Wall
                                || Type == StructureType.Floor
                                || Type == StructureType.Door            // v0.5.20
@@ -155,7 +160,9 @@ namespace Sporeholm.World
                                || Type == StructureType.GossipBench                 // v0.5.36
                                || Type == StructureType.Table                      // v0.5.37
                                || Type == StructureType.Torch                      // v0.5.84t
-                               || Type == StructureType.CookingTable;              // v0.6.2 (Phase 5.6)
+                               || Type == StructureType.CookingTable               // v0.6.2 (Phase 5.6)
+                               || Type == StructureType.SparringYard               // v0.7.2
+                               || Type == StructureType.TrainingDummy;             // v0.7.2
         public bool IsImpassable => Type == StructureType.Wall;   // Floors / Doors / Shelves are passable
 
         public static StructureSlot Empty => default;
@@ -239,6 +246,13 @@ namespace Sporeholm.World
         // 2 Fungal Wood + 1 Pebblestone (chopping block + stove top).
         CookingTablePlanned = 28,
         CookingTable        = 29,
+        // v0.7.2 (Phase 7) — combat-practice furniture. SparringYard (melee
+        // drill) + TrainingDummy (strike practice). Passive: colonists train
+        // here to gain combat XP with no real damage.
+        SparringYardPlanned  = 30,
+        SparringYard         = 31,
+        TrainingDummyPlanned = 32,
+        TrainingDummy        = 33,
     }
 
     // v0.5.19 — structure material. Mirrors the v0.5.16 MaterialKey families
