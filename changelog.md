@@ -7,6 +7,28 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.7.2] — 2026-06-14 — Phase 7 completion: rescue, training buildings, apparel layers
+
+Closes out Phase 7 with the three remaining combat-arc features: carrying a downed colonist to a bed, combat training furniture, and worn-apparel sprites — plus a hardening pass from an adversarial review.
+
+### Rescue (carry a downed colonist to a bed)
+
+New `TaskType.Rescue` + a BehaviorSystem rescue pass. A Doctor (Doctor work priority) or Caretaker walks to the nearest downed colonist, picks them up, carries them to the nearest bed, and sets them down there to rest and be tended. The carrier drives the carried colonist's position each tick; the rescue pass runs after the combat pass (a rescuer under attack defends first) and before the medical pass (the wounded are moved to safety before being treated in place). Rescuers prefer a bed that isn't already occupied by another downed colonist. Carry links round-trip safely through colonist death.
+
+### Combat training buildings
+
+Two new build-menu furniture pieces in the Furniture sub-category: the **Sparring Yard** (4 wood — trains Melee) and the **Training Dummy** (2 wood — trains Ranged). A new `TaskType.Train`: an idle Guardian — or any off-duty colonist — walks to the nearest reachable training building and drills there, gaining the matching combat skill slowly over time (live combat still grants XP faster). No real damage is dealt. Both pieces have hand-baked sprites (a crossed practice-sword mat; a straw pell with a target ring), full blueprint / build / demolish support, room furniture + beauty contribution, and tile-readout labels.
+
+### Apparel sprite layers
+
+`ShroompColonyView` now draws worn apparel over a colonist: a hat (brim + crown), a cloak panel, and boots, each tinted by the apparel's material family. Held weapons continue to render in-hand.
+
+### Hardening (adversarial review pass)
+
+A multi-agent review of the new features found and fixed: a carrier pulled into combat mid-carry no longer strands the downed colonist (the carry releases so another rescuer or doctor can take over); a colonist who recovers while being carried is set down instead of being dragged while moving on its own; rescuers no longer stack multiple colonists on one bed; a training task is dropped if its building is demolished mid-drill (no more "training" an empty tile); and worn apparel no longer renders upright over a colonist lying down (downed / sleeping). Build clean, 0 warnings / 0 errors.
+
+---
+
 ## [0.7.1] — 2026-06-14 — Phase 7 combat depth: wounds, pain, healers, armor, draft
 
 Builds on the v0.7.0 combat foundation with the medical + tactical layers: persistent wounds, pain, venom, a healer/medicine loop, material-aware armor, draftable colonists, and per-weapon held-item sprites.

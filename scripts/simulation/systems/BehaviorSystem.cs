@@ -461,6 +461,17 @@ namespace Sporeholm.Simulation.Systems
                     if (!bpSlot.IsBlueprint) return false;
                     return true;
 
+                case TaskType.Train:
+                    // v0.7.2 review fix — the training building must still exist.
+                    // If the Sparring Yard / Training Dummy is demolished while a
+                    // shroomp walks to it or drills on it, drop the task so it
+                    // re-selects instead of "training" an empty tile (which would
+                    // grant free Melee XP at thin air).
+                    if (t.TargetTileX < 0 || t.TargetTileY < 0) return true;
+                    var trainType = map.GetStructure(t.TargetTileX, t.TargetTileY).Type;
+                    return trainType == StructureType.SparringYard
+                        || trainType == StructureType.TrainingDummy;
+
                 default:
                     return true;
             }
@@ -843,12 +854,22 @@ namespace Sporeholm.Simulation.Systems
                     // v0.7.2 — a downed colonist can't carry anyone: release its
                     // rescue link so the would-be rescuee isn't left frozen.
                     if (s.CarriedShroompId.HasValue)
-                    {
-                        var carried = FindShroompById(shroomps, s.CarriedShroompId.Value);
-                        if (carried != null) carried.IsBeingCarried = false;
-                        s.CarriedShroompId = null;
-                    }
+                        ReleaseCarry(s, shroomps, s.SimPos);
                     continue;   // skip the rest of the per-shroomp tick
+                }
+
+                // v0.7.2 review fix — a shroomp currently being CARRIED (rescue)
+                // must not run its own movement / task pipeline; the carrier
+                // drives its SimPos. Guard regardless of downed state: a victim
+                // that recovers (stands up) mid-carry would otherwise become a
+                // second writer of its own position, fighting the carrier's drag.
+                // (The carrier releases the link in TryHandleRescue once the
+                // victim is no longer downed.) UpdateDownedState already ran above
+                // so the victim's IsDowned stays current for that release check.
+                if (s.IsBeingCarried)
+                {
+                    s.PrevSimPos = s.SimPos;
+                    continue;
                 }
 
                 // v0.3.35 / v0.3.40 — tick down each per-shroomp "recently
@@ -873,7 +894,16 @@ namespace Sporeholm.Simulation.Systems
                 if (s.AttackCooldownTicks > 0)
                     s.AttackCooldownTicks -= tickInterval;
                 if (TryHandleCombat(s, map, effectiveDt, rng))
+                {
+                    // v0.7.2 review fix (critical) — a carrier pulled into combat
+                    // must drop its rescue carry, else the downed victim is left
+                    // frozen, untreatable, and un-rescuable for the whole fight.
+                    // Set them down where they were being dragged so another
+                    // rescuer / doctor can take over.
+                    if (s.CarriedShroompId.HasValue)
+                        ReleaseCarry(s, shroomps, s.SimPos);
                     continue;
+                }
 
                 // v0.7.2 (Phase 7) — rescue pass: carry a downed colonist to a
                 // bed. After combat (a rescuer under attack defends first),
@@ -1549,10 +1579,15 @@ namespace Sporeholm.Simulation.Systems
             // Resolve the current carry victim (if any).
             Shroomp? victim = s.CarriedShroompId.HasValue
                 ? FindShroompById(shroomps, s.CarriedShroompId.Value) : null;
-            if (victim != null && !victim.IsAlive)
+            // v0.7.2 review fix — release the carry if the victim died OR recovered
+            // (stood back up) mid-carry: set them down so they become a valid
+            // rescuee/patient again and the carrier is free to re-evaluate. Before
+            // this, a victim that healed past the stand-up threshold while carried
+            // kept IsBeingCarried=true and was dragged while also running its own
+            // pipeline (dual position writer).
+            if (victim != null && (!victim.IsAlive || !victim.IsDowned))
             {
-                victim.IsBeingCarried = false;
-                s.CarriedShroompId = null;
+                DepositCarried(s, victim, s.SimPos);
                 victim = null;
             }
 
@@ -1595,7 +1630,12 @@ namespace Sporeholm.Simulation.Systems
             // Phase 2 — carrying: head to the nearest bed + deposit.
             int tx = (int)(s.SimPos.X / LocalMap.TileSize);
             int ty = (int)(s.SimPos.Y / LocalMap.TileSize);
-            var bed = map.FindNearestBed(tx, ty);
+            // v0.7.2 review fix — prefer a bed not already occupied by another
+            // downed/being-carried colonist so two rescuers don't stack victims
+            // on one bed. Falls back to the bare nearest bed if every bed is
+            // taken (better to double up than to strand them on the floor).
+            var bed = FindNearestFreeBedForRescue(victim, shroomps, map, tx, ty)
+                      ?? map.FindNearestBed(tx, ty);
             if (!bed.HasValue)
             {
                 DepositCarried(s, victim, s.SimPos);   // bed vanished mid-carry — set down here
@@ -1635,6 +1675,62 @@ namespace Sporeholm.Simulation.Systems
             victim.IsBeingCarried = false;
             carrier.CarriedShroompId = null;
             carrier.CurrentTask = null;
+        }
+
+        // v0.7.2 review fix — release an in-progress rescue carry, setting the
+        // carried victim down at `at` so it becomes a valid FindRescuee /
+        // FindPatient target again. Called from every path that ABANDONS a carry
+        // mid-route (carrier downed, carrier pulled into combat). Normal arrival
+        // uses DepositCarried; carrier death is handled in SimulationCore.
+        private static void ReleaseCarry(Shroomp carrier, IReadOnlyList<Shroomp> shroomps, Vector2 at)
+        {
+            if (!carrier.CarriedShroompId.HasValue) return;
+            var carried = FindShroompById(shroomps, carrier.CarriedShroompId.Value);
+            if (carried != null)
+            {
+                carried.SimPos = at;
+                carried.PrevSimPos = at;
+                carried.SimTarget = at;
+                carried.PathWaypoints.Clear();
+                carried.IsBeingCarried = false;
+            }
+            carrier.CarriedShroompId = null;
+        }
+
+        // v0.7.2 review fix — nearest Bed not already occupied by another downed
+        // or being-carried colonist (so rescuers don't stack victims on one bed).
+        // Returns null when every bed is occupied; the caller then falls back to
+        // the bare nearest bed. The occupancy set is tiny (only incapacitated
+        // shroomps), so the per-bed inner check stays cheap.
+        private static (int X, int Y)? FindNearestFreeBedForRescue(
+            Shroomp victim, IReadOnlyList<Shroomp> shroomps, LocalMap map, int fx, int fy)
+        {
+            Span<int> occX = stackalloc int[16];
+            Span<int> occY = stackalloc int[16];
+            int n = 0;
+            for (int i = 0; i < shroomps.Count && n < occX.Length; i++)
+            {
+                var p = shroomps[i];
+                if (ReferenceEquals(p, victim) || !p.IsAlive) continue;
+                if (!p.IsDowned && !p.IsBeingCarried) continue;
+                occX[n] = (int)(p.SimPos.X / LocalMap.TileSize);
+                occY[n] = (int)(p.SimPos.Y / LocalMap.TileSize);
+                n++;
+            }
+            (int X, int Y)? best = null; int bd = int.MaxValue;
+            for (int y = 0; y < map.Height; y++)
+            for (int x = 0; x < map.Width;  x++)
+            {
+                if (map.GetStructure(x, y).Type != StructureType.Bed) continue;
+                bool taken = false;
+                for (int k = 0; k < n; k++)
+                    if (occX[k] == x && occY[k] == y) { taken = true; break; }
+                if (taken) continue;
+                int ddx = x - fx, ddy = y - fy;
+                int d = ddx * ddx + ddy * ddy;
+                if (d < bd) { bd = d; best = (x, y); }
+            }
+            return best;
         }
 
         // Nearest downed colonist that needs carrying to a bed (reachable, not

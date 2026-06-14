@@ -845,7 +845,8 @@ public partial class ShroompColonyView : Node2D
             foreach (var (slotName, payload) in s.Equipment)
             {
                 if (slotName == carrySlot) continue;
-                DrawEquipmentSlotOn(_extrasNode!, pos, slotName, payload.Kind, payload.SubType, payload.MaterialFamily);
+                DrawEquipmentSlotOn(_extrasNode!, pos, slotName, payload.Kind, payload.SubType, payload.MaterialFamily,
+                    s.IsDowned || s.IsSleeping);
             }
         }
 
@@ -937,11 +938,16 @@ public partial class ShroompColonyView : Node2D
     // between ShroompColonyView and `_extrasNode` in the tree, so equipment,
     // tools, carry icons, and name labels need to live on `_extrasNode`
     // to appear on top of the body.
-    private static void DrawEquipmentSlotOn(CanvasItem ci, Vector2 pos, string slotName, string kind, string subType, string matFamily)
+    private static void DrawEquipmentSlotOn(CanvasItem ci, Vector2 pos, string slotName, string kind, string subType, string matFamily,
+        bool lyingDown)
     {
         // Hands always draw the held weapon/tool. Other slots draw worn apparel
         // (v0.7.2), gated on Kind == "Apparel" and tinted by material family.
-        bool apparel = kind == "Apparel";
+        // v0.7.2 review fix — suppress apparel rects while the body is laid
+        // horizontal (downed / sleeping); they're drawn at fixed upright offsets
+        // and would otherwise detach from the rotated body (matching the
+        // bleeding-drip guard). Held weapons still draw.
+        bool apparel = kind == "Apparel" && !lyingDown;
         Color tint = ApparelTint(matFamily);
         switch (slotName)
         {
