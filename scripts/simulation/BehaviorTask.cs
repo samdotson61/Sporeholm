@@ -58,6 +58,17 @@ namespace Sporeholm.Simulation
         // tile clears + refunds 20%-60% of the material cost (Construction
         // skill drives recovery rate). See DemolishSystem.
         Demolish,
+        // v0.7.0 (Phase 7) — combat tasks (display + AI). Attack = pursue +
+        // strike a hostile entity; Flee = retreat from a threat. Movement and
+        // resolution run in BehaviorSystem's dedicated combat pass (not the
+        // normal arrival pipeline), so these have no ApplyTaskEffect case — they
+        // exist for the roster/card "what is this shroomp doing?" verb + the
+        // sword-icon overlay.
+        Attack, Flee,
+        // v0.7.1 (Phase 7) — a Doctor / Caretaker tends a wounded colonist in
+        // place, consuming medicine if available. Handled by BehaviorSystem's
+        // medical pass (like combat) — no ApplyTaskEffect case.
+        TreatPatient,
         // Tier 3 — idle. Wander still exists as the "go somewhere new"
         // baseline; v0.3.43 adds five more idle behaviours so shroomps stop
         // jittering in place between commands:

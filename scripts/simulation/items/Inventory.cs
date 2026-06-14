@@ -273,6 +273,34 @@ namespace Sporeholm.Simulation.Items
             return taken;
         }
 
+        // v0.7.1 — consume by ITEM sub-type (e.g. a specific "MagicHerbPoultice"
+        // medicine), regardless of material family. Smallest-stack-first.
+        public int ConsumeBySubType(ItemKind kind, string subType, int amount)
+        {
+            if (amount <= 0 || string.IsNullOrEmpty(subType)) return 0;
+            int taken = 0;
+            lock (_lock)
+            {
+                var matches = new System.Collections.Generic.List<Item>();
+                for (int i = 0; i < _items.Count; i++)
+                {
+                    var it = _items[i];
+                    if (it.Kind != kind || it.SubType != subType) continue;
+                    if (it.Quantity > 0) matches.Add(it);
+                }
+                matches.Sort((a, b) => a.Quantity.CompareTo(b.Quantity));
+                foreach (var stack in matches)
+                {
+                    if (taken >= amount) break;
+                    int take = System.Math.Min(amount - taken, stack.Quantity);
+                    stack.Quantity -= take;
+                    taken += take;
+                }
+                _items.RemoveAll(it => it.Quantity <= 0);
+            }
+            return taken;
+        }
+
         // Consume one unit (or more) from a specific stack. Returns the
         // number of units actually removed (always ≤ requested). If the
         // stack drops to zero, the entry is removed from the list.

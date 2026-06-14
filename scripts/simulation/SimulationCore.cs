@@ -115,6 +115,26 @@ namespace Sporeholm.Simulation
 		// auto-accepts; Phase 9's storyteller will gain Accept/Decline UI.
 		public ConcurrentQueue<ShroompSnapshot> PendingWanderers { get; } = new();
 
+		// v0.7.0 (Phase 7) — discrete combat events for the UI (one per resolved
+		// exchange the player should see). Edge-triggered; SimulationManager
+		// drains in DrainCombatEvents() and GameController turns each into a
+		// MessageLog line + CombatFeedbackOverlay floater/decal. Capped so a
+		// stalled main thread can't grow the queue without bound.
+		public ConcurrentQueue<Combat.CombatEventData> PendingCombatEvents { get; } = new();
+		private const int MaxCombatEventQueue = 256;
+		// Cached combat delegates (assigned once) so BeginTick doesn't allocate
+		// two closures every tick.
+		private System.Action<Combat.CombatEventData>? _emitCombatEvent;
+		private System.Action<Shroomp, CauseOfDeath>? _killShroompForCombat;
+
+		// v0.7.0 (Phase 7) — player "attack that entity" orders. Main thread
+		// enqueues (shroomp name + entity Guid); the sim thread drains them into
+		// Shroomp.CombatTargetId, which BehaviorSystem turns into an Attack task.
+		public ConcurrentQueue<(string ShroompName, System.Guid TargetEntityId)> PendingAttackOrders { get; } = new();
+
+		public void QueueAttackEntity(string shroompName, System.Guid targetEntityId) =>
+			PendingAttackOrders.Enqueue((shroompName, targetEntityId));
+
 		private readonly Random _rng = new();
 
 		// ── Role-change command queue ─────────────────────────────────────────────
@@ -539,6 +559,11 @@ namespace Sporeholm.Simulation
 				// wound (cond=20, severity=30) on a non-vital part produces
 				// ~0.018 / sec accumulation = ~93 minutes to bleed out —
 				// slow but visible.
+				// v0.7.1 (Phase 7) — heal wounds + decay venom before the bleed
+				// recompute, so this second's bleed reflects the freshly-restored
+				// body-part condition.
+				HediffSystem.Tick(working);
+
 				const float bleedDt = 1f;
 				foreach (var s in working)
 				{
@@ -620,6 +645,21 @@ namespace Sporeholm.Simulation
 				}
 			}
 
+			// v0.7.0 (Phase 7) — drain attack orders: set CombatTargetId on the
+			// named shroomp so BehaviorSystem pursues + strikes that entity.
+			while (PendingAttackOrders.TryDequeue(out var ao))
+			{
+				foreach (var s in working)
+				{
+					if (s.Name == ao.ShroompName)
+					{
+						s.CombatTargetId = ao.TargetEntityId;
+						s.CombatTargetName = "enemy";
+						break;
+					}
+				}
+			}
+
 			float dt = SimulationClock.BaseTickIntervalMs / 1000f;
 			// v0.3.39 (O-H.2) — increment the global tick counter and pass
 			// to BehaviorSystem so its per-shroomp LOD skip can compare
@@ -634,19 +674,14 @@ namespace Sporeholm.Simulation
 			// shroomp — cheap even at 1000 shroomps.
 			if ((GlobalTick & 15) == 0)
 				BehaviorSystem.AssignTickPhases(working, CameraFollow);
-			long tBehaviorStart = System.Diagnostics.Stopwatch.GetTimestamp();
-			BehaviorSystem.Tick(working, Map, Resources, queue, _rng, dt, GlobalTick, _date.Hour);
-			PerfBehaviorMicros += (System.Diagnostics.Stopwatch.GetTimestamp() - tBehaviorStart)
-				* 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
 
-			// v0.6.0 (Phase 6) — entity tick. Runs after BehaviorSystem
-			// so hostile entities see shroomps with this tick's positions
-			// before reacting. Dead entities are filtered here (Health <= 0
-			// or State == Dead) so the next snapshot only carries the
-			// living roster.
+			// v0.7.0 (Phase 7) — build the entity working set BEFORE BehaviorSystem
+			// so colonists can see + engage hostiles using this tick's positions.
+			// Pruning dead entities (and enqueuing their removal events) moves up
+			// here from the old post-behavior block.
+			List<Sporeholm.Simulation.Entities.Entity> entWork = null!;
 			if (Map != null)
 			{
-				List<Sporeholm.Simulation.Entities.Entity> entWork;
 				lock (_entityLock)
 				{
 					// v0.6.2 audit Fix 5 — enqueue removal events for every entity
@@ -657,16 +692,43 @@ namespace Sporeholm.Simulation
 					_entities.RemoveAll(e => !e.IsAlive);
 					entWork = new List<Sporeholm.Simulation.Entities.Entity>(_entities);
 				}
+			}
+			IReadOnlyList<Sporeholm.Simulation.Entities.Entity> entForBehavior =
+				entWork ?? (IReadOnlyList<Sporeholm.Simulation.Entities.Entity>)
+					System.Array.Empty<Sporeholm.Simulation.Entities.Entity>();
+
+			// v0.7.0 (Phase 7) — set the per-tick combat context (shared RNG, map,
+			// event sink, canonical kill delegate) before any system resolves an
+			// attack. Both BehaviorSystem (shroomp→entity) and EntitySystem
+			// (entity→shroomp) route damage through CombatSystem, which reads this.
+			_emitCombatEvent ??= ev =>
+			{
+				PendingCombatEvents.Enqueue(ev);
+				while (PendingCombatEvents.Count > MaxCombatEventQueue)
+					PendingCombatEvents.TryDequeue(out _);
+			};
+			_killShroompForCombat ??= (s, c) => KillShroomp(s, c);
+			Combat.CombatSystem.BeginTick(new Combat.CombatContext(
+				_rng, Map, GlobalTick, _emitCombatEvent, _killShroompForCombat));
+
+			long tBehaviorStart = System.Diagnostics.Stopwatch.GetTimestamp();
+			BehaviorSystem.Tick(working, entForBehavior, Map, Resources, queue, _rng, dt, GlobalTick, _date.Hour);
+			PerfBehaviorMicros += (System.Diagnostics.Stopwatch.GetTimestamp() - tBehaviorStart)
+				* 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
+
+			// v0.6.0 (Phase 6) — entity tick. Runs after BehaviorSystem so hostile
+			// entities react to this tick's shroomp positions. Reuses the entWork
+			// set built above.
+			if (Map != null && entWork != null)
+			{
 				Sporeholm.Simulation.Systems.EntitySystem.Tick(entWork, working, Map, dt, _rng, (int)GlobalTick);
 				// v0.6.0 — once per in-game day, refill ambient population.
 				if (dayBoundary)
 					Sporeholm.Simulation.Systems.EntitySpawnSystem.MaintainPopulation(
-						(List<Sporeholm.Simulation.Entities.Entity>)entWork, Map, _rng);
+						entWork, Map, _rng);
 				lock (_entityLock)
 				{
-					// The list is the same reference held inside the lock until
-					// snapshot; no additional sync needed since we returned a
-					// fresh copy. Just write back the maintained additions.
+					// Write back the maintained roster (combat deaths + ambient spawns).
 					_entities.Clear();
 					_entities.AddRange(entWork);
 				}

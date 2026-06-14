@@ -75,6 +75,15 @@ public partial class ShroompColonyView : Node2D
         // identify eaters at a glance. Sam: "Shroomps should have an
         // eating animation to show when they're eating."
         public bool IsEating;
+
+        // v0.7.0 (Phase 7) — combat animation timers (1 → 0, decayed each
+        // frame). Lunge = a forward jab toward the target on a swing; Hit =
+        // a knockback recoil + red flash when struck.
+        public float   LungeT;
+        public Vector2 LungeDir;
+        public float   HitT;
+        public Vector2 KnockDir;
+        public float   FlashT;
     }
 
     private readonly List<VisualShroomp>        _shroomps = new();
@@ -447,6 +456,26 @@ public partial class ShroompColonyView : Node2D
         }
     }
 
+    // v0.7.0 (Phase 7) — combat animation triggers, called by GameController as
+    // it drains combat events. Lunge: the attacker jabs toward the target on a
+    // swing. HitReact: the defender recoils away from the attacker + flashes red
+    // when a blow lands. Keyed by shroomp Name (the renderer's instance key).
+    public void TriggerAttackLunge(string name, Vector2 towardPos)
+    {
+        if (string.IsNullOrEmpty(name) || !_byName.TryGetValue(name, out var vs)) return;
+        var d = towardPos - vs.Pos;
+        if (d.LengthSquared() > 0.01f) { vs.LungeDir = d.Normalized(); vs.LungeT = 1f; }
+    }
+
+    public void TriggerHitReact(string name, Vector2 fromPos)
+    {
+        if (string.IsNullOrEmpty(name) || !_byName.TryGetValue(name, out var vs)) return;
+        var d = vs.Pos - fromPos;
+        vs.KnockDir = d.LengthSquared() > 0.01f ? d.Normalized() : new Vector2(0f, -1f);
+        vs.HitT   = 1f;
+        vs.FlashT = 1f;
+    }
+
     public override void _Process(double delta)
     {
         // v0.3.36 (B.8 / N.5) — _Process used to QueueRedraw every frame
@@ -505,6 +534,15 @@ public partial class ShroompColonyView : Node2D
             {
                 // v0.5.84t — eaters chew ~3.5× faster than the resting bob.
                 s.BobTimer += dt * (s.IsEating ? 8.4f : 2.4f);
+
+                // v0.7.0 — decay combat animation timers (~0.17s each).
+                if (s.LungeT > 0f || s.HitT > 0f || s.FlashT > 0f)
+                {
+                    float ad = dt * 6f;
+                    s.LungeT = Mathf.Max(0f, s.LungeT - ad);
+                    s.HitT   = Mathf.Max(0f, s.HitT   - ad);
+                    s.FlashT = Mathf.Max(0f, s.FlashT - ad);
+                }
 
                 if (s.Target == Vector2.Zero)
                     continue;          // not yet seeded
@@ -596,9 +634,14 @@ public partial class ShroompColonyView : Node2D
             float bobAmp = (s.IsYielding || s.IsSleeping || s.IsDowned) ? 0f
                          : (s.IsEating ? 3.0f : 1.0f);
             float bob = Mathf.Sin(s.BobTimer) * bobAmp;
+            // v0.7.0 — combat motion: an out-and-back lunge jab toward the
+            // target plus a knockback recoil when struck.
+            Vector2 combatOffset = Vector2.Zero;
+            if (s.LungeT > 0f) combatOffset += s.LungeDir * (5f * Mathf.Sin(s.LungeT * Mathf.Pi));
+            if (s.HitT   > 0f) combatOffset += s.KnockDir * (4f * s.HitT);
             var pos = new Vector2(
-                s.Pos.X + anchorAdjX,
-                s.Pos.Y + (s.IsYielding ? YieldAnchorAdjY : anchorAdjY) + bob);
+                s.Pos.X + anchorAdjX + combatOffset.X,
+                s.Pos.Y + (s.IsYielding ? YieldAnchorAdjY : anchorAdjY) + bob + combatOffset.Y);
             if (!rect.HasPoint(s.Pos)) continue;
 
             int moodIdx = (int)s.Mood;
@@ -619,7 +662,7 @@ public partial class ShroompColonyView : Node2D
             Transform2D xform;
             if (s.IsDowned || s.IsSleeping)
             {
-                xform = new Transform2D(SleepRotation, s.Pos);
+                xform = new Transform2D(SleepRotation, s.Pos + combatOffset);
             }
             else if (s.IsYielding)
             {
@@ -637,6 +680,13 @@ public partial class ShroompColonyView : Node2D
             Color tint = s.IsDowned
                 ? new Color(0.55f, 0.55f, 0.55f, 1f)
                 : Colors.White;
+            // v0.7.0 — red-white flash when a blow lands.
+            if (s.FlashT > 0f)
+                tint = new Color(
+                    Mathf.Min(2f, tint.R + 0.9f * s.FlashT),
+                    tint.G * (1f - 0.4f * s.FlashT),
+                    tint.B * (1f - 0.4f * s.FlashT),
+                    tint.A);
 
             if (s.Sex == Sex.Female)
             {
@@ -935,17 +985,49 @@ public partial class ShroompColonyView : Node2D
         }
     }
 
-    // Hand-held tool / weapon. Tool = small brown dot. Weapon = small
-    // grey vertical bar to suggest a haft. Phase 7 combat will replace
-    // with per-weapon glyphs.
+    // Hand-held tool / weapon. v0.7.1 (Phase 7) — per-weapon-type glyphs so the
+    // wielded weapon reads at a glance (spear / sword / axe / club / bow / sling).
     private static void DrawHandItemOn(CanvasItem ci, Vector2 at, string kind, string subType)
     {
         if (kind == "Weapon")
         {
-            ci.DrawRect(new Rect2(at.X - 0.5f, at.Y - 2.5f, 1.5f, 5f),
-                new Color(0.85f, 0.85f, 0.85f, 0.90f));
-            ci.DrawRect(new Rect2(at.X - 1.0f, at.Y + 2.5f, 2.5f, 1f),
-                new Color(0.55f, 0.40f, 0.25f, 0.95f));
+            var steel = new Color(0.85f, 0.86f, 0.92f, 0.95f);
+            var haft  = new Color(0.55f, 0.40f, 0.25f, 0.95f);
+            var cord  = new Color(0.70f, 0.62f, 0.45f, 0.95f);
+            switch (subType)
+            {
+                case "Spear":
+                    ci.DrawRect(new Rect2(at.X - 0.4f, at.Y - 4f, 0.9f, 8f), haft);
+                    ci.DrawRect(new Rect2(at.X - 0.9f, at.Y - 4.6f, 1.9f, 1.6f), steel);   // tip
+                    break;
+                case "Sword":
+                    ci.DrawRect(new Rect2(at.X - 0.5f, at.Y - 4f, 1.2f, 6.5f), steel);      // blade
+                    ci.DrawRect(new Rect2(at.X - 1.6f, at.Y + 1.8f, 3.2f, 0.9f), haft);     // crossguard
+                    break;
+                case "Axe":
+                    ci.DrawRect(new Rect2(at.X - 0.4f, at.Y - 3.5f, 0.9f, 7f), haft);       // haft
+                    ci.DrawRect(new Rect2(at.X + 0.4f, at.Y - 3.5f, 2.2f, 2.6f), steel);    // head
+                    break;
+                case "Club":
+                case "Hammer":
+                    ci.DrawRect(new Rect2(at.X - 0.4f, at.Y - 1.5f, 0.9f, 5f), haft);       // haft
+                    ci.DrawCircle(new Vector2(at.X, at.Y - 2.5f), 1.9f, new Color(0.5f, 0.36f, 0.22f, 0.95f));
+                    break;
+                case "Bow":
+                case "Crossbow":
+                    ci.DrawArc(new Vector2(at.X - 1.4f, at.Y), 3.2f, -1.2f, 1.2f, 8, steel, 0.9f, antialiased: true);
+                    ci.DrawLine(new Vector2(at.X - 1.4f, at.Y - 3f), new Vector2(at.X - 1.4f, at.Y + 3f), cord, 0.6f);
+                    break;
+                case "Sling":
+                case "Atlatl":
+                    ci.DrawLine(new Vector2(at.X - 1.5f, at.Y - 2f), new Vector2(at.X + 1.5f, at.Y + 2f), cord, 0.8f);
+                    ci.DrawCircle(new Vector2(at.X, at.Y + 2f), 1.2f, haft);
+                    break;
+                default:
+                    ci.DrawRect(new Rect2(at.X - 0.5f, at.Y - 2.5f, 1.5f, 5f), steel);
+                    ci.DrawRect(new Rect2(at.X - 1.0f, at.Y + 2.5f, 2.5f, 1f), haft);
+                    break;
+            }
         }
         else if (kind == "Tool")
         {

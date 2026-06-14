@@ -343,13 +343,42 @@ namespace Sporeholm.UI
 
         private void BuildFutureSection()
         {
+            // v0.7.0 (Phase 7) — live combat dev controls (replaced the stubs).
+            _content.AddChild(MakeText("Combat (Phase 7)", 11, HeaderCol));
+            _content.AddChild(MakeBtn("Spawn Wolf (cursor)",      SpawnHostileAtCursor));
+            _content.AddChild(MakeBtn("Spawn Wolf + attack sel.", SpawnHostileAndAttack));
+            _content.AddChild(MakeBtn("Draft / Undraft sel.",
+                () => ForEachSelected(n => Sim?.DevToggleDraft(n), "Toggled draft")));
+
             _content.AddChild(MakeText("Future Systems (stubs)", 11, HeaderCol));
-            _content.AddChild(MakeStubBtn("Trigger raid",       "Phase 7 — Combat / raids"));
             _content.AddChild(MakeStubBtn("Force storm",        "Phase 10 — Weather"));
             _content.AddChild(MakeStubBtn("Spawn trader",       "Phase 11 — Trade caravans"));
             _content.AddChild(MakeStubBtn("Start fire",         "Phase 10 — Fire propagation"));
             _content.AddChild(MakeStubBtn("Cause disease",      "Phase 8 — Health / disease"));
-            _content.AddChild(MakeStubBtn("Spawn hostile mob",  "Phase 7 — Hostile entities"));
+        }
+
+        // v0.7.0 (Phase 7) — spawn a Wolf at the cursor. Being Hostile it
+        // auto-aggros nearby colonists, and armed colonists / Guardians auto-
+        // defend, so this alone produces a live fight.
+        private void SpawnHostileAtCursor()
+        {
+            if (Sim == null) { Log("No sim"); return; }
+            var tile = CursorTile();
+            if (tile == null) { Log("Cursor not on map"); return; }
+            Sim.DevSpawnEntity(tile.Value.tx, tile.Value.ty, Sporeholm.Simulation.Entities.EntityKind.Wolf);
+            Log($"Spawned Wolf at ({tile.Value.tx},{tile.Value.ty})");
+        }
+
+        // Spawn a Wolf and order the selected colonists to attack it (exercises
+        // the player attack-order path).
+        private void SpawnHostileAndAttack()
+        {
+            if (Sim == null) { Log("No sim"); return; }
+            var tile = CursorTile();
+            if (tile == null) { Log("Cursor not on map"); return; }
+            var id = Sim.DevSpawnEntity(tile.Value.tx, tile.Value.ty, Sporeholm.Simulation.Entities.EntityKind.Wolf);
+            if (id == null) { Log("Spawn rejected"); return; }
+            ForEachSelected(n => Sim.RequestAttackEntity(n, id.Value), "Attacking Wolf");
         }
 
         // ── Helpers ─────────────────────────────────────────────────────────────

@@ -142,5 +142,41 @@ namespace Sporeholm.Simulation
             Items.Quality.Legendary  => 1.50f,
             _                        => 1.00f,
         };
+
+        // ── Combat (Phase 7 — v0.7.0) ─────────────────────────────────────
+        // Per the design contract, every combat magic-number that scales with
+        // skill lives here; CombatSystem composes these into the exchange.
+        //
+        // Skill factor feeding the attack ROLL. Mirrors the RimWorld melee/
+        // ranged hit-chance slope: lvl 0 ≈ 0.40, lvl 8 ≈ 0.84, lvl 20 = 1.50.
+        public static float MeleeSkillFactor(int skillLevel) =>
+            0.40f + 0.055f * Mathf.Clamp(skillLevel, 0, 20);
+
+        public static float RangedSkillFactor(int skillLevel) =>
+            0.40f + 0.055f * Mathf.Clamp(skillLevel, 0, 20);
+
+        // Damage multiplier from the wielder's weapon skill ("WielderStrength"
+        // term in the §7.4 formula). lvl 0 = 0.70×, lvl 8 ≈ 1.02×, lvl 20 = 1.50×.
+        public static float MeleeDamageFactor(int skillLevel) =>
+            0.70f + 0.040f * Mathf.Clamp(skillLevel, 0, 20);
+
+        // Evasion (dodge) chance from Athletics. Capped low so combat resolves
+        // rather than whiffing forever. lvl 0 = 2 %, lvl 20 = 26 %.
+        public static float DodgeChance(int athleticsLevel) =>
+            Mathf.Clamp(0.02f + 0.012f * Mathf.Clamp(athleticsLevel, 0, 20), 0f, 0.50f);
+
+        // Final to-hit probability for one swing: weapon accuracy lifted by the
+        // attacker's skill, reduced by the defender's dodge, clamped so neither
+        // perfect misses nor perfect hits dominate.
+        public static float HitChance(int attackerSkillLevel, float weaponAccuracy,
+            float defenderDodge, bool ranged)
+        {
+            float skillFactor = ranged
+                ? RangedSkillFactor(attackerSkillLevel)
+                : MeleeSkillFactor(attackerSkillLevel);
+            // accuracy is the touch-range base; skill nudges it ±, dodge subtracts.
+            float hit = weaponAccuracy * (0.70f + skillFactor * 0.30f) - defenderDodge;
+            return Mathf.Clamp(hit, 0.05f, 0.95f);
+        }
     }
 }

@@ -151,7 +151,8 @@ namespace Sporeholm.Simulation.Items
                 PreferredForTasks = new[]{ TaskType.GatherFood } },   // no weapon stats — baskets aren't combat-viable
             new() { Kind = ItemKind.Tool, SubType = "Focus",  DisplayName = "Sage Staff",    Icon = "🔮", BaseDurability = 80f,  BaseValue = 4.0f, AllowedFamilies = new[]{"Wood","Magic","Stone"},
                 BodyClass = EquipSlotMeta.BodyClass.Hand,
-                PreferredForTasks = new[]{ TaskType.Attune, TaskType.Meditate } },
+                PreferredForTasks = new[]{ TaskType.Attune, TaskType.Meditate },
+                BaseDamage = 11f, BaseAccuracy = 0.65f },   // v0.7.0 — a Sage's staff doubles as a magical weapon (Phase 7)
             new() { Kind = ItemKind.Tool, SubType = "Sickle", DisplayName = "Sickle",        Icon = "🪚", BaseDurability = 100f, BaseValue = 2.5f, AllowedFamilies = new[]{"Wood","Stone","Bone"},
                 BodyClass = EquipSlotMeta.BodyClass.Hand,
                 PreferredForTasks = new[]{ TaskType.ChopWood, TaskType.CutVegetation },

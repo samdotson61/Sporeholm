@@ -589,6 +589,14 @@ namespace Sporeholm.Simulation.Systems
         // disperse instead of looping a new (still-blocked) plan every
         // StuckRePathTicks. 240 ticks @ 60 Hz = 4 in-game seconds at 1×.
         private static long _currentTick = 0;
+        // v0.7.0 (Phase 7) — entity roster for this tick, for combat target
+        // search + pursuit. Sim-thread-only scratch, set at the top of Tick
+        // (mirrors _currentTick / _currentHourOfDay).
+        private static IReadOnlyList<Entities.Entity> _entities =
+            System.Array.Empty<Entities.Entity>();
+        // v0.7.0 — true when any entity this tick is Hostile or actively Hunting,
+        // so the per-shroomp auto-engage scan is skipped entirely in peacetime.
+        private static bool _combatHasHostiles = false;
         private const  long PawnBlockedRepathCooldown = 240;
 
         // Scan the freshly-computed path waypoints for any tile that's
@@ -648,24 +656,31 @@ namespace Sporeholm.Simulation.Systems
             float h = s.ComputeHealthPercent();
             float downAt   = DownThresholdFor(s);
             float standAt  = downAt + StandBackUpHysteresis;
-            if (!s.IsDowned && h < downAt)
+            // v0.7.1 — pain can also knock a colonist unconscious (Pain > 90),
+            // with hysteresis (must drop below 80 to come round) so they don't
+            // flicker awake right at the threshold.
+            float pain = s.ComputePain();
+            if (!s.IsDowned && (h < downAt || pain > 90f))
             {
                 s.IsDowned = true;
                 ThoughtRegistry.Add(s, "Downed");
             }
-            else if (s.IsDowned && h >= standAt)
+            else if (s.IsDowned && h >= standAt && pain < 80f)
             {
                 s.IsDowned = false;
                 ThoughtRegistry.Add(s, "StoodBackUp");
             }
         }
 
-        public static void Tick(IReadOnlyList<Shroomp> shroomps, LocalMap? map,
+        public static void Tick(IReadOnlyList<Shroomp> shroomps,
+            IReadOnlyList<Entities.Entity> entities, LocalMap? map,
             ColonyResources resources, Queue<PlayerOrder>? pendingOrders,
             Random rng, float dtSeconds, long currentTick = 0, int hourOfDay = 12)
         {
             _currentHourOfDay = hourOfDay;
             _currentTick      = currentTick;   // v0.5.82 — pawn-blocked repath cooldown
+            _entities         = entities ?? System.Array.Empty<Entities.Entity>();   // v0.7.0
+            _combatHasHostiles = AnyCombatHostile(_entities);                        // v0.7.0
             // v0.4.14 — batch the region-graph rebuild to once per sim
             // tick. Without this gate every excavation's `MutateTerrain`
             // flipped `_regionsDirty`, and the next shroomp's SelectTask
@@ -824,6 +839,7 @@ namespace Sporeholm.Simulation.Systems
                     s.CurrentTask = null;
                     s.PathWaypoints.Clear();
                     s.PrevSimPos = s.SimPos;
+                    if (s.CombatTargetName == "enemy") s.CombatTargetName = null;   // v0.7.0 — drop ⚔ while downed
                     continue;   // skip the rest of the per-shroomp tick
                 }
 
@@ -840,6 +856,41 @@ namespace Sporeholm.Simulation.Systems
                 // v0.4.57 — post-abandon designation-task cooldown.
                 if (s.DesignationCooldownTicks > 0)
                     s.DesignationCooldownTicks -= tickInterval;
+
+                // v0.7.0 (Phase 7) — combat pass. Tick down the attack cooldown,
+                // then (if a hostile is ordered-targeted or auto-acquired in
+                // range) pursue + strike, or flee if pacifist / badly wounded.
+                // When engaged this owns the shroomp's tick — skip the normal
+                // need/work/idle pipeline below.
+                if (s.AttackCooldownTicks > 0)
+                    s.AttackCooldownTicks -= tickInterval;
+                if (TryHandleCombat(s, map, effectiveDt, rng))
+                    continue;
+
+                // v0.7.1 (Phase 7) — medical pass: a Doctor / Caretaker tends the
+                // wounded in place (consuming medicine if available). Runs after
+                // combat (a doctor under attack defends first), before the normal
+                // work / idle pipeline.
+                if (TryHandleMedical(s, map, shroomps, resources, effectiveDt))
+                    continue;
+
+                // v0.7.1 (Phase 7) — drafted hold. A drafted colonist that isn't
+                // fighting or treating, has no active player order, and isn't in a
+                // critical state just stands its post: set a one-time idle "hold"
+                // and skip the work/equip pipeline (no per-tick churn or tool-drop).
+                if (s.IsDrafted
+                    && !(s.CurrentTask is { Type: TaskType.PlayerOrder })
+                    && s.Nutrition >= 20f && s.Rest >= 15f && s.Safety >= 20f)
+                {
+                    if (!(s.CurrentTask is { Type: TaskType.None }))
+                    {
+                        ReleaseTaskClaim(s, map);
+                        s.CurrentTask = new BehaviorTask(TaskType.None, s.SimPos, 0f);
+                        s.PathWaypoints.Clear();
+                    }
+                    s.PrevSimPos = s.SimPos;
+                    continue;
+                }
 
                 // v0.5.60 — RimWorld-parity per-tick interaction roll.
                 // Fires Chitchat / KindWords / Slight / DeepTalk as ONE-TICK
@@ -1465,6 +1516,361 @@ namespace Sporeholm.Simulation.Systems
             (-0.707107f, -0.707107f),  // -135°
             (-1.000000f,  0.000000f),  // 180°
         };
+
+        // ── v0.7.1 (Phase 7) — Medical pass ───────────────────────────────
+        // A Doctor (or Caretaker) walks to the nearest wounded colonist and tends
+        // their worst wound in place, consuming a Magic Herb Poultice if the
+        // colony has one. Tending marks the wound treated (so HediffSystem heals
+        // it ~6× faster), restores part condition, and clears venom. Self-
+        // contained movement, like the combat pass.
+        private const float TreatRangeTiles       = 1.6f;
+        private const int   TreatWorkTicks        = 120;   // ~2s of tending per wound
+        private const float TreatConditionRestore = 28f;   // base part condition restored per tend (× quality)
+
+        private static bool TryHandleMedical(Shroomp s, LocalMap? map,
+            IReadOnlyList<Shroomp> shroomps, ColonyResources resources, float dt)
+        {
+            if (!s.IsAlive || s.IsDowned || s.IsBeingCarried) return false;
+            if (s.CombatTargetId != null) return false;                       // combat preempts
+            if (!(JobPriorityOn(s, "Doctor") || s.Role == "Caretaker")) return false;
+
+            var patient = FindPatient(s, shroomps, map);
+            if (patient == null)
+            {
+                if (s.CurrentTask is { Type: TaskType.TreatPatient })
+                { s.CurrentTask = null; s.TaskProgressTicks = 0; }
+                return false;
+            }
+
+            if (!(s.CurrentTask is { Type: TaskType.TreatPatient }))
+            {
+                if (s.CurrentTask != null) ReleaseTaskClaim(s, map);
+                s.TaskProgressTicks = 0;
+            }
+            s.CurrentTask = new BehaviorTask(TaskType.TreatPatient, patient.SimPos, 88f,
+                interruptible: true, targetId: patient.Id.ToString());
+
+            float rangePx = TreatRangeTiles * LocalMap.TileSize;
+            if (s.SimPos.DistanceSquaredTo(patient.SimPos) <= rangePx * rangePx)
+            {
+                s.SimTarget = s.SimPos;
+                s.PathWaypoints.Clear();
+                s.PrevSimPos = s.SimPos;
+                if (++s.TaskProgressTicks >= TreatWorkTicks)
+                {
+                    s.TaskProgressTicks = 0;
+                    ApplyTend(s, patient, resources);
+                }
+            }
+            else
+            {
+                CombatStepToward(s, patient.SimPos, map, dt);
+            }
+            return true;
+        }
+
+        private static bool JobPriorityOn(Shroomp s, string cat)
+            => s.WorkPriorities != null && s.WorkPriorities.TryGetValue(cat, out var v) && v != 0;
+
+        private static Shroomp? FindPatient(Shroomp doctor, IReadOnlyList<Shroomp> shroomps, LocalMap? map)
+        {
+            int dx = (int)(doctor.SimPos.X / LocalMap.TileSize);
+            int dy = (int)(doctor.SimPos.Y / LocalMap.TileSize);
+            Shroomp? best = null; float bd = float.MaxValue;
+            for (int i = 0; i < shroomps.Count; i++)
+            {
+                var p = shroomps[i];
+                if (ReferenceEquals(p, doctor) || !p.IsAlive) continue;
+                if (!NeedsTreatment(p)) continue;
+                // Don't lock onto an unreachable patient (across walls / sealed
+                // rooms) — the greedy treat-walk can't path there and would freeze.
+                if (map != null)
+                {
+                    int px = (int)(p.SimPos.X / LocalMap.TileSize);
+                    int py = (int)(p.SimPos.Y / LocalMap.TileSize);
+                    if (!map.IsWorkReachable(dx, dy, px, py)) continue;
+                }
+                float d2 = doctor.SimPos.DistanceSquaredTo(p.SimPos);
+                if (d2 < bd) { bd = d2; best = p; }
+            }
+            return best;
+        }
+
+        private static bool NeedsTreatment(Shroomp p)
+        {
+            if (p.IsDowned) return true;
+            if (p.ComputeHealthPercent() < 60f) return true;
+            for (int i = 0; i < p.Hediffs.Count; i++)
+                if (!p.Hediffs[i].Tended && p.Hediffs[i].Severity > 8f) return true;
+            return false;
+        }
+
+        private static void ApplyTend(Shroomp doctor, Shroomp patient, ColonyResources resources)
+        {
+            // Worst untended wound first (Hediff is a class — mutating sticks).
+            Combat.Hediff? worst = null;
+            for (int i = 0; i < patient.Hediffs.Count; i++)
+            {
+                var h = patient.Hediffs[i];
+                if (h.Tended) continue;
+                if (worst == null || h.Severity > worst.Severity) worst = h;
+            }
+
+            int docHealing = (doctor.Skills != null && doctor.Skills.TryGetValue("Healing", out var hl)) ? hl : 0;
+            // Only spend a poultice when there's an actual wound to dress.
+            bool medicine = worst != null && resources?.Inventory != null
+                && resources.Inventory.ConsumeBySubType(ItemKind.Magic, "MagicHerbPoultice", 1) > 0;
+            float quality = Mathf.Clamp(0.40f + 0.03f * docHealing + (medicine ? 0.40f : 0f), 0.20f, 1.50f);
+
+            if (worst != null)
+            {
+                worst.Tended = true;
+                if (patient.BodyParts.TryGetValue(worst.BodyPart, out var c))
+                    patient.BodyParts[worst.BodyPart] = Mathf.Min(100f, c + TreatConditionRestore * quality);
+            }
+            else
+            {
+                RestoreWorstPart(patient, TreatConditionRestore * quality * 0.5f);
+            }
+            patient.Venom = Mathf.Max(0f, patient.Venom - 30f * quality);   // antivenom
+            patient.RecomputeBleedRate();
+            SkillRegistry.GainXp(doctor, "Healing", 25f);
+        }
+
+        private static void RestoreWorstPart(Shroomp p, float amount)
+        {
+            string? worstPart = null; float worstCond = 100f;
+            foreach (var def in BodyPartRegistry.Template)
+                if (p.BodyParts.TryGetValue(def.Name, out var c) && c < worstCond)
+                { worstCond = c; worstPart = def.Name; }
+            if (worstPart != null) p.BodyParts[worstPart] = Mathf.Min(100f, worstCond + amount);
+        }
+
+        // ── v0.7.0 (Phase 7) — Combat pass ────────────────────────────────
+        // Self-contained: combatants move + strike here, bypassing the normal
+        // task/path/arrival pipeline (which assumes static targets). Returns
+        // true when the shroomp is engaged this tick (caller skips the rest).
+        private const float CombatXpPerSwing = 8f;
+
+        private static bool TryHandleCombat(Shroomp s, LocalMap? map, float dt, Random rng)
+        {
+            bool engaged = ResolveCombatAndAct(s, map, dt, rng);
+            if (!engaged)
+            {
+                // Don't leave a stale combat display-task behind when disengaging.
+                if (s.CurrentTask is { } ct && (ct.Type == TaskType.Attack || ct.Type == TaskType.Flee))
+                    s.CurrentTask = null;
+                if (s.CombatTargetName == "enemy") s.CombatTargetName = null;
+                s.CombatPursuitTicks = 0;
+            }
+            return engaged;
+        }
+
+        private static bool ResolveCombatAndAct(Shroomp s, LocalMap? map, float dt, Random rng)
+        {
+            // 1. Explicit (player-ordered) target takes priority.
+            if (s.CombatTargetId.HasValue)
+            {
+                var ordered = FindCombatEntity(s.CombatTargetId.Value);
+                if (ordered == null)
+                {
+                    s.CombatTargetId = null;            // target died / despawned
+                    s.CombatPursuitTicks = 0;
+                }
+                else if (s.IsPacifist)
+                {
+                    s.CombatTargetId = null;            // pacifists never hold an attack order
+                    s.CombatPursuitTicks = 0;
+                    return DoFlee(s, ordered.SimPos, map, dt);
+                }
+                else if (s.CombatPursuitTicks > Combat.CombatTuning.MaxPursuitTicks)
+                {
+                    // gave up — couldn't close on a faster / fleeing target
+                    s.CombatTargetId = null;
+                    s.CombatPursuitTicks = 0;
+                }
+                else if (s.HealthFraction < Combat.CombatTuning.FleeHealthFraction)
+                {
+                    // Wounded: break off and flee, but KEEP the order so the
+                    // colonist re-engages once healed above the threshold.
+                    return DoFlee(s, ordered.SimPos, map, dt);
+                }
+                else
+                {
+                    return DoAttack(s, ordered, map, dt, rng);
+                }
+            }
+
+            // 2. Auto-defense (no standing order).
+            bool hasWeapon = s.EquippedWeapon is { } ew
+                && ew.State != Sporeholm.Simulation.Items.ItemState.Broken;
+
+            if (s.IsPacifist || (!hasWeapon && !s.IsDrafted))
+            {
+                // Pacifists, and unarmed colonists who AREN'T drafted, flee a
+                // creature actively hunting them rather than trade blows. A
+                // drafted colonist holds the line with fists if unarmed.
+                var threat = NearestHuntingHostile(s, Combat.CombatTuning.SelfDefenseEngageTiles);
+                return threat != null && DoFlee(s, threat.SimPos, map, dt);
+            }
+
+            // Armed (or drafted) colonist — engage nearby threats. Guardians and
+            // the drafted range further. Skip the scan when no threats exist.
+            if (_combatHasHostiles)
+            {
+                float tiles = (s.Role == "Guardian" || s.IsDrafted)
+                    ? Combat.CombatTuning.GuardianEngageTiles
+                    : Combat.CombatTuning.SelfDefenseEngageTiles;
+                var foe = NearestHostile(s, tiles);
+                if (foe != null)
+                {
+                    if (s.HealthFraction < Combat.CombatTuning.FleeHealthFraction)
+                        return DoFlee(s, foe.SimPos, map, dt);
+                    return DoAttack(s, foe, map, dt, rng);
+                }
+            }
+            return false;
+        }
+
+        private static bool DoAttack(Shroomp s, Entities.Entity target, LocalMap? map, float dt, Random rng)
+        {
+            EnterCombatTask(s, map, TaskType.Attack, target);
+            s.CombatTargetName = "enemy";   // ⚔ sword icon
+
+            var profile = s.GetAttackProfile();
+            float rangePx = profile.RangeTiles * LocalMap.TileSize;
+            if (s.SimPos.DistanceSquaredTo(target.SimPos) <= rangePx * rangePx)
+            {
+                s.CombatPursuitTicks = 0;   // closed on the target — reset the leash
+                s.SimTarget = s.SimPos;
+                s.PathWaypoints.Clear();
+                s.PrevSimPos = s.SimPos;
+                if (Combat.CombatSystem.TryAttack(s, target))
+                {
+                    EntitySystem.ProvokeEntity(target, s.Id);
+                    bool ranged = Combat.CombatProfiles.IsRanged(profile.Type);
+                    SkillRegistry.GainXp(s, ranged ? "Ranged" : "Melee", CombatXpPerSwing);
+                }
+            }
+            else
+            {
+                s.CombatPursuitTicks++;     // still closing — counts toward the leash
+                CombatStepToward(s, target.SimPos, map, dt);
+            }
+            return true;
+        }
+
+        private static bool DoFlee(Shroomp s, Vector2 threatPos, LocalMap? map, float dt)
+        {
+            EnterCombatTask(s, map, TaskType.Flee, null);
+            s.CombatTargetName = null;
+            Vector2 dir = s.SimPos - threatPos;
+            if (dir.LengthSquared() < 0.01f) dir = new Vector2(1f, 0f);
+            dir = dir.Normalized();
+            CombatStepToward(s, s.SimPos + dir * (LocalMap.TileSize * 4f), map, dt);
+            return true;
+        }
+
+        // Set a combat display-task (so the roster shows Fighting / Fleeing),
+        // releasing any prior work claim once on entry. Refreshed each tick.
+        private static void EnterCombatTask(Shroomp s, LocalMap? map, TaskType type, Entities.Entity? target)
+        {
+            bool alreadyCombat = s.CurrentTask is { } ct
+                && (ct.Type == TaskType.Attack || ct.Type == TaskType.Flee);
+            if (!alreadyCombat)
+            {
+                if (s.CurrentTask != null) ReleaseTaskClaim(s, map);
+                s.IdleLingerTicks = 0;
+            }
+            Vector2 tpos = target != null ? target.SimPos : s.SimPos;
+            s.CurrentTask = new BehaviorTask(type, tpos, 95f, interruptible: true,
+                targetId: target?.Id.ToString());
+        }
+
+        // Direct steering toward a pixel target at the colonist's move speed
+        // (folding in injury slowdown), halting at impassable tiles. Mirrors the
+        // entity stepper; used only by the combat pass.
+        private static void CombatStepToward(Shroomp s, Vector2 targetPos, LocalMap? map, float dt)
+        {
+            s.SimTarget = targetPos;
+            s.PathWaypoints.Clear();
+            float speed = s.SimSpeed * Math.Max(0.15f, s.ComputeMovingCapacity());
+            float step  = speed * dt;
+            Vector2 to  = targetPos - s.SimPos;
+            float dist  = to.Length();
+            if (dist <= 0.5f) { s.PrevSimPos = s.SimPos; return; }
+            Vector2 dir = to / dist;
+            float stepLen = Math.Min(step, dist);
+            Vector2 newPos = s.SimPos + dir * stepLen;
+            if (map != null)
+            {
+                int tx = (int)(newPos.X / LocalMap.TileSize);
+                int ty = (int)(newPos.Y / LocalMap.TileSize);
+                if (!map.InBounds(tx, ty) || !map.IsPassable(tx, ty))
+                {
+                    s.PrevSimPos = s.SimPos;
+                    return;   // blocked — hold position (open-field combat assumption)
+                }
+            }
+            s.PrevSimPos = s.SimPos;
+            s.SimPos = newPos;
+        }
+
+        private static Entities.Entity? FindCombatEntity(Guid id)
+        {
+            for (int i = 0; i < _entities.Count; i++)
+                if (_entities[i].Id == id)
+                    return _entities[i].IsAlive ? _entities[i] : null;
+            return null;
+        }
+
+        // Nearest threat within `tiles`: a Hostile-disposition creature OR any
+        // creature (incl. a provoked Neutral) actively hunting THIS colonist.
+        private static Entities.Entity? NearestHostile(Shroomp s, float tiles)
+        {
+            float r = tiles * LocalMap.TileSize, r2 = r * r;
+            Entities.Entity? best = null; float bd = float.MaxValue;
+            for (int i = 0; i < _entities.Count; i++)
+            {
+                var e = _entities[i];
+                if (!e.IsAlive) continue;
+                bool threat = (e.State == Entities.EntityState.Hunt && e.TargetShroompId == s.Id)
+                    || Entities.EntityRegistry.Get(e.Kind).Disposition == Entities.Disposition.Hostile;
+                if (!threat) continue;
+                float d2 = s.SimPos.DistanceSquaredTo(e.SimPos);
+                if (d2 <= r2 && d2 < bd) { bd = d2; best = e; }
+            }
+            return best;
+        }
+
+        // Cheap once-per-tick scan: are there any threats on the map at all?
+        private static bool AnyCombatHostile(IReadOnlyList<Entities.Entity> es)
+        {
+            for (int i = 0; i < es.Count; i++)
+            {
+                var e = es[i];
+                if (!e.IsAlive) continue;
+                if (e.State == Entities.EntityState.Hunt) return true;
+                if (Entities.EntityRegistry.Get(e.Kind).Disposition == Entities.Disposition.Hostile) return true;
+            }
+            return false;
+        }
+
+        // Nearest live entity actively Hunting (any disposition — a provoked
+        // neutral counts) within `tiles`. Used for flee decisions.
+        private static Entities.Entity? NearestHuntingHostile(Shroomp s, float tiles)
+        {
+            float r = tiles * LocalMap.TileSize, r2 = r * r;
+            Entities.Entity? best = null; float bd = float.MaxValue;
+            for (int i = 0; i < _entities.Count; i++)
+            {
+                var e = _entities[i];
+                if (!e.IsAlive || e.State != Entities.EntityState.Hunt) continue;
+                float d2 = s.SimPos.DistanceSquaredTo(e.SimPos);
+                if (d2 <= r2 && d2 < bd) { bd = d2; best = e; }
+            }
+            return best;
+        }
 
         private static bool MoveOneTick(Shroomp s, LocalMap? map, float dtSeconds, Random rng,
             int tickInterval = 1)
@@ -2477,6 +2883,10 @@ namespace Sporeholm.Simulation.Systems
 
             if (s.Nutrition < eatThreshold)   return MakeEat(s, resources, priority: 70f, map: map);
             if (s.Rest      < sleepThreshold) return MakeSleep(s, priority: 65f, map: map);
+
+            // v0.7.1 (Phase 7) — drafted-colonist hold is handled in the
+            // per-shroomp loop (after the combat / medical passes), not here, so
+            // it doesn't re-run task selection + auto-equip every tick.
 
             // ── Tier 2: role tasks ──────────────────────────────────────────
             // v0.3.21 — player-issued designations take precedence over the

@@ -48,6 +48,13 @@ namespace Sporeholm.UI
         // helper as the shroomp / tile-properties selection indicators.
         private System.Guid? _selectedId;
 
+        // v0.7.0 (Phase 7) — per-entity combat animation timers (1 → 0). Lunge =
+        // a jab toward the target on a swing; Hit = knockback recoil + red flash
+        // when struck. Keyed by entity Guid; entries removed when fully decayed.
+        private struct EntAnim { public float LungeT, HitT, FlashT; public Vector2 LungeDir, KnockDir; }
+        private readonly Dictionary<System.Guid, EntAnim> _anims = new();
+        private readonly List<System.Guid> _animKeys = new();   // reusable decay buffer
+
         public override void _Ready()
         {
             TextureFilter = TextureFilterEnum.Nearest;
@@ -93,7 +100,15 @@ namespace Sporeholm.UI
         public void UpdateFromSnapshot(IReadOnlyList<EntitySnapshot> entities)
         {
             _lastSnap = entities;   // v0.6.2 — cache for hit-testing
-            // Per-kind counters
+            RenderInstances(entities);
+        }
+
+        // v0.6.0 / v0.7.0 — write per-instance transforms + tints. Called on each
+        // snapshot push, and again every frame (from _Process) while a combat
+        // animation is active so lunge / recoil / flash play out smoothly
+        // between snapshots.
+        private void RenderInstances(IReadOnlyList<EntitySnapshot> entities)
+        {
             var counts = new Dictionary<EntityKind, int>(EntityRegistry.All.Count);
             foreach (var def in EntityRegistry.All) counts[def.Kind] = 0;
 
@@ -104,27 +119,67 @@ namespace Sporeholm.UI
                 int idx = counts[e.Kind];
                 if (idx >= MaxPerKind) continue;
                 var origin = e.SimPos;
-                // Fading the alpha on wounded entities gives a quick
-                // visual hint that something is hurt without an HP bar.
+                // Fading the alpha on wounded entities gives a quick visual hint
+                // that something is hurt without an HP bar.
                 float healthFrac = e.MaxHealth > 0f ? Mathf.Clamp(e.Health / e.MaxHealth, 0f, 1f) : 1f;
                 float alpha      = 0.40f + 0.60f * healthFrac;
-                // Tamed entities get a soft warm tint so the player can
-                // tell their pets apart from wild specimens of the same
-                // species at a glance. Phase 8 husbandry adds the same
-                // marker in the Animals tab.
+                // Tamed entities get a soft warm tint so the player can tell
+                // their pets apart from wild specimens at a glance.
                 Color tint = e.IsTamed
                     ? new Color(1.10f, 1.00f, 0.85f, alpha)
                     : new Color(1.00f, 1.00f, 1.00f, alpha);
+                // v0.7.0 — combat animation: lunge / knockback offset + hit flash.
+                if (_anims.TryGetValue(e.Id, out var a))
+                {
+                    if (a.LungeT > 0f) origin += a.LungeDir * (5f * Mathf.Sin(a.LungeT * Mathf.Pi));
+                    if (a.HitT   > 0f) origin += a.KnockDir * (4f * a.HitT);
+                    if (a.FlashT > 0f)
+                        tint = new Color(
+                            Mathf.Min(2f, tint.R + 0.9f * a.FlashT),
+                            tint.G * (1f - 0.4f * a.FlashT),
+                            tint.B * (1f - 0.4f * a.FlashT),
+                            tint.A);
+                }
                 mmi.Multimesh.SetInstanceTransform2D(idx, new Transform2D(0f, origin));
                 mmi.Multimesh.SetInstanceColor(idx, tint);
                 counts[e.Kind] = idx + 1;
             }
 
-            // Publish visible counts
             foreach (var def in EntityRegistry.All)
-            {
                 _mmis[def.Kind].Multimesh.VisibleInstanceCount = counts[def.Kind];
+        }
+
+        // v0.7.0 (Phase 7) — combat animation triggers (GameController calls
+        // these as it drains combat events). Keyed by entity Guid.
+        public void TriggerLunge(System.Guid id, Vector2 towardPos)
+        {
+            var pos = PosOf(id);
+            var a = _anims.TryGetValue(id, out var ex) ? ex : default;
+            if (pos != null)
+            {
+                var d = towardPos - pos.Value;
+                if (d.LengthSquared() > 0.01f) { a.LungeDir = d.Normalized(); a.LungeT = 1f; }
             }
+            _anims[id] = a;
+        }
+
+        public void TriggerHit(System.Guid id, Vector2 fromPos)
+        {
+            var pos = PosOf(id);
+            var a = _anims.TryGetValue(id, out var ex) ? ex : default;
+            Vector2 d = pos != null ? pos.Value - fromPos : new Vector2(0f, -1f);
+            a.KnockDir = d.LengthSquared() > 0.01f ? d.Normalized() : new Vector2(0f, -1f);
+            a.HitT   = 1f;
+            a.FlashT = 1f;
+            _anims[id] = a;
+        }
+
+        private Vector2? PosOf(System.Guid id)
+        {
+            if (_lastSnap == null) return null;
+            for (int i = 0; i < _lastSnap.Count; i++)
+                if (_lastSnap[i].Id == id) return _lastSnap[i].SimPos;
+            return null;
         }
 
         // v0.6.2 — hit-test for click selection. Returns the EntitySnapshot
@@ -185,6 +240,25 @@ namespace Sporeholm.UI
             // the entity wanders. Repaint each frame while a selection is
             // active so the brackets track the entity's motion.
             if (_selectedId != null) QueueRedraw();
+
+            // v0.7.0 — advance combat animations + re-apply instance transforms
+            // so lunge / recoil / flash play out smoothly between snapshots.
+            if (_anims.Count > 0)
+            {
+                float ad = (float)delta * 6f;
+                _animKeys.Clear();
+                _animKeys.AddRange(_anims.Keys);
+                foreach (var id in _animKeys)
+                {
+                    var a = _anims[id];
+                    a.LungeT = Mathf.Max(0f, a.LungeT - ad);
+                    a.HitT   = Mathf.Max(0f, a.HitT   - ad);
+                    a.FlashT = Mathf.Max(0f, a.FlashT - ad);
+                    if (a.LungeT <= 0f && a.HitT <= 0f && a.FlashT <= 0f) _anims.Remove(id);
+                    else _anims[id] = a;
+                }
+                if (_lastSnap != null) RenderInstances(_lastSnap);
+            }
         }
 
         public override void _Draw()

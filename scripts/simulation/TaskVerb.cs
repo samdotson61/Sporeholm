@@ -32,6 +32,10 @@ namespace Sporeholm.Simulation
             TaskType.Demolish       => "Demolishing",   // v0.6.2 — demolish-as-task
             TaskType.Research       => "Researching",
             TaskType.Guard          => "Guarding",
+            // v0.7.0 — combat
+            TaskType.Attack         => "Fighting",
+            TaskType.Flee           => "Fleeing",
+            TaskType.TreatPatient   => "Treating the wounded",
             // Tier 3 — idle (v0.3.43 rewrite)
             TaskType.Wander         => "Wandering",
             TaskType.Loiter         => "Loitering",

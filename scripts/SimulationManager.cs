@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Sporeholm.Simulation;
 using Sporeholm.Simulation.Systems;
+using Sporeholm.Simulation.Combat;
 using Sporeholm.World;
 
 namespace Sporeholm
@@ -473,6 +474,36 @@ namespace Sporeholm
 		public void ClearCombatOrder(string shroompName)
 		{
 			_core.QueueCombatOrder(shroompName, null);
+		}
+
+		// v0.7.0 (Phase 7) — order a colonist to attack a specific wild entity.
+		// The sim thread drains this into Shroomp.CombatTargetId; BehaviorSystem
+		// pursues + strikes the target through CombatSystem.
+		public void RequestAttackEntity(string shroompName, System.Guid targetEntityId) =>
+			_core.QueueAttackEntity(shroompName, targetEntityId);
+
+		// Cancel a colonist's current attack order (clears target + sword icon).
+		public void ClearAttackOrder(string shroompName)
+		{
+			_core.PostMainThreadCommand(() =>
+			{
+				foreach (var s in _core.AllShroomps())
+					if (s.Name == shroompName) { s.CombatTargetId = null; s.CombatTargetName = null; break; }
+			});
+		}
+
+		// v0.7.0 (Phase 7) — drain discrete combat events for the UI. Called once
+		// per frame from GameController.OnTick; each becomes a MessageLog line +
+		// a CombatFeedbackOverlay floater / blood decal.
+		private static readonly System.Collections.Generic.List<CombatEventData> _emptyCombatEvents = new();
+		public System.Collections.Generic.List<CombatEventData> DrainCombatEvents()
+		{
+			// Common case is zero events — return a shared empty list to avoid a
+			// per-frame allocation. Callers only iterate the result, never mutate.
+			if (_core.PendingCombatEvents.IsEmpty) return _emptyCombatEvents;
+			var list = new System.Collections.Generic.List<CombatEventData>();
+			while (_core.PendingCombatEvents.TryDequeue(out var e)) list.Add(e);
+			return list;
 		}
 
 		// v0.3.39 (O-H.2) — main-thread → sim-thread camera-follow push.
@@ -1018,6 +1049,8 @@ namespace Sporeholm
 					Inventory   = invList,
 					Preferences = SnapshotPreferences(s.Preferences),
 					Thoughts    = SnapshotThoughts(s.Thoughts),
+					Hediffs     = SnapshotHediffs(s.Hediffs),   // v0.7.1
+					Venom       = s.Venom,                      // v0.7.1
 				};
 			}
 			return result;
@@ -1031,6 +1064,9 @@ namespace Sporeholm
 			public string                                  Handedness   = "Right";
 			public System.Collections.Generic.List<SaveManager.EquipmentSaveData>? Equipment    = null;
 			public SaveManager.ItemSaveData?               CarriedItem  = null;
+				// v0.7.1 — Phase 7 wounds + active venom load.
+				public System.Collections.Generic.List<SaveManager.HediffSaveData>? Hediffs = null;
+				public float Venom = 0f;
 			// v0.5.73 — full Shroomp.Inventory snapshot. Pre-v0.5.73 only
 			// the topmost stack (CarriedItem getter) was saved; a hauler
 			// with multiple stacks lost the rest. Loaders read Inventory
@@ -1046,6 +1082,16 @@ namespace Sporeholm
 		// sidecar so reload restores the dead shroomp's name / cause /
 		// personality on the obituary line. Non-corpse items leave the
 		// `Corpse` init property at its null default.
+		private static System.Collections.Generic.List<SaveManager.HediffSaveData>? SnapshotHediffs(
+			System.Collections.Generic.List<Sporeholm.Simulation.Combat.Hediff> hediffs)
+		{
+			if (hediffs == null || hediffs.Count == 0) return null;
+			var list = new System.Collections.Generic.List<SaveManager.HediffSaveData>(hediffs.Count);
+			foreach (var h in hediffs)
+				list.Add(new SaveManager.HediffSaveData(h.BodyPart, h.Type.ToString(), h.Severity, h.Tended));
+			return list;
+		}
+
 		private static SaveManager.ItemSaveData SnapshotItem(
 			Sporeholm.Simulation.Items.Item it, long globalTick)
 		{
@@ -1603,6 +1649,16 @@ namespace Sporeholm
 				// init means old saves deserialise to 0 cleanly).
 				s.BloodLoss = sd.BloodLoss;
 
+				// v0.7.1 — restore wounds + venom (null / 0 on pre-v0.7.1 saves).
+				if (sd.Hediffs != null)
+				{
+					s.Hediffs = new System.Collections.Generic.List<Sporeholm.Simulation.Combat.Hediff>(sd.Hediffs.Count);
+					foreach (var hd in sd.Hediffs)
+						if (System.Enum.TryParse<Sporeholm.Simulation.Combat.CombatWound>(hd.Type, out var wt))
+							s.Hediffs.Add(new Sporeholm.Simulation.Combat.Hediff(hd.BodyPart, wt, hd.Severity) { Tended = hd.Tended });
+				}
+				s.Venom = sd.Venom;
+
 				// v0.3.35 — restore SimPos / SimTarget / SimSpeed from the
 				// save so the shroomp re-enters the sim at its saved tile, not
 				// at Vector2.Zero (which SeedSimPositions would then clobber
@@ -2005,6 +2061,34 @@ namespace Sporeholm
 			fresh.SimSpeed    = 1.2f;
 			_core.AddShroomp(fresh);
 			return true;
+		}
+
+		// v0.7.0 (Phase 7) — spawn a wild entity at a tile (dev / playtest).
+		// Hostile kinds auto-aggro nearby colonists via EntitySystem, so this
+		// doubles as the "spawn a threat" control. Mirrors DevSpawnShroomp.
+		public System.Guid? DevSpawnEntity(int tx, int ty, Sporeholm.Simulation.Entities.EntityKind kind)
+		{
+			float ts = Sporeholm.World.LocalMap.TileSize;
+			var pixel = new Vector2(tx * ts + ts / 2f, ty * ts + ts / 2f);
+			// Create on the main thread to get the Guid synchronously, but ADD it
+			// on the sim thread (PendingCommands is drained at the top of Tick,
+			// before the entity working-set is snapshotted) so the spawn isn't
+			// lost to the tick's entity write-back. Mirrors the threading model
+			// every other main-thread sim mutation follows.
+			var e = Sporeholm.Simulation.Entities.Entity.SpawnAt(kind, pixel, _rng);
+			_core.PostMainThreadCommand(() => _core.AddEntity(e));
+			return e.Id;
+		}
+
+		// v0.7.1 (Phase 7) — toggle a colonist's drafted (combat-ready hold)
+		// state. Direct single-field write (race-tolerant dev/UI action, like
+		// the other Dev* need writes). Returns the new drafted state.
+		public bool DevToggleDraft(string name)
+		{
+			var s = DevFindShroompByName(name);
+			if (s == null) return false;
+			s.IsDrafted = !s.IsDrafted;
+			return s.IsDrafted;
 		}
 
 		// Toggle force-pause from dev panel — wraps the existing Paused field

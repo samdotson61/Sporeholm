@@ -25,7 +25,7 @@ namespace Sporeholm.Simulation.Entities
         Dead    = 5,
     }
 
-    public sealed class Entity
+    public sealed class Entity : Combat.ICombatant
     {
         // ── identity ──────────────────────────────────────────────────
         public Guid       Id   { get; init; } = Guid.NewGuid();
@@ -123,5 +123,39 @@ namespace Sporeholm.Simulation.Entities
         }
 
         public bool IsAlive => Health > 0f && State != EntityState.Dead;
+
+        // ── v0.7.0 (Phase 7) — ICombatant implementation ──────────────────
+        // Wild entities are the single-HP combatant: damage drains Health and
+        // the chosen body part is flavour for the narrative only. Death
+        // (Health <= 0) is pruned next tick by SimulationCore, which fires
+        // PendingEntityRemovals. Provocation / flee-on-hit reactions live in
+        // EntitySystem (the AI layer), not here.
+        public Guid CombatId => Id;
+        public string CombatName => EntityRegistry.Get(Kind).DisplayName;
+        public Combat.CombatTeam Team => Combat.CombatTeam.Wildlife;
+        public Vector2 Pos => SimPos;
+        public bool CanAct => IsAlive;                  // entities don't go "downed"
+        public float HealthFraction => MaxHealth > 0f ? Health / MaxHealth : 1f;
+        public float Pain => 0f;                        // entities don't model pain
+        public uint BloodRgba => Combat.CombatProfiles.BloodRgba(Kind);
+
+        public Combat.CombatProfile GetAttackProfile() =>
+            Combat.CombatProfiles.NaturalWeapon(Kind, AttackPower);
+
+        // Animals fight at a flat competence; the weapon profile + per-species
+        // AttackPower carry the difference between a Mouse and a Wolf.
+        public int AttackSkill(bool ranged) => 6;
+
+        public float DodgeChance() => Mathf.Clamp(0.04f + Speed * 0.001f, 0f, 0.20f);
+        public float BlockChance() => 0f;
+
+        public string PickHitPart(Random rng) => Combat.CombatProfiles.PickEntityPart(Kind, rng);
+        public float ArmorFractionAt(string part) => Combat.CombatProfiles.NaturalArmor(Kind);
+
+        public bool ApplyDamage(string part, float amount, Combat.CombatWound wound, long globalTick)
+        {
+            Health = Math.Max(0f, Health - amount);
+            return Health <= 0f;
+        }
     }
 }

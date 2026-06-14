@@ -7,6 +7,81 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.7.1] — 2026-06-14 — Phase 7 combat depth: wounds, pain, healers, armor, draft
+
+Builds on the v0.7.0 combat foundation with the medical + tactical layers: persistent wounds, pain, venom, a healer/medicine loop, material-aware armor, draftable colonists, and per-weapon held-item sprites.
+
+### Wounds (Hediff system)
+
+New `scripts/simulation/combat/Hediff.cs` + `systems/HediffSystem.cs`. Each combat hit now records a persistent wound on the struck body part (Bruise / Cut / Fracture / Puncture / Mangle / Sever / Concussion, classified by weapon type × damage). Wounds carry a Severity and contribute Pain; HediffSystem heals them each in-game second (tended wounds ~6× faster), restoring the underlying part condition as they close, and prunes them at zero. Destroyed (severed / 0-condition) parts do not regenerate, matching the existing natural-heal rule. Wounds + their tended state round-trip through save/load.
+
+### Pain + venom
+
+`Shroomp.ComputePain()` sums active-wound pain (0–100). Pain > 60 spoils a combatant's attack rolls; Pain > 90 knocks them unconscious (with hysteresis), extending the downed state beyond pure health loss. Venomous attackers (Snake fangs, Wasp stinger) inject a venom load that thins the blood (adds to BleedRate) and decays over time; tending clears it. `ICombatant.Pain` is implemented on both Shroomp and Entity (entities don't model pain). Pain + venom surface on the shroomp snapshot.
+
+### Healer + medicine loop
+
+New `TaskType.TreatPatient` + a BehaviorSystem medical pass: a Doctor (Doctor work priority) or Caretaker walks to the nearest wounded colonist — downed, low-health, or carrying an untended wound — and tends the worst wound in place, consuming a Magic Herb Poultice if the colony has one (`Inventory.ConsumeBySubType`). Tend quality scales with the healer's Healing skill + medicine; tending marks the wound treated (so it heals fast and stops hurting), restores part condition, clears venom, and grants Healing XP. The medical pass skips unreachable patients (no cross-wall lock-up) and runs after the combat pass (a healer under attack defends first).
+
+### Layered armor
+
+`Shroomp.ArmorFractionAt` is now material-aware — hard plate (Stone / Bone) shields far better than hide or cloth, scaled by the apparel's condition + quality (cap 55%). CombatSystem mediates armor by weapon type: blunt transmits force through plate (armor less effective), edged is well-stopped, piercing / ranged find some gaps, magical bypasses entirely.
+
+### Draft (combat orders)
+
+New `Shroomp.IsDrafted`. A drafted colonist holds its post — no autonomous work or idle wandering — while still honoring critical needs and player move-orders, and stands combat-ready: it auto-engages threats at the wider Guardian range and will fight even unarmed. The drafted hold runs in the behavior loop without re-running task selection each tick. Toggle via the dev panel ("Draft / Undraft sel."). Unarmed / wrestling combat already resolves through the fists profile.
+
+### Held-weapon sprites
+
+`ShroompColonyView` now draws a per-weapon-type glyph in a wielder's hand — spear, sword, axe, club, bow, sling — replacing the generic grey bar.
+
+### Hardening
+
+A review pass fixed: severed limbs no longer regrow through the wound-heal; healers no longer lock onto unreachable patients; drafted colonists no longer churn task-selection or drop held tools each tick; medicine isn't spent when there's no wound to dress. Build clean, 0 warnings / 0 errors.
+
+### Still deferred (v0.7.x)
+
+Carry-a-downed-colonist-to-a-bed rescue (treatment is currently in-place), combat training buildings (Sparring Yard / Training Dummy), and full apparel sprite layers remain follow-ups on this foundation.
+
+## [0.7.0] — 2026-06-14 — Phase 7: Combat System (foundation slice)
+
+The first combat slice. Shroomps and wild entities now fight through one shared, body-part-driven engine: colonists defend the colony and can be ordered to attack, hostiles wound and can kill, and every exchange is shown with damage numbers, blood, sprite animations, and a combat log. Active phase advances to 7 (version `bb` 6 → 7).
+
+### Shared combat engine
+
+New `scripts/simulation/combat/` package:
+- `ICombatant` — one interface implemented by BOTH `Shroomp` and `Entity`, so a single code path resolves shroomp→entity, entity→shroomp (and, later, shroomp→shroomp) fights.
+- `CombatSystem.ResolveExchange` — the shared damage helper. Each attempted swing runs a nine-stage exchange: range check → hit roll (weapon accuracy lifted by attacker skill, reduced by defender dodge) → shield block → critical roll → body-part selection → armor mitigation → damage → wound classification → apply + death + a narrative/feedback event. Runs on the sim thread; a per-tick `CombatContext` carries the shared RNG, the event sink, and the canonical kill delegate.
+- `CombatProfiles` — maps weapons to damage types and supplies each species' natural weapon, natural-hide armor, blood colour, and flavour hit-parts. `CombatNarrator` — template combat-log sentences. All tunable numbers live in `CombatTuning`; all combat skill curves live in `SkillCurve` (new MeleeSkillFactor / RangedSkillFactor / MeleeDamageFactor / DodgeChance / HitChance).
+
+### Damage routes through the real body model
+
+Shroomp combat reuses the existing systems end-to-end: a hit reduces a specific `BodyParts` entry (weighted hit-location draw — outer/larger parts likelier, organs rarely struck directly), which the live bleed / moving-capacity / vital-organ-death / downed pipelines already consume. Combat kills route through `KillShroomp` with the previously-unused `CauseOfDeath.Combat`. Entities use their single Health pool; death prunes them and fires the existing removal event. Weapon damage folds in material, quality, and condition; held tools (Knife / Sickle / Pick) and the Sage Staff (now a magical weapon) act as improvised/real weapons.
+
+### Both directions wired
+
+- Replaced the v0.6.0 `EntitySystem.ApplyEntityAttack` stub — it used pre-rename body-part names ("Torso"/"Head") that no longer exist, so roughly half of all hostile hits silently dealt zero damage. Entity attacks now route through `CombatSystem`.
+- Added the missing shroomp→entity path: a per-shroomp combat pass in `BehaviorSystem` (new `TaskType.Attack` / `Flee`) that pursues + strikes an ordered or auto-acquired target, or flees when pacifist / badly wounded. Auto-defense engages nearby threats (Guardians range further); a pursuit leash stops a colonist chasing a faster fleeing target forever; a wounded ordered attacker breaks off but keeps the order and re-engages once healed.
+- `EntitySystem.ProvokeEntity`: a struck Friendly (or flee-type, e.g. Magic Wisp) flees; a struck Neutral retaliates and is then re-acquired by colonist auto-defense.
+
+### Combat reads — feedback + animations
+
+- New `CombatFeedbackOverlay`: floating damage numbers (`-N`, bold crit, `BLOCK` / `MISS` / `DODGE`) and species-coloured blood spatter (shroomps bleed blue; mushroom-kin fauna bleed spore-teal; mammals red; insects green; the Magic Wisp violet). Each blow also posts to the Combat message log.
+- Sprite animations for every combat action, on both colony renderers: the attacker lunges toward its target on a swing; the defender recoils with a knockback + red flash when a blow lands; pursuit and flee are carried by movement. The existing bleed-drip, downed-pose, and ⚔ target glyph remain.
+
+### Player + dev controls
+
+- Right-click a creature with colonists selected to order an attack (works for both defense and hunting). Pacifist / wounded colonists flee instead.
+- The dev panel's Phase 7 stubs are replaced with live "Spawn Wolf (cursor)" and "Spawn Wolf + attack sel." controls.
+
+### Hardening
+
+A multi-dimension review pass drove fixes: the dev entity-spawn now routes through the sim-thread command queue (closing a lost-update race against the per-tick entity write-back); ordered attacks survive a transient health dip; provoked neutrals are re-acquired by auto-defense; the peacetime auto-engage scan is skipped when no threats are present; per-frame allocations in the event drain + combat context were removed; the blood overlay only redraws while something is animating. Build clean, 0 warnings / 0 errors.
+
+### Deferred to v0.7.x
+
+Full per-part wound (Hediff) objects, layered armor mitigation, wrestling/grapple moves, training buildings, healer/rescue of downed colonists, weapon/apparel sprites, and patrol/retreat/hold orders remain for follow-up sub-patches on this foundation.
+
 ## [0.6.3] — 2026-05-21 — Doc-cleanup pass: 3rd-party + 3rd-person + changelog framing strip; author attribution restored
 
 A documentation-only patch with no code changes. Three coordinated cleanups across `changelog.md`, `README.md`, and `SporeDes/Sporeholm_Roadmap_2026.md`, plus a new memory rule capturing the standard for future doc edits.

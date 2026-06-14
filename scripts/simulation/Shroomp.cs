@@ -20,7 +20,7 @@ namespace Sporeholm.Simulation
 
 	// Core shroomp data model. Lives exclusively on the simulation thread.
 	// The main thread only reads from ShroompSnapshot, never from this class directly.
-	public class Shroomp
+	public class Shroomp : Combat.ICombatant
 	{
 		public Guid Id { get; } = Guid.NewGuid();
 		public string Name { get; set; } = string.Empty;
@@ -207,6 +207,7 @@ namespace Sporeholm.Simulation
 				float partWeight = def.Vital ? 0.0012f : 0.0006f;
 				rate += severity * partWeight;
 			}
+			if (Venom > 0f) rate += Venom * 0.0006f;   // v0.7.1 — venom thins the blood
 			BleedRate = rate;
 		}
 
@@ -563,6 +564,12 @@ namespace Sporeholm.Simulation
 		// head, and the eventual Phase 9 combat system will fill in actions.
 		public string? CombatTargetName { get; set; }
 
+		// v0.7.0 (Phase 7) — the entity this shroomp is attacking (player order
+		// or auto-defense). BehaviorSystem pursues + strikes it via CombatSystem,
+		// and clears it when the target dies / leaves or the order is cancelled.
+		// CombatTargetName above is kept in sync so the ⚔ sword icon still shows.
+		public Guid? CombatTargetId { get; set; }
+
 		// v0.3.43 — Thoughts (RimWorld-style temporal mood entries) and
 		// Preferences (DF-style persistent likes/dislikes). See Thought.cs
 		// and Preferences.cs for the data shapes. Together they replace
@@ -819,5 +826,234 @@ namespace Sporeholm.Simulation
 		}
 		public Sporeholm.Simulation.Items.Item? EquippedApparel =>
 			Equipment.TryGetValue(Sporeholm.Simulation.Items.EquipSlot.Torso, out var t) ? t : null;
+
+		// ── v0.7.0 (Phase 7) — ICombatant implementation ──────────────────
+		// Shroomps are the rich, body-part-driven combatant: a hit routes to a
+		// specific BodyParts entry, and the existing bleed / down / moving /
+		// vital-death machinery turns that into the full wound model. Members
+		// are named Combat* to avoid colliding with the existing Id/Name.
+
+		// Swing cooldown (ticks). Decremented each tick by BehaviorSystem.
+		public int AttackCooldownTicks { get; set; } = 0;
+		// Ticks spent chasing an ORDERED target without landing a hit; the
+		// combat pass abandons the order past CombatTuning.MaxPursuitTicks so a
+		// colonist can't chase a faster fleeing creature across the whole map.
+		public int CombatPursuitTicks { get; set; } = 0;
+
+		// v0.7.1 (Phase 7) — wounds + pain + venom + rescue plumbing. Hediffs are
+		// the medical layer (pain + tend targets) alongside the condition-based
+		// bleed/down/death mechanics. Venom is an active poison load that ticks
+		// damage + decays. CarriedShroompId/IsBeingCarried drive downed-colonist
+		// rescue (a rescuer carries a downed colonist to a bed).
+		public System.Collections.Generic.List<Combat.Hediff> Hediffs { get; set; } = new();
+		public float Venom { get; set; } = 0f;
+		public System.Guid? CarriedShroompId { get; set; }
+		public bool IsBeingCarried { get; set; } = false;
+		// v0.7.1 (Phase 7) — drafted = combat-ready hold: suppresses autonomous
+		// work/idle (SelectTask), widens combat auto-engage to the Guardian ring
+		// and lets even an unarmed colonist fight; critical needs + player
+		// move-orders still apply.
+		public bool IsDrafted { get; set; } = false;
+
+		public Guid CombatId => Id;
+		public string CombatName => Name;
+		public Combat.CombatTeam Team => Combat.CombatTeam.Colony;
+		public Vector2 Pos => SimPos;
+		public bool CanAct => IsAlive && !IsDowned;
+		public float HealthFraction => ComputeHealthPercent() / 100f;
+		public float Pain => ComputePain();
+		public uint BloodRgba => Combat.CombatProfiles.ShroompBloodRgba;
+
+		public int AttackSkill(bool ranged) =>
+			Skills.TryGetValue(ranged ? "Ranged" : "Melee", out int v) ? v : 0;
+
+		public float DodgeChance() =>
+			SkillCurve.DodgeChance(Skills.TryGetValue("Athletics", out int a) ? a : 0);
+
+		// Shield block: scan both hands for an item carrying BaseBlockChance
+		// (the Shield apparel sits in a hand slot).
+		public float BlockChance()
+		{
+			Sporeholm.Simulation.Items.EquipSlot[] hands =
+			{
+				HandednessMeta.DominantHand(Handedness),
+				HandednessMeta.OffHand(Handedness),
+			};
+			foreach (var slot in hands)
+			{
+				if (!Equipment.TryGetValue(slot, out var it)) continue;
+				var bdef = Sporeholm.Simulation.Items.ItemRegistry.Get(it.Kind, it.SubType);
+				if (bdef == null || bdef.BaseBlockChance <= 0f) continue;
+				float c = it.DurabilityCap > 0f
+					? Mathf.Clamp(it.AvgCondition / it.DurabilityCap, 0f, 1f) : 1f;
+				return Mathf.Clamp(bdef.BaseBlockChance * c, 0f, Combat.CombatTuning.MaxBlockChance);
+			}
+			return 0f;
+		}
+
+		// Resolve the equipped weapon into a combat profile, folding material /
+		// quality / condition into the effective damage. Falls back to unarmed
+		// when no usable weapon is held.
+		public Combat.CombatProfile GetAttackProfile()
+		{
+			var w = EquippedWeapon;
+			// Improvised weapon: a held Tool with combat stats (Knife / Sickle /
+			// Pick / Sage Staff) is used when no real weapon is equipped, so a
+			// cornered forager defends with the implement in its hands.
+			if (w == null || w.State == Sporeholm.Simulation.Items.ItemState.Broken)
+			{
+				var tool = EquippedTool;
+				if (tool != null && tool.State != Sporeholm.Simulation.Items.ItemState.Broken)
+				{
+					var tdef = Sporeholm.Simulation.Items.ItemRegistry.Get(tool.Kind, tool.SubType);
+					if (tdef != null && tdef.BaseDamage > 0f) w = tool;
+				}
+			}
+			if (w == null || w.State == Sporeholm.Simulation.Items.ItemState.Broken)
+				return Combat.CombatProfile.Unarmed;
+			var def = Sporeholm.Simulation.Items.ItemRegistry.Get(w.Kind, w.SubType);
+			if (def == null || def.BaseDamage <= 0f)
+				return Combat.CombatProfile.Unarmed;
+
+			var type    = Combat.CombatProfiles.TypeForSubType(w.SubType);
+			bool ranged = Combat.CombatProfiles.IsRanged(type);
+			var matDef  = Sporeholm.Simulation.Items.MaterialRegistry.Get(w.Material);
+			float matMul = Mathf.Clamp(matDef?.DurabilityMul ?? 1f,
+				Combat.CombatTuning.MinMaterialDamageMul, Combat.CombatTuning.MaxMaterialDamageMul);
+			float qualMul = SkillCurve.ToolQualityFactor(w.Quality);
+			float condMul = w.DurabilityCap > 0f
+				? Mathf.Clamp(w.AvgCondition / w.DurabilityCap, 0f, 1f) : 1f;
+			float dmg = def.BaseDamage * matMul * qualMul * condMul;
+
+			float rangeTiles = type == Combat.WeaponType.Magical
+				? Combat.CombatTuning.MagicalRangeTiles
+				: ranged ? Combat.CombatTuning.RangedRangeTiles
+				         : Combat.CombatTuning.MeleeRangeTiles;
+			int cd = ranged ? Combat.CombatTuning.RangedCooldownTicks
+			                : Combat.CombatTuning.MeleeCooldownTicks;
+			return new Combat.CombatProfile(dmg, def.BaseAccuracy, type, rangeTiles, cd, def.DisplayName);
+		}
+
+		// Weighted body-part hit-location draw (§7.2). Larger / outer parts are
+		// likelier; internal organs are seldom hit directly. Only parts present
+		// on this shroomp are eligible.
+		public string PickHitPart(Random rng)
+		{
+			float total = 0f;
+			foreach (var def in BodyPartRegistry.Template)
+				if (BodyParts.ContainsKey(def.Name)) total += HitWeight(def.Name);
+			if (total <= 0f) return "Stalk";
+			float roll = (float)rng.NextDouble() * total;
+			foreach (var def in BodyPartRegistry.Template)
+			{
+				if (!BodyParts.ContainsKey(def.Name)) continue;
+				roll -= HitWeight(def.Name);
+				if (roll <= 0f) return def.Name;
+			}
+			return "Stalk";
+		}
+
+		private static float HitWeight(string part) => part switch
+		{
+			"Stalk"      => 22f,
+			"Cap"        => 10f,
+			"Left Arm"   => 8f,  "Right Arm"  => 8f,
+			"Left Leg"   => 9f,  "Right Leg"  => 9f,
+			"Left Hand"  => 3f,  "Right Hand" => 3f,
+			"Left Foot"  => 3f,  "Right Foot" => 3f,
+			"Left Gill"  => 4f,  "Right Gill" => 4f,
+			"Stomach"    => 4f,  "Jaw"        => 3f,
+			"Left Eye"   => 1f,  "Right Eye"  => 1f,  "Spore Vent" => 1f,
+			"Heart"      => 2f,  "Brain"      => 1f,  "Filter"     => 2f,
+			_            => 2f,
+		};
+
+		// Worn-apparel damage reduction over the slot covering `part` (modest in
+		// v0.7.0; layered armor is a follow-up). Shields are block, not armor.
+		public float ArmorFractionAt(string part)
+		{
+			Sporeholm.Simulation.Items.EquipSlot slot = part switch
+			{
+				"Cap"        => Sporeholm.Simulation.Items.EquipSlot.Head,
+				"Stalk"      => Sporeholm.Simulation.Items.EquipSlot.Torso,
+				"Left Foot"  => Sporeholm.Simulation.Items.EquipSlot.LeftFoot,
+				"Right Foot" => Sporeholm.Simulation.Items.EquipSlot.RightFoot,
+				_            => Sporeholm.Simulation.Items.EquipSlot.None,
+			};
+			if (slot == Sporeholm.Simulation.Items.EquipSlot.None) return 0f;
+			if (!Equipment.TryGetValue(slot, out var it)
+				|| it.Kind != Sporeholm.Simulation.Items.ItemKind.Apparel) return 0f;
+			// Base stopping power by material family — hard plate (Stone / Bone)
+			// shields best, hide is medium, cloth / plant is light.
+			float baseArmor = it.Material.Family switch
+			{
+				"Stone" => 0.30f,
+				"Bone"  => 0.28f,
+				"Wood"  => 0.20f,
+				"Hide"  => 0.18f,
+				"Magic" => 0.16f,
+				"Cloth" => 0.10f,
+				"Plant" => 0.10f,
+				_       => 0.12f,
+			};
+			float c = it.DurabilityCap > 0f
+				? Mathf.Clamp(it.AvgCondition / it.DurabilityCap, 0f, 1f) : 1f;
+			float q = SkillCurve.ToolQualityFactor(it.Quality);
+			return Mathf.Clamp(baseArmor * c * q, 0f, 0.55f);
+		}
+
+		// Apply resolved net damage to a body part. Sever zeroes the part and
+		// its children. Returns true when a vital part reaches 0 (lethal hit) —
+		// the engine then routes the kill through SimulationCore.KillShroomp.
+		public bool ApplyDamage(string part, float amount, Combat.CombatWound wound, long globalTick)
+		{
+			if (!BodyParts.ContainsKey(part))
+			{
+				if (BodyParts.ContainsKey("Stalk")) part = "Stalk";
+				else return false;
+			}
+			float next = Math.Clamp(BodyParts[part] - amount, 0f, 100f);
+			if (wound == Combat.CombatWound.Sever)
+			{
+				next = 0f;
+				foreach (var def in BodyPartRegistry.Template)
+					if (def.Parent == part && BodyParts.ContainsKey(def.Name))
+						BodyParts[def.Name] = 0f;
+			}
+			BodyParts[part] = next;
+			if (wound != Combat.CombatWound.None && amount > 0f)
+				AddOrEscalateHediff(part, wound, amount);
+			RecomputeBleedRate();
+			var pdef = BodyPartRegistry.Get(part);
+			return pdef != null && pdef.Vital && next <= 0f;
+		}
+
+		// v0.7.1 — record a wound. Escalates an existing untended wound of the
+		// same type on the same part rather than spamming entries; caps the list.
+		public void AddOrEscalateHediff(string part, Combat.CombatWound wound, float severity)
+		{
+			if (wound == Combat.CombatWound.None) return;
+			for (int i = 0; i < Hediffs.Count; i++)
+			{
+				var h = Hediffs[i];
+				if (!h.Tended && h.BodyPart == part && h.Type == wound)
+				{
+					h.Severity = Math.Min(100f, h.Severity + severity);
+					return;
+				}
+			}
+			if (Hediffs.Count >= 16) return;   // safety cap
+			Hediffs.Add(new Combat.Hediff(part, wound, Math.Min(100f, severity)));
+		}
+
+		// v0.7.1 — total pain (0..100) from active wounds. Drives the combat-roll
+		// penalty + the pain-unconscious threshold (see BehaviorSystem).
+		public float ComputePain()
+		{
+			if (Hediffs.Count == 0) return 0f;
+			float p = 0f;
+			for (int i = 0; i < Hediffs.Count; i++) p += Hediffs[i].PainContribution();
+			return Math.Clamp(p, 0f, 100f);
+		}
 	}
 }

@@ -2,7 +2,7 @@
 
 A colony simulation game about a tribe of mushroom-people (**Shroomps**) trying to survive in a strange, fungal world. Designed and developed by **Sam Dotson** in **Godot 4.6** (C#).
 
-Current version: **v0.6.3** (active development — Phase 6 entity system shipped; Phase 7 combat next).
+Current version: **v0.7.1** (active development — Phase 7 combat depth: a shared body-part combat engine with persistent wounds, pain + venom, a healer / medicine loop, material-aware armor, draftable colonists, right-click attack orders, and full damage / blood / animation feedback).
 
 ---
 

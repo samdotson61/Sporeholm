@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Godot;
 using Sporeholm.Simulation.Entities;
+using Sporeholm.Simulation.Combat;
 using Sporeholm.World;
 
 namespace Sporeholm.Simulation.Systems
@@ -26,6 +27,10 @@ namespace Sporeholm.Simulation.Systems
         // walk into a wall.
         private const float ArrivalPx = 6f;
         private const float StuckPx   = 0.3f;
+        // v0.7.0 — ticks a struck Friendly / flee-type entity runs before
+        // settling back to Wander (reuses AttackCooldownTicks as the flee timer,
+        // matching the existing Flee→Wander gate).
+        private const int FleeDurationTicks = 180;   // ~3s @ 60Hz
 
         public static void Tick(
             IReadOnlyList<Entity> entities,
@@ -187,24 +192,16 @@ namespace Sporeholm.Simulation.Systems
             }
             e.SimPos = newPos;
 
-            // Attack contact for Hunt state.
-            if (e.State == EntityState.Hunt && e.AttackCooldownTicks <= 0)
+            // Attack contact for Hunt state — routed through the shared Phase 7
+            // combat engine, which owns range, cooldown, hit/dodge/block rolls,
+            // body-part wounds + bleeding, and death via CauseOfDeath.Combat.
+            // (Replaces the v0.6.0 ApplyEntityAttack stub, whose pre-rename
+            // part-name pool silently no-op'd ~half of all hits.)
+            if (e.State == EntityState.Hunt)
             {
                 var target = LookupShroomp(e.TargetShroompId, shroomps);
                 if (target != null)
-                {
-                    float dx = target.SimPos.X - e.SimPos.X;
-                    float dy = target.SimPos.Y - e.SimPos.Y;
-                    if (dx * dx + dy * dy <= (def.BodyRadiusPx + 12f) * (def.BodyRadiusPx + 12f))
-                    {
-                        // Phase 7 will route this through the proper combat
-                        // pipeline. For now, deal AttackPower to a random
-                        // body part using the existing damage model so the
-                        // hostiles in v0.6.0 are real threats not props.
-                        ApplyEntityAttack(e, target);
-                        e.AttackCooldownTicks = 60;   // 1 sec at 60 Hz sim
-                    }
-                }
+                    CombatSystem.TryAttack(e, target);
             }
         }
 
@@ -230,23 +227,28 @@ namespace Sporeholm.Simulation.Systems
             return e.SimPos;   // sat in place if everything's blocked
         }
 
-        // Apply damage from an entity to a shroomp. Targets a random
-        // body part weighted by surface area (Torso > Limbs > Head).
-        // Mutates the BodyParts dict directly — same pattern the existing
-        // NeedsSystem starvation path and DevDamageToDown use. Phase 7
-        // combat will replace this with a proper weapon-vs-armor pipeline
-        // routed through a shared damage helper; for now this is the
-        // minimal "hostiles in v0.6.0 are real threats" wiring.
-        private static void ApplyEntityAttack(Entity attacker, Shroomp target)
+        // v0.7.0 (Phase 7) — react to being attacked by a shroomp. Friendlies
+        // and flee-when-struck hostiles (Magic Wisp) flee toward safety; all
+        // other hostiles and provoked neutrals turn on the attacker. Called by
+        // BehaviorSystem when a colonist lands (or attempts) a strike, so a
+        // hunted boar fights back and a struck glowbunny bolts.
+        public static void ProvokeEntity(Entity e, Guid attackerId)
         {
-            string[] partPool = { "Torso", "Torso", "Torso",
-                                  "Head",
-                                  "Left Arm", "Right Arm",
-                                  "Left Leg", "Right Leg" };
-            var rng = new Random(attacker.Id.GetHashCode() ^ System.Environment.TickCount);
-            string part = partPool[rng.Next(partPool.Length)];
-            if (!target.BodyParts.TryGetValue(part, out float cur)) return;
-            target.BodyParts[part] = Math.Clamp(cur - attacker.AttackPower, 0f, 100f);
+            if (e == null || !e.IsAlive) return;
+            var def = EntityRegistry.Get(e.Kind);
+            bool fleer = def.Disposition == Disposition.Friendly
+                         || (def.Disposition == Disposition.Hostile && def.FleeRangePx > 0f);
+            if (fleer)
+            {
+                e.State = EntityState.Flee;
+                e.TargetShroompId = attackerId;
+                e.AttackCooldownTicks = FleeDurationTicks;   // reused as the flee timer
+            }
+            else
+            {
+                e.State = EntityState.Hunt;        // neutral retaliation / focus the attacker
+                e.TargetShroompId = attackerId;
+            }
         }
     }
 }

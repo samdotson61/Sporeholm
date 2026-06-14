@@ -66,7 +66,16 @@ public partial class SaveManager : Node
 		// BleedRate is derived from body-part conditions every sim tick
 		// (Shroomp.RecomputeBleedRate) so doesn't need persisting.
 		public float                           BloodLoss      { get; init; } = 0f;
+		// v0.7.1 — Phase 7 wounds + venom. Null / 0 for pre-v0.7.1 saves (the
+		// body-part condition still persists, so the colonist loads wounded —
+		// only the wound records + pain are dropped, which heal back naturally).
+		public List<HediffSaveData>?           Hediffs        { get; init; } = null;
+		public float                           Venom          { get; init; } = 0f;
 	}
+
+	// v0.7.1 (Phase 7) — per-part wound (Hediff) save record. Type is the
+	// CombatWound enum NAME (reorder-safe).
+	public record HediffSaveData(string BodyPart, string Type, float Severity, bool Tended);
 
 	public record ColonySave(
 		int Year, string Season, int Day,
@@ -759,6 +768,8 @@ public partial class SaveManager : Node
 				Preferences = ex?.Preferences,
 				Thoughts    = ex?.Thoughts,
 				BloodLoss   = s.BloodLossPct,          // v0.5.81 — bleeding reservoir
+				Hediffs     = ex?.Hediffs,             // v0.7.1 — wounds
+				Venom       = ex?.Venom ?? 0f,         // v0.7.1 — active venom load
 			});
 		}
 		return shroomps;

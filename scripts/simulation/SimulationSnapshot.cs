@@ -153,6 +153,9 @@ namespace Sporeholm.Simulation
 		// shroomp limps. Surface to the unit card so players can see why
 		// a wounded shroomp moves slowly.
 		float                              MovingCapacity,
+		// v0.7.1 — combat pain (0-100) + active venom load, surfaced to the card.
+		float                              Pain,
+		float                              Venom,
 		// v0.4.30 — multi-item carry. CarryingCapacity is computed from
 		// life stage + traits (5–75); CurrentCarriedCount is the sum of
 		// Quantity across the shroomp's Inventory. Unit card draws a bar
@@ -226,6 +229,8 @@ namespace Sporeholm.Simulation
 			s.BleedRate > 0f,                // v0.5.81 — IsBleeding
 			s.BloodLoss,                      // v0.5.81 — BloodLossPct
 			s.ComputeMovingCapacity(),        // v0.5.81 — MovingCapacity
+			s.ComputePain(),                  // v0.7.1 — Pain
+			s.Venom,                          // v0.7.1 — Venom
 			s.CarryingCapacity,
 			s.CurrentCarriedCount,
 			SnapshotInventory(s),

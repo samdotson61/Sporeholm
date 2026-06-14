@@ -49,6 +49,7 @@ public partial class GameController : Node
 	private ShroompRosterPanel      _roster          = null!;
 	private SelectionBoxPreview   _selectBox       = null!;
 	private OrderFeedbackOverlay  _orderFeedback   = null!;
+	private CombatFeedbackOverlay _combatFeedback  = null!;   // v0.7.0 Phase 7 — damage floaters + blood
 	// v0.3.24 — multi-select replaces the v0.3.20 single string. HashSet so
 	// repeat-adds during box-select are O(1) and lookup for "is X selected?"
 	// is O(1). Mirrored into ShroompColonyView via SetSelection each time it
@@ -251,6 +252,11 @@ public partial class GameController : Node
 		// Shroomp colony view drawn over the tile map.
 		_colony = new ShroompColonyView { Name = "Colony" };
 		AddChild(_colony);
+
+		// v0.7.0 (Phase 7) — combat feedback (damage floaters + blood spatter),
+		// added after the colony so floaters draw above the shroomp sprites.
+		_combatFeedback = new CombatFeedbackOverlay { Name = "CombatFeedback" };
+		AddChild(_combatFeedback);
 
 		// v0.5.58 — visual day/night cycle. Owns a CanvasModulate that tints
 		// the entire world canvas based on SimulationDate.Hour. Only affects
@@ -653,6 +659,22 @@ public partial class GameController : Node
 				// toolbar's click-twice-to-deselect convention.
 				_toolbar.SetActiveTool(_toolbar.ActiveTool);
 				return true;
+			}
+
+			// Priority 1.5 (v0.7.0 Phase 7) — right-click an entity to attack
+			// it. Any creature under the cursor, with colonists selected,
+			// issues an attack order (enables both defence and hunting).
+			// Pacifist / wounded colonists flee instead (BehaviorSystem).
+			if (_selectedShroomps.Count > 0)
+			{
+				var esnap = _entityColonyView.GetEntitySnapAt(click);
+				if (esnap.HasValue)
+				{
+					foreach (var name in _selectedShroomps)
+						_sim.RequestAttackEntity(name, esnap.Value.Id);
+					_orderFeedback.RingCombat(click);
+					return true;
+				}
 			}
 
 			// Priority 2 — context action with selected shroomps.
@@ -1439,6 +1461,29 @@ public partial class GameController : Node
 			// mood stay in sync while the player has it open. Visibility-
 			// gated inside the card (no-op when closed).
 			_entityCard.Refresh(snap);
+
+			// v0.7.0 (Phase 7) — drain discrete combat events into the message
+			// log (Combat category) + the feedback overlay (damage floaters +
+			// species-coloured blood spatter).
+			foreach (var cev in _sim.DrainCombatEvents())
+			{
+				if (!string.IsNullOrEmpty(cev.Text))
+					_msgLog.Post(cev.Text, MessageLog.Category.Combat, _lastDate);
+				_combatFeedback.SpawnFloater(cev.Pos, cev.Damage, cev.Outcome);
+				if (cev.ShowBlood)
+					_combatFeedback.SpawnBlood(cev.Pos, cev.BloodRgba);
+
+				// v0.7.0 — sprite animations: the attacker lunges toward the
+				// target on every swing; the defender recoils + flashes red when a
+				// blow lands (ShowBlood is true for Hit/Crit/Kill).
+				if (cev.AttackerIsEntity) _entityColonyView.TriggerLunge(cev.AttackerId, cev.Pos);
+				else                      _colony.TriggerAttackLunge(cev.AttackerName, cev.Pos);
+				if (cev.ShowBlood)
+				{
+					if (cev.DefenderIsEntity) _entityColonyView.TriggerHit(cev.DefenderId, cev.AttackerPos);
+					else                      _colony.TriggerHitReact(cev.DefenderName, cev.AttackerPos);
+				}
+			}
 			// v0.4.26 — visibility-gated panel refreshes. `_card.Refresh`
 			// and the roster Refresh (rows list construction + the per-
 			// row UpdateRow that touches multiple Label.Text values per
