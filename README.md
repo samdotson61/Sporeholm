@@ -8,7 +8,7 @@ Current version: **v0.7.2** (active development — Phase 7 combat depth: a shar
 
 ## Project status at a glance
 
-Sporeholm is mid-development. The core simulation loop — colony of pawns, needs, work, construction, crafting, mood, wildlife, save/load — is shipped and stable. Combat, farming/husbandry, weather, events, and disease are the next phases.
+Sporeholm is mid-development. The core simulation loop — colony of pawns, needs, work, construction, crafting, mood, wildlife, save/load — is shipped and stable. **Combat (Phase 7) is now complete** — a full body-part combat system with wounds, pain/venom, healing, rescue, layered armor, training, and weapons. Farming/husbandry, weather, events, and disease are the next phases.
 
 | Layer | State |
 |---|---|
@@ -24,7 +24,7 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 | Per-tick mining scaled by skill + tools | Shipped |
 | **Wildlife (15 species: friendly + neutral + hostile)** | **Shipped — v0.6.0** |
 | Save / load | Shipped |
-| **Combat** | Hostile-creature contact damage only — full Phase 7 next |
+| **Combat** | **Shipped — v0.7.x** (body-part combat, wounds, pain/venom, healer + rescue, layered armor, draft, training, weapons) |
 | **Husbandry & farming** | Stubs only — Phase 8 |
 | **Weather & temperature** | Insulation half — Phase 10 |
 | **Disease, research, eras** | Future phases |
@@ -42,7 +42,7 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 ### Shroomps (the colonists)
 
 - Five core needs: **Nutrition**, **Rest**, **Social**, **Magic Resonance**, **Safety**, with derived **Joy** and mood.
-- **12 skills**: Botany, Mining, Athletics, Melee, Ranged, Crafting, **Cooking** (new), Construction, Magic, Social, Study, Healing. Level 0–20 with diminishing XP curves. Planned additions: **Defense** + **Hunting** (Phase 7 combat) and **Husbandry** (Phase 8 farming + animals) — target roster of 15 skills by end of Phase 8.
+- **12 skills**: Botany, Mining, Athletics, Melee, Ranged, Crafting, **Cooking**, Construction, Magic, Social, Study, Healing. Level 0–20 with diminishing XP curves. Phase 7 combat ships on the existing **Melee / Ranged / Healing** skills; **Husbandry** is the planned Phase 8 addition (farming + animals).
 - **7 roles**: Forager, Crafter, Guardian, Caretaker, Scholar, Sage, Elder. Each role has skill bonuses + default work priorities.
 - **13 mushroom-themed biological traits** (penetrance 0–1) — active ones include **MyceliumAttuned** (magic resonance lasts longer), **ClusterFruiting** (social decays slower around colony-mates), **EfficientGills** (hunger decays slower), **RapidMetabolism** (hunger decays faster — biological cost), **SporeResonant**, **CompactStature** + **WispyFrame** (carry-capacity penalties). Plus personality archetypes + backstories + the **Pacifist** trait (auto-blocks weapon equipping, ~8% incidence).
 - Full body-part hierarchy (Cap, Stalk, Gills, Spore Vent, Filter, legs, feet, hands) with damage, bleeding, downed state, natural healing.
@@ -63,6 +63,19 @@ Event-only big creatures (Bear / Leopard Tortoise / Tasmanian Mauler / Dragon / 
 
 Click any creature to open the **Entity Card** — a compact inspector showing species, description, health, mood (derived from health % + needs + AI state), and the simplified Nutrition + Rest needs. Updates in real time while open.
 
+### Combat (Phase 7)
+
+A full body-part combat system layered on the wildlife AI. Shroomps and creatures share one combat engine: a strike resolves through range → accuracy → block → crit → hit-location → armor → damage → wound, and routes into the same body-part / bleeding / downed pipeline as the rest of the sim.
+
+- **Wounds (Hediffs)** — every hit records a persistent wound on the struck part (Bruise / Cut / Fracture / Puncture / Mangle / Sever / Concussion, by weapon type × damage). Wounds carry severity, contribute **pain**, heal over time (tended wounds ~6× faster), and won't regrow a severed part.
+- **Pain + venom** — high pain spoils a combatant's attacks and can knock them unconscious. Venomous attackers (Snake, Wasp) inject a venom load that thins the blood and decays over time; tending clears it.
+- **Layered armor** — worn apparel mitigates damage scaled by material (hard plate beats hide beats cloth), condition, and quality. Mitigation varies by weapon type — blunt punches through plate, edged is well-stopped, magic bypasses entirely.
+- **Healer + medicine** — a Doctor or Caretaker walks to the nearest wounded colonist and tends the worst wound in place, consuming a **Magic Herb Poultice** if one is stocked. Tending heals faster, restores part condition, and clears venom.
+- **Rescue** — a Doctor or Caretaker carries a *downed* colonist to the nearest free bed to recover and be treated.
+- **Training buildings** — a **Sparring Yard** (trains Melee) or **Training Dummy** (trains Ranged); idle Guardians and off-duty colonists drill there for combat XP in peacetime, with no real damage.
+- **Draft** — a drafted colonist holds its post, auto-engages threats at a wider range, and will fight even unarmed.
+- **Feedback + controls** — floating damage numbers, species-coloured blood decals, a combat message log, and sprite animations (attacker lunge, defender recoil + red flash). **Right-click a hostile creature to order an attack.**
+
 ### Work + designations
 
 - Drag-paint orders: Gather food, Excavate stone/wood, Chop trees, Cut plants, Build (walls/floors/doors/furniture), Stockpile zones, Allowed Areas, Demolish.
@@ -74,8 +87,8 @@ Click any creature to open the **Entity Card** — a compact inspector showing s
 ### Construction
 
 - Place blueprints; Crafters haul materials + frame the structure per-tick (skill-scaled).
-- Structure types: Wall, Floor, Door, Shelf, Workbench, **Cooking Table** (new — dedicated cook station for the Cooking skill split), Bonfire (renamed from Hearth — heat source + half-speed cooking fallback), Bed, Meditation Shrine, Shroom Board, Gossip Bench, Table, Torch (wood haft + flame, +2°C per torch, light emission stubbed for Phase 10).
-- **Production / Furniture tab split** in the Build panel: Workbench + Cooking Table sit in the new Production tab (where workstations belong); Bed / Table / Shelf / Bonfire / Torch stay in Furniture.
+- Structure types: Wall, Floor, Door, Shelf, Workbench, **Cooking Table** (dedicated cook station for the Cooking skill split), Bonfire (renamed from Hearth — heat source + half-speed cooking fallback), Bed, Meditation Shrine, Shroom Board, Gossip Bench, Table, Torch (wood haft + flame, +2°C per torch, light emission stubbed for Phase 10), **Sparring Yard** + **Training Dummy** (combat-practice furniture — Phase 7).
+- **Production / Furniture tab split** in the Build panel: Workbench + Cooking Table sit in the new Production tab (where workstations belong); Bed / Table / Shelf / Bonfire / Torch / Sparring Yard / Training Dummy stay in Furniture.
 - Material choice per blueprint: 5 stone subtypes + 3 wood subtypes + **Pebblestone** (refined cobblestone). Each material has a distinct tint + Comfort / Beauty multiplier.
 - 16-variant autotile walls so wall stretches blend horizontally.
 - **Demolish is a paintable task** (rewritten in v0.6.2): paint a built structure to mark it for tear-down (red X overlay), a Crafter walks to it and performs the work over many ticks (Construction skill drives speed). Refund is **20%–60% of material cost based on Construction skill** — skilled crafters salvage more. Blueprints still cancel instantly + refund delivered materials.
@@ -106,7 +119,7 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 
 - Procedural item system: every dropped item has Kind / SubType / Material (family + subtype) / Quality (Crude → Legendary) / Condition / Age / State (Fresh / Stale / Spoiled).
 - Per-tile drops with 250-stack cap + type-locked tiles + spiral overflow.
-- Equipment system: per-body-part slots (hands, head, torso, feet) with auto-equip for the current task.
+- Equipment system: per-body-part slots (hands, head, torso, feet) with auto-equip for the current task. Worn apparel (**cloak / hat / boots**) renders on the colonist and provides material-scaled armor in combat.
 - **Opportunistic weapon upgrade**: shroomps scan colony inventory for a better weapon and swap in (scored by damage × accuracy × quality × condition × skill bias). Pacifists never auto-equip a weapon.
 - **Drop-unsuitable-tool**: when a task ends and the next task doesn't want the held tool, it's dropped on the ground (unforbidden) for haulers to return to a stockpile. Role-canonical tools (Sage's Sage Staff, Crafter's Hammer, Forager's Basket) are kept.
 - **Item-drop icons**: 49 dedicated pixel-art variants so wood / stone / berries / cloth / bone / weapons all read at a glance.
@@ -146,8 +159,8 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 | 5 | Tile-based construction | Complete |
 | 5.5 | Crafting bills | Complete |
 | 6 | Entity system (animals + creatures) | Shipped (v0.6.0 — 15 species + AI + sprites + save/load) |
-| **7** | **Combat** (with Healer + Rescue + Weapons/Apparel) | **Next** (stubs ready) |
-| 8 | Agricultural systems (animal husbandry, farming, hunting) | — |
+| 7 | Combat (Healer + Rescue + Training + Weapons/Apparel) | Shipped (v0.7.2 — full body-part combat) |
+| **8** | **Agricultural systems** (animal husbandry, farming, hunting) | **Next** |
 | 9 | Events + Storyteller (Peaceful / Random / Adventure — extensible) | Stub |
 | 10 | Weather + Environment (Insulation half done) | — |
 | 11 | Technology + Culture (research + power) | — |
@@ -206,7 +219,7 @@ The OpenGL Compatibility renderer is locked in for wider hardware compatibility,
 ### The basic loop
 
 1. **Bottom task bar** — open **Orders** to paint Gather / Excavate / Chop / Cut / Haul / Demolish designations.
-2. **Build** tab — pick a structure (Wall / Floor / Door / Workbench / Cooking Table / Bed / Bonfire / Torch / Joy furniture), pick a material chip (Granite / Marble / DeadWood / etc.), drag to place blueprints. Sub-tabs: **Structure** (walls, floors, doors), **Production** (Workbench, Cooking Table), **Furniture** (Bed, Table, Shelf, Bonfire, Torch), **Joy** (Shrine, Board, Bench).
+2. **Build** tab — pick a structure (Wall / Floor / Door / Workbench / Cooking Table / Bed / Bonfire / Torch / Joy furniture), pick a material chip (Granite / Marble / DeadWood / etc.), drag to place blueprints. Sub-tabs: **Structure** (walls, floors, doors), **Production** (Workbench, Cooking Table), **Furniture** (Bed, Table, Shelf, Bonfire, Torch, Sparring Yard, Training Dummy), **Joy** (Shrine, Board, Bench).
 3. **Zones** tab — paint stockpile rectangles, set priority + accepted item types.
 4. **Areas** tab — paint per-shroomp allowed areas (or the shared *Home* area).
 5. **Jobs** tab — 15-category priority grid per shroomp.
@@ -234,6 +247,8 @@ A typical first colony:
 - **Cavern roofs**: dig into solid stone or wood to create roofed pockets — items inside decay slower (½× or ¼× with a Hearth).
 - **Sages + Sage Staff**: Sages with a Sage Staff get a 1.3× × QualityMul bonus on Attune speed. Sages won't pick up weapons.
 - **Pacifists** (~8% of pawns) refuse to auto-equip weapons. Check their card to see the trait.
+- **Training**: build a **Sparring Yard** (Melee) or **Training Dummy** (Ranged) — idle Guardians and off-duty colonists drill there to raise combat skill in peacetime.
+- **Combat**: right-click a hostile creature to order an attack. Wounded colonists bleed and can be **downed**; a Doctor or Caretaker will tend them — and carry a downed colonist to a bed.
 - **Tool bonuses** stack with skill — even a Crude Pick speeds up mining by ~17%; a Masterwork Pick adds ~75%.
 - **Save often** — F9 quicksave or via the menu. Multi-slot saves browse with rename/overwrite/delete.
 
