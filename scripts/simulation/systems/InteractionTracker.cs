@@ -109,21 +109,16 @@ namespace Sporeholm.Simulation.Systems
             initiator.Social = Mathf.Clamp(initiator.Social + def.SocialDelta, 0f, 100f);
             target.Social    = Mathf.Clamp(target.Social    + def.SocialDelta, 0f, 100f);
 
-            // Opinion delta — friendship/enmity threshold via Preferences.
-            // Positive interactions can Befriend; negative can flip to dislike.
-            if (def.OpinionDelta > 0)
+            // v0.7.3 (N9) — route opinion through the ledger (Friend/Rival are
+            // derived from thresholds; the binary Liked/Disliked lists stay in
+            // sync inside AdjustOpinion). Positive interactions build toward
+            // friendship; Slights now erode toward rivalry — the "running
+            // negative-opinion totals" the old TODO was waiting on now exist.
+            if (def.OpinionDelta != 0f)
             {
-                // Repeated positive interactions cumulatively bump toward friendship.
-                // Per-interaction chance based on the delta magnitude.
-                if (System.MathF.Abs(def.OpinionDelta) >= 3 && initiator.Preferences != null)
-                {
-                    initiator.Preferences.Befriend(target.Name);
-                    target.Preferences?.Befriend(initiator.Name);
-                }
+                initiator.Preferences?.AdjustOpinion(target.Name, def.OpinionDelta);
+                target.Preferences?.AdjustOpinion(initiator.Name, def.OpinionDelta);
             }
-            // Slight could escalate to enemy — keep it light for now: thought
-            // penalty is the main effect, no auto-enmity yet (future polish
-            // can add it when running negative-opinion totals exist).
 
             // Thought emission — ThoughtRegistry expects (shroomp, key, context?).
             ThoughtRegistry.Add(initiator, def.ThoughtKey, target.Name);

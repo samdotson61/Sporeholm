@@ -2,7 +2,7 @@
 
 A colony simulation game about a tribe of mushroom-people (**Shroomps**) trying to survive in a strange, fungal world. Designed and developed by **Sam Dotson** in **Godot 4.6** (C#).
 
-Current version: **v0.7.2** (active development — Phase 7 combat depth: a shared body-part combat engine with persistent wounds, pain + venom, a healer / medicine loop, material-aware armor, draftable colonists, right-click attack orders, full damage / blood / animation feedback, carry-a-downed-colonist-to-a-bed rescue, combat training buildings, and apparel sprite layers).
+Current version: **v0.7.3** (active development — Phase 7 combat plus a depth pass: a shared body-part combat engine with wounds, pain + venom, a healer / medicine loop, material-aware armor, draft, rescue, training buildings, apparel layers, and right-click attack orders — now joined by **patrol orders**, **mental breaks** on mood collapse, and a **social opinion / relationship** ledger).
 
 ---
 
@@ -18,7 +18,7 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 | Designation orders (Cut / Chop / Gather / Mine / Haul) | Shipped |
 | Stockpile zones + Haul system | Shipped |
 | Construction (walls / floors / doors / furniture) | Shipped |
-| Crafting bills at workbenches (41 recipes) | Shipped |
+| Crafting bills at workbenches (50 recipes) | Shipped |
 | Room detection + room types (Bedroom / Kitchen / Workshop / Storage) | Shipped |
 | Natural cavern roofs | Shipped |
 | Per-tick mining scaled by skill + tools | Shipped |
@@ -42,6 +42,8 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 ### Shroomps (the colonists)
 
 - Five core needs: **Nutrition**, **Rest**, **Social**, **Magic Resonance**, **Safety**, with derived **Joy** and mood.
+- **Relationships**: colonists build a numeric opinion of one another from social encounters, forming **Acquaintance / Friend / Rival / Lover** bonds (the last a hook for a future courtship system). Repeated good chats build friendship; repeated slights build rivalry.
+- **Mental breaks**: a colonist whose mood collapses may briefly lose control — **sad wandering**, a **tantrum**, or a **daze** — overriding work and orders (but not self-defense), then recovering with a catharsis. A message-log alert fires when one starts.
 - **12 skills**: Botany, Mining, Athletics, Melee, Ranged, Crafting, **Cooking**, Construction, Magic, Social, Study, Healing. Level 0–20 with diminishing XP curves. Phase 7 combat ships on the existing **Melee / Ranged / Healing** skills; **Husbandry** is the planned Phase 8 addition (farming + animals).
 - **7 roles**: Forager, Crafter, Guardian, Caretaker, Scholar, Sage, Elder. Each role has skill bonuses + default work priorities.
 - **13 mushroom-themed biological traits** (penetrance 0–1) — active ones include **MyceliumAttuned** (magic resonance lasts longer), **ClusterFruiting** (social decays slower around colony-mates), **EfficientGills** (hunger decays slower), **RapidMetabolism** (hunger decays faster — biological cost), **SporeResonant**, **CompactStature** + **WispyFrame** (carry-capacity penalties). Plus personality archetypes + backstories + the **Pacifist** trait (auto-blocks weapon equipping, ~8% incidence).
@@ -74,6 +76,7 @@ A full body-part combat system layered on the wildlife AI. Shroomps and creature
 - **Rescue** — a Doctor or Caretaker carries a *downed* colonist to the nearest free bed to recover and be treated.
 - **Training buildings** — a **Sparring Yard** (trains Melee) or **Training Dummy** (trains Ranged); idle Guardians and off-duty colonists drill there for combat XP in peacetime, with no real damage.
 - **Draft** — a drafted colonist holds its post, auto-engages threats at a wider range, and will fight even unarmed.
+- **Patrol** — select colonist(s), pick the **🚩 Patrol** order, and click two points (hold **Shift** for more) to set a looping route they walk as a standing order (yielding to needs + combat, resuming after). A plain right-click move cancels it.
 - **Feedback + controls** — floating damage numbers, species-coloured blood decals, a combat message log, and sprite animations (attacker lunge, defender recoil + red flash). **Right-click a hostile creature to order an attack.**
 
 ### Work + designations
@@ -97,7 +100,7 @@ A full body-part combat system layered on the wildlife AI. Shroomps and creature
 
 A workbench holds a queue of bills. Crafters pick them up, consume ingredients from colony inventory, work for N ticks (skill-scaled), and produce items dropped on the workbench tile.
 
-41 recipes across:
+50 recipes across:
 
 - **Cooking** (Cooking Table; Bonfire fallback at half speed): Cook Meal (4 of any food → 1 Prepared Meal), Juice Berries. The Cooking Table is the dedicated full-speed cook station; a Bonfire can cook the same recipes at × 2.0 work-ticks so a bare colony can still feed itself before a Cooking Table is built.
 - **Crafting** (Workbench): Weave Moss Cloth, Weave Grass Linen.

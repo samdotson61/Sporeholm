@@ -472,6 +472,11 @@ namespace Sporeholm.Simulation.Systems
                     return trainType == StructureType.SparringYard
                         || trainType == StructureType.TrainingDummy;
 
+                case TaskType.Patrol:
+                    // v0.7.3 — patrol validity is managed by the patrol pass
+                    // (which owns its own movement + waypoint cycling).
+                    return true;
+
                 default:
                     return true;
             }
@@ -919,6 +924,28 @@ namespace Sporeholm.Simulation.Systems
                 if (TryHandleMedical(s, map, shroomps, resources, effectiveDt))
                     continue;
 
+                // v0.7.3 (N8) — mental break. A shroomp whose mood has collapsed
+                // may lose player control for a spell — it overrides draft /
+                // patrol / work / idle, but runs AFTER combat/rescue/medical so a
+                // breaking colonist still defends itself and the wounded are
+                // handled first. Tick an active break; otherwise roll to start
+                // one while mood is in the Breaking/Collapse band and no life
+                // threat is pulling at them (Eat/Sleep take priority).
+                if (s.MentalBreakCooldown > 0) s.MentalBreakCooldown -= tickInterval;
+                if (s.MentalBreakTicks > 0)
+                {
+                    TickMentalBreak(s, map, effectiveDt, rng, tickInterval);
+                    continue;
+                }
+                if (s.MentalBreakCooldown <= 0
+                    && (s.MoodState == MoodState.Breaking || s.MoodState == MoodState.Collapse)
+                    && !IsLifeThreatening(s)
+                    && rng.NextDouble() < MentalBreakChancePerTick * tickInterval)
+                {
+                    StartMentalBreak(s, map, rng);
+                    continue;
+                }
+
                 // v0.7.1 (Phase 7) — drafted hold. A drafted colonist that isn't
                 // fighting or treating, has no active player order, and isn't in a
                 // critical state just stands its post: set a one-time idle "hold"
@@ -934,6 +961,34 @@ namespace Sporeholm.Simulation.Systems
                         s.PathWaypoints.Clear();
                     }
                     s.PrevSimPos = s.SimPos;
+                    continue;
+                }
+
+                // v0.7.3 (N20) — patrol pass. A standing player order: loop
+                // between PatrolWaypoints. Runs after combat/rescue/medical/draft
+                // and BEFORE the normal work/idle pipeline, so an explicit patrol
+                // suppresses autonomous work + idle (like draft) yet still yields
+                // to critical needs (Nutrition<20 / Rest<15 / Safety<20 → fall
+                // through so Eat/Sleep/SeekSafety run) and to an explicit move
+                // order. Uses the normal MoveOneTick A* follower so long routes
+                // path across walls (unlike the combat pass's direct steering).
+                if (s.PatrolWaypoints.Count >= 2
+                    && !(s.CurrentTask is { Type: TaskType.PlayerOrder })
+                    && s.Nutrition >= 20f && s.Rest >= 15f && s.Safety >= 20f)
+                {
+                    if (s.PatrolIndex < 0 || s.PatrolIndex >= s.PatrolWaypoints.Count)
+                        s.PatrolIndex = 0;
+                    if (!(s.CurrentTask is { Type: TaskType.Patrol }))
+                    {
+                        if (s.CurrentTask != null) ReleaseTaskClaim(s, map);
+                        AssignPatrolHop(s, map, s.PatrolWaypoints[s.PatrolIndex]);
+                    }
+                    bool patrolArrived = MoveOneTick(s, map, effectiveDt, rng, tickInterval);
+                    if (patrolArrived)
+                    {
+                        s.PatrolIndex = (s.PatrolIndex + 1) % s.PatrolWaypoints.Count;
+                        AssignPatrolHop(s, map, s.PatrolWaypoints[s.PatrolIndex]);
+                    }
                     continue;
                 }
 
@@ -1695,6 +1750,78 @@ namespace Sporeholm.Simulation.Systems
                 carried.IsBeingCarried = false;
             }
             carrier.CarriedShroompId = null;
+        }
+
+        // v0.7.3 (N20) — point the shroomp at a specific patrol waypoint: assign
+        // a Patrol task and compute the A* route to it. Mirrors the chain-order
+        // pop so the movement pipeline follows a real path across walls.
+        private static void AssignPatrolHop(Shroomp s, LocalMap? map, Godot.Vector2 target)
+        {
+            int tx = (int)(target.X / LocalMap.TileSize);
+            int ty = (int)(target.Y / LocalMap.TileSize);
+            s.CurrentTask = new BehaviorTask(TaskType.Patrol, target, 95f,
+                isPlayerOrder: true, interruptible: true, tileX: tx, tileY: ty);
+            s.SimTarget = target;
+            s.PathWaypoints.Clear();
+            s.StuckTicks = 0;
+            s.RePathTried = false;
+            if (map != null)
+                Pathfinder.FindPath(map, s.SimPos, (tx, ty),
+                    s.PathWaypoints, _shroompPerTile, OccTileIdx(s));
+        }
+
+        // v0.7.3 (N8) — mental-break tuning.
+        private const int   MentalBreakDurationTicks = 720;    // ~12 s spell at 1×
+        private const int   MentalBreakCooldownTicks = 3600;   // ~1 min before another can fire
+        private const float MentalBreakChancePerTick = 0.0010f;
+
+        // Begin a mental break: drop the current task, pick a kind. The mental
+        // break pass then owns the shroomp until MentalBreakTicks elapses.
+        private static void StartMentalBreak(Shroomp s, LocalMap? map, Random rng)
+        {
+            if (s.CurrentTask != null) ReleaseTaskClaim(s, map);
+            s.PathWaypoints.Clear();
+            int roll = rng.Next(100);
+            s.MentalBreak = roll < 45 ? MentalBreakType.SadWander
+                          : roll < 75 ? MentalBreakType.Daze
+                          : MentalBreakType.Tantrum;
+            s.MentalBreakTicks   = MentalBreakDurationTicks;
+            s.BreakRetargetTicks = 0;
+            s.BreakWanderTarget  = Godot.Vector2.Zero;
+            s.CurrentTask = new BehaviorTask(TaskType.MentalBreak, s.SimPos, 90f, interruptible: false);
+        }
+
+        // Drive an active mental break + end it on expiry (Catharsis relief
+        // thought + a cooldown so it doesn't immediately re-trigger).
+        private static void TickMentalBreak(Shroomp s, LocalMap? map, float dt, Random rng, int tickInterval)
+        {
+            s.MentalBreakTicks -= tickInterval;
+            if (s.MentalBreakTicks <= 0)
+            {
+                s.MentalBreak = MentalBreakType.None;
+                s.MentalBreakCooldown = MentalBreakCooldownTicks;
+                s.CurrentTask = null;
+                s.BreakWanderTarget = Godot.Vector2.Zero;
+                ThoughtRegistry.Add(s, "Catharsis");
+                return;
+            }
+            if (s.MentalBreak == MentalBreakType.Daze)
+            {
+                s.PrevSimPos = s.SimPos;   // stand catatonic
+                return;
+            }
+            // SadWander / Tantrum — drift to a periodically re-rolled nearby point.
+            s.BreakRetargetTicks -= tickInterval;
+            if (s.BreakRetargetTicks <= 0 || s.BreakWanderTarget == Godot.Vector2.Zero)
+            {
+                float radiusTiles = s.MentalBreak == MentalBreakType.Tantrum ? 5f : 3f;
+                double ang = rng.NextDouble() * System.Math.PI * 2.0;
+                float dist = (float)rng.NextDouble() * radiusTiles * LocalMap.TileSize;
+                s.BreakWanderTarget = s.SimPos
+                    + new Godot.Vector2((float)System.Math.Cos(ang), (float)System.Math.Sin(ang)) * dist;
+                s.BreakRetargetTicks = s.MentalBreak == MentalBreakType.Tantrum ? 45 : 90;
+            }
+            CombatStepToward(s, s.BreakWanderTarget, map, dt);
         }
 
         // v0.7.2 review fix — nearest Bed not already occupied by another downed
@@ -4801,7 +4928,13 @@ namespace Sporeholm.Simulation.Systems
                     if (map != null && t.TargetTileX >= 0 && t.TargetTileY >= 0)
                     {
                         var slot = map.GetVegetation(t.TargetTileX, t.TargetTileY);
-                        if (slot.IsPresent && !slot.IsDepleted)
+                        // v0.7.3 (E8) — re-validate the designation at apply time:
+                        // another shroomp may have cleared it, or the player may
+                        // have cancelled the Chop order, between path-start and
+                        // arrival this tick. Skip the work if it's gone (the task
+                        // still clears below so the shroomp re-evaluates).
+                        if (slot.IsPresent && !slot.IsDepleted
+                            && map.HasChopWoodDesignation(t.TargetTileX, t.TargetTileY))
                         {
                             // v0.4.15 — single-shot felling (RimWorld
                             // semantics). The previous version called
@@ -4878,7 +5011,10 @@ namespace Sporeholm.Simulation.Systems
                     if (map != null && t.TargetTileX >= 0 && t.TargetTileY >= 0)
                     {
                         var slot = map.GetVegetation(t.TargetTileX, t.TargetTileY);
-                        if (slot.IsPresent && !slot.IsDepleted)
+                        // v0.7.3 (E8) — re-validate the Cut designation at apply
+                        // time (another shroomp cleared it / player cancelled).
+                        if (slot.IsPresent && !slot.IsDepleted
+                            && map.HasCutDesignation(t.TargetTileX, t.TargetTileY))
                         {
                             var vegType = slot.Type;
                             var dropPos = new Vector2(
@@ -5121,18 +5257,20 @@ namespace Sporeholm.Simulation.Systems
                         {
                             ThoughtRegistry.Add(s,       "ChatWithEnemy", partner.Name);
                             ThoughtRegistry.Add(partner, "ChatWithEnemy", s.Name);
+                            // v0.7.3 (N9) — a sour chat erodes opinion further.
+                            s.Preferences?.AdjustOpinion(partner.Name, -1.5f);
+                            partner.Preferences?.AdjustOpinion(s.Name, -1.5f);
                         }
                         else
                         {
                             bool weLike   = s.Preferences?.LikesShroomp(partner.Name) ?? false;
                             ThoughtRegistry.Add(s,       weLike ? "ChatWithFriend" : "NiceChat", partner.Name);
                             ThoughtRegistry.Add(partner, weLike ? "ChatWithFriend" : "NiceChat", s.Name);
-                            // Tiny chance of forming a friendship on a positive chat.
-                            if ((s.Id.GetHashCode() ^ partner.Id.GetHashCode() & 0xF) == 0)
-                            {
-                                s.Preferences?.Befriend(partner.Name);
-                                partner.Preferences?.Befriend(s.Name);
-                            }
+                            // v0.7.3 (N9) — a good chat builds opinion; crossing the
+                            // friend threshold promotes them to friends (the binary
+                            // Liked list stays in sync inside AdjustOpinion).
+                            s.Preferences?.AdjustOpinion(partner.Name, +2f);
+                            partner.Preferences?.AdjustOpinion(s.Name, +2f);
                         }
                     }
                     break;

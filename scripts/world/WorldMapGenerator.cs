@@ -5,11 +5,13 @@ using Godot;
 namespace Sporeholm.World
 {
     // Generates a sparse world map from four independent noise layers.
-    // Grid size is variable (8–128); bias params nudge each noise channel ±35%.
+    // Grid size is variable (8–192); bias params nudge each noise channel ±35%.
     public static class WorldMapGenerator
     {
         public const int DefaultGridSize = 32;
-        public const int MaxGridSize     = 128;
+        // v0.7.3 — raised 128→192 so the WorldGenPanel "192 × 192 (Max)" option
+        // actually generates a 192² world instead of being silently clamped to 128².
+        public const int MaxGridSize     = 192;
 
         public static WorldTile[,] Generate(int seed, int gridSize = DefaultGridSize,
             float elevBias = 0f, float rainBias = 0f, float tempBias = 0f, float magicBias = 0f)

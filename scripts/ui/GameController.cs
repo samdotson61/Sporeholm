@@ -55,6 +55,11 @@ public partial class GameController : Node
 	// is O(1). Mirrored into ShroompColonyView via SetSelection each time it
 	// changes so the yellow selection ring tracks the colony view's draw.
 	private readonly System.Collections.Generic.HashSet<string> _selectedShroomps = new();
+	// v0.7.3 (N20) — points collected while the Patrol order tool is active.
+	// Each left-click appends one; ≥2 commits the loop to the selected
+	// shroomp(s). A plain (no-Shift) click after a route is complete starts a
+	// fresh route; Shift always appends.
+	private readonly System.Collections.Generic.List<Godot.Vector2> _patrolRoute = new();
 	// Name of the shroomp currently selected (or null). Right-click move orders
 	// target this shroomp when set. Mirrors `VisualShroomp.Selected` in colony view.
 	// _selectedShroompName removed v0.3.24 — replaced by _selectedShroomps HashSet above.
@@ -733,6 +738,27 @@ public partial class GameController : Node
 
 		var desig = _toolbar.ActiveDesignation;
 
+		// ── v0.7.3 (N20) Patrol order: point-based, not a rectangle paint ──
+		// Each left-click (press) adds a waypoint; with ≥2 points the loop is
+		// (re)assigned live to the selected shroomp(s). A plain click after a
+		// complete route starts a fresh route; Shift always appends. Requires
+		// shroomp(s) selected; a plain right-click move cancels patrol (sim side).
+		if (desig == Sporeholm.UI.DesignationTool.Patrol)
+		{
+			if (!mb.Pressed) return true;              // act on press, swallow release
+			if (!tile.HasValue) return true;
+			if (_selectedShroomps.Count == 0) return true;   // nothing to command
+			var pmap = WorldState.Instance?.CurrentLocalMap;
+			if (pmap == null || !pmap.IsPassable(tile.Value.x, tile.Value.y)) return true;
+			bool shiftHeld = Input.IsKeyPressed(Key.Shift);
+			if (_patrolRoute.Count >= 2 && !shiftHeld) _patrolRoute.Clear();
+			_patrolRoute.Add(click);
+			_orderFeedback.RingMove(click);
+			if (_patrolRoute.Count >= 2)
+				_sim.RequestPatrolOrderGroup(_selectedShroomps, _patrolRoute);
+			return true;
+		}
+
 		// ── Tool active → designation drag-box (existing behaviour) ───────
 		if (desig != Sporeholm.UI.DesignationTool.None && tile.HasValue)
 		{
@@ -1069,6 +1095,8 @@ public partial class GameController : Node
 		// v0.5.84t — starving alert one-shot per pawn.
 		_sim.Connect(SimulationManager.SignalName.StarvationStarted,
 			Callable.From<string>(OnStarvationStarted));
+		_sim.Connect(SimulationManager.SignalName.MentalBreakStarted,
+			Callable.From<string, string>(OnMentalBreakStarted));   // v0.7.3 (N8)
 		// v0.6.2 audit Fix 5 — auto-close EntityCardPanel on entity death.
 		_sim.Connect(SimulationManager.SignalName.EntityRemoved,
 			Callable.From<string>(OnEntityRemoved));
@@ -1603,6 +1631,14 @@ public partial class GameController : Node
 	{
 		GD.Print($"[Starvation] {name} is starving");
 		_msgLog.Post($"{name} is starving!", MessageLog.Category.Starving, _lastDate);
+	}
+
+	// v0.7.3 (N8) — mental-break alert. Mood collapse → a colonist loses
+	// control for a spell (sad wander / tantrum / daze). One entry per break.
+	private void OnMentalBreakStarted(string name, string kind)
+	{
+		GD.Print($"[MentalBreak] {name} is {kind}");
+		_msgLog.Post($"{name} is {kind}.", MessageLog.Category.MoodDrop, _lastDate);
 	}
 
 	// Compact in-game timestamp: "Hour 6 Day 3, Spring, Year 1 S.D." → "D3 Y1"

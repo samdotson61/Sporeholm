@@ -71,6 +71,12 @@ public partial class SaveManager : Node
 		// only the wound records + pain are dropped, which heal back naturally).
 		public List<HediffSaveData>?           Hediffs        { get; init; } = null;
 		public float                           Venom          { get; init; } = 0f;
+		// v0.7.3 (N20) — patrol order. Route stored interleaved [x0,y0,x1,y1,…]
+		// in pixel space; null for shroomps with no patrol. PatrolIndex is the
+		// current leg. Standing orders persist across save/load (unlike one-shot
+		// move orders, which are intentionally transient).
+		public List<float>?                    Patrol         { get; init; } = null;
+		public int                             PatrolIndex    { get; init; } = 0;
 	}
 
 	// v0.7.1 (Phase 7) — per-part wound (Hediff) save record. Type is the
@@ -276,6 +282,10 @@ public partial class SaveManager : Node
 		public List<string> DislikedActivities { get; init; } = new();
 		public List<string> LikedShroomps        { get; init; } = new();
 		public List<string> DislikedShroomps     { get; init; } = new();
+		// v0.7.3 (N9) — opinion ledger (name→score) + lover bonds. Empty on
+		// pre-v0.7.3 saves (Friend/Rival re-derive from the binary lists above).
+		public Dictionary<string, float> Opinions { get; init; } = new();
+		public List<string>              Lovers   { get; init; } = new();
 	}
 
 	// v0.4.7 (bugreport B-1) — per-shroomp thought ring slot. Only active
@@ -770,6 +780,8 @@ public partial class SaveManager : Node
 				BloodLoss   = s.BloodLossPct,          // v0.5.81 — bleeding reservoir
 				Hediffs     = ex?.Hediffs,             // v0.7.1 — wounds
 				Venom       = ex?.Venom ?? 0f,         // v0.7.1 — active venom load
+				Patrol      = ex?.Patrol,              // v0.7.3 — patrol route
+				PatrolIndex = ex?.PatrolIndex ?? 0,    // v0.7.3
 			});
 		}
 		return shroomps;

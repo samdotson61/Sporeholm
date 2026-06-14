@@ -88,6 +88,15 @@ namespace Sporeholm.Simulation
         Train,
         // Tier 0 — player override
         PlayerOrder,
+        // v0.7.3 (N20) — Patrol: a standing player order. The shroomp loops
+        // between PatrolWaypoints (set via the Patrol order tool) until a plain
+        // move order cancels it. Driven by BehaviorSystem's dedicated patrol
+        // pass (like combat/rescue), so it has no ApplyTaskEffect case.
+        Patrol,
+        // v0.7.3 (N8) — MentalBreak: shroomp has lost player control (mood
+        // collapse). Driven by BehaviorSystem's mental-break pass; the verb
+        // surfaces "Breaking down" in the roster/card.
+        MentalBreak,
     }
 
     // Roadmap §3.2 behavior task carried by each Shroomp. Target is in *pixel*

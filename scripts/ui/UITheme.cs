@@ -103,6 +103,10 @@ namespace Sporeholm.UI
         // erase mode to flip to disallowed. Operates on the currently
         // selected single shroomp via GameController.SelectedShroompNames.
         AllowedArea,
+        // v0.7.3 (N20) — Patrol order. With shroomp(s) selected, click 2+
+        // points (Shift to add more) to set a looping patrol route. Not a
+        // tile-paint designation — GameController collects the points directly.
+        Patrol,
     }
 
     // Roadmap §3.x.7 — single source of truth for floating-panel theme constants.

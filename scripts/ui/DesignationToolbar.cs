@@ -61,6 +61,7 @@ public partial class DesignationToolbar : Control
         BuildTrainingDummy = DesignationTool.BuildTrainingDummy,
         // v0.5.25 (Phase 5C polish) — Allowed-area painter (per-shroomp).
         AllowedArea    = DesignationTool.AllowedArea,
+        Patrol         = DesignationTool.Patrol,   // v0.7.3 (N20)
         Demolish   = DesignationTool.Demolish,
         Priority     = 102,   // Phase 3.10 stub
     }
@@ -117,6 +118,7 @@ public partial class DesignationToolbar : Control
         Tool.BuildSparringYard  => DesignationTool.BuildSparringYard,  // v0.7.2
         Tool.BuildTrainingDummy => DesignationTool.BuildTrainingDummy, // v0.7.2
         Tool.AllowedArea    => DesignationTool.AllowedArea,      // v0.5.25
+        Tool.Patrol         => DesignationTool.Patrol,           // v0.7.3 (N20)
         Tool.Demolish   => DesignationTool.Demolish,    // v0.5.19
         Tool.Remove    => DesignationTool.Remove,
         _              => DesignationTool.None,
@@ -198,6 +200,10 @@ public partial class DesignationToolbar : Control
         // entry stays so cross-tab activation still routes through this
         // toolbar's `SetActiveTool` (single source of active-tool truth).
         AddToolButton(Tool.Remove,   "✕ Remove",   "Wipe any designation or stockpile cell in box.");
+        // v0.7.3 (N20) — Patrol order. Unit command, not a tile paint:
+        // select shroomp(s), then click 2+ points (Shift to add more) to set
+        // a looping patrol route. A plain right-click move cancels it.
+        AddToolButton(Tool.Patrol,   "🚩 Patrol",  "Select shroomp(s), then click two points (hold Shift to add more) — they patrol the loop between them. A plain right-click move cancels patrol.");
         // v0.3.26 — Wall / Storage / Priorities moved to their own tabs in
         // BottomTabPanel (Build / Zones / Jobs). Orders tab is now just the
         // active order tools, mirroring RimWorld's tab separation.

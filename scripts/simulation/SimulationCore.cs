@@ -97,6 +97,18 @@ namespace Sporeholm.Simulation
 		// to MessageLog under the new Starving category.
 		public ConcurrentQueue<ShroompSnapshot> PendingStarvationStarts { get; } = new();
 
+		// v0.7.3 (N8) — rising-edge mental-break alerts. (Name, Kind) so the
+		// MessageLog can read e.g. "X is throwing a tantrum." SimulationManager
+		// drains + emits MentalBreakStarted; GameController posts the message.
+		public ConcurrentQueue<(string Name, string Kind)> PendingMentalBreaks { get; } = new();
+		private static string MentalBreakLabel(MentalBreakType t) => t switch
+		{
+			MentalBreakType.SadWander => "wandering in despair",
+			MentalBreakType.Tantrum   => "throwing a tantrum",
+			MentalBreakType.Daze      => "frozen in a daze",
+			_                         => "breaking down",
+		};
+
 		// v0.6.2 audit Fix 5 — entity-removed events for UI cleanup. Mirrors
 		// PendingDeaths for shroomps. Enqueued when EntitySystem prunes dead
 		// entities + when an entity despawns (flee out the map edge, etc.).
@@ -619,6 +631,23 @@ namespace Sporeholm.Simulation
 					}
 				}
 
+				// v0.7.3 (N8) — rising-edge mental-break alert (mirrors the
+				// starvation edge above). One enqueue per break; WasMentalBreaking
+				// holds until the break ends so the player isn't spammed.
+				foreach (var s in working)
+				{
+					if (!s.IsAlive) continue;
+					if (s.MentalBreakTicks > 0 && !s.WasMentalBreaking)
+					{
+						s.WasMentalBreaking = true;
+						PendingMentalBreaks.Enqueue((s.Name, MentalBreakLabel(s.MentalBreak)));
+					}
+					else if (s.MentalBreakTicks <= 0 && s.WasMentalBreaking)
+					{
+						s.WasMentalBreaking = false;
+					}
+				}
+
 				// Healing phase runs last — dead shroomps are already marked so HealTick
 				// skips them, and vital organs that just hit 0 are not healed back above zero.
 				NeedsSystem.HealTick(working);
@@ -895,6 +924,16 @@ namespace Sporeholm.Simulation
 			// snapshot under _shroompLock so the iteration is safe.
 			const float WitnessRadiusPx = 10f * Sporeholm.World.LocalMap.TileSize;
 			float wr2 = WitnessRadiusPx * WitnessRadiusPx;
+			// v0.7.3 (E10) — spatial early-out before the per-shroomp distance
+			// math. (1) Bounding-box reject on each axis (exact, skips the
+			// squared-distance multiply for far shroomps). (2) Region gate:
+			// resolve the corpse tile's DF region once; a shroomp in a different
+			// region is walled off from the body and can't witness the death
+			// through a wall, so skip it. Region 0 (corpse on an impassable tile)
+			// disables the gate and falls back to pure distance.
+			int corpseTx = (int)(dropPos.X / Sporeholm.World.LocalMap.TileSize);
+			int corpseTy = (int)(dropPos.Y / Sporeholm.World.LocalMap.TileSize);
+			ushort corpseRegion = Map.GetRegion(corpseTx, corpseTy);
 			var living = AllShroomps();
 			for (int i = 0; i < living.Count; i++)
 			{
@@ -902,6 +941,13 @@ namespace Sporeholm.Simulation
 				if (!other.IsAlive || other == s) continue;
 				float dx = other.SimPos.X - dropPos.X;
 				float dy = other.SimPos.Y - dropPos.Y;
+				if (System.Math.Abs(dx) > WitnessRadiusPx || System.Math.Abs(dy) > WitnessRadiusPx) continue;
+				if (corpseRegion != 0)
+				{
+					int otx = (int)(other.SimPos.X / Sporeholm.World.LocalMap.TileSize);
+					int oty = (int)(other.SimPos.Y / Sporeholm.World.LocalMap.TileSize);
+					if (Map.GetRegion(otx, oty) != corpseRegion) continue;
+				}
 				if (dx * dx + dy * dy > wr2) continue;
 				ThoughtRegistry.Add(other, "WitnessedDeath", context: s.Name);
 			}

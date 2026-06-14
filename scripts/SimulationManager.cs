@@ -42,6 +42,7 @@ namespace Sporeholm
 		// v0.5.84t — one-shot starvation alert (rising edge of Nutrition < 20).
 		// GameController posts a MessageLog entry under Category.Starving.
 		[Signal] public delegate void StarvationStartedEventHandler(string name);
+		[Signal] public delegate void MentalBreakStartedEventHandler(string name, string kind);   // v0.7.3 (N8)
 
 		// v0.6.2 audit Fix 5 — entity removed (died / despawned). GameController
 		// uses this to auto-close the EntityCardPanel when the selected
@@ -226,6 +227,10 @@ namespace Sporeholm
 			// v0.5.84t — drain starvation rising-edges.
 			while (_core.PendingStarvationStarts.TryDequeue(out var starv))
 				EmitSignal(SignalName.StarvationStarted, starv.Name);
+
+			// v0.7.3 (N8) — drain mental-break rising-edges.
+			while (_core.PendingMentalBreaks.TryDequeue(out var mb))
+				EmitSignal(SignalName.MentalBreakStarted, mb.Name, mb.Kind);
 
 			// v0.6.2 audit Fix 5 — drain entity-removal events. GameController
 			// auto-closes the EntityCardPanel if the removed creature was the
@@ -424,6 +429,7 @@ namespace Sporeholm
 				{
 					var s = DevFindShroompByName(capturedName);
 					s?.MoveOrderQueue.Clear();
+					s?.PatrolWaypoints.Clear();   // v0.7.3 (N20) — a plain move order cancels patrol
 				});
 				_core.QueuePlayerOrder(name, target);
 				i++;
@@ -457,6 +463,39 @@ namespace Sporeholm
 				{
 					var s = DevFindShroompByName(capturedName);
 					s?.MoveOrderQueue.Add(target);
+				});
+				i++;
+			}
+		}
+
+		// v0.7.3 (N20) — patrol order. Assigns a standing patrol route (2+
+		// pixel-space points) to each named shroomp; they loop the route as a
+		// standing order until a plain move order cancels it. Squad members
+		// start on staggered legs so they spread out along the route rather
+		// than walking nose-to-tail. Routed through the sim-thread command
+		// queue (same contract as the move-order APIs).
+		public void RequestPatrolOrderGroup(System.Collections.Generic.IEnumerable<string> shroompNames,
+			System.Collections.Generic.IReadOnlyList<Vector2> points)
+		{
+			if (points == null || points.Count < 2) return;
+			var route = new System.Collections.Generic.List<Vector2>(points);
+			int count = 0;
+			foreach (var _ in shroompNames) count++;
+			if (count == 0) return;
+			int i = 0;
+			foreach (var name in shroompNames)
+			{
+				string capturedName = name;
+				int startLeg = count > 1 ? (i * route.Count) / count : 0;
+				_core.PostMainThreadCommand(() =>
+				{
+					var s = DevFindShroompByName(capturedName);
+					if (s == null) return;
+					s.PatrolWaypoints = new System.Collections.Generic.List<Vector2>(route);
+					s.PatrolIndex = startLeg % route.Count;
+					s.MoveOrderQueue.Clear();
+					s.CurrentTask = null;
+					s.PathWaypoints.Clear();
 				});
 				i++;
 			}
@@ -1074,6 +1113,8 @@ namespace Sporeholm
 					Thoughts    = SnapshotThoughts(s.Thoughts),
 					Hediffs     = SnapshotHediffs(s.Hediffs),   // v0.7.1
 					Venom       = s.Venom,                      // v0.7.1
+					Patrol      = SnapshotPatrol(s.PatrolWaypoints),   // v0.7.3 (N20)
+					PatrolIndex = s.PatrolIndex,                       // v0.7.3 (N20)
 				};
 			}
 			return result;
@@ -1090,6 +1131,9 @@ namespace Sporeholm
 				// v0.7.1 — Phase 7 wounds + active venom load.
 				public System.Collections.Generic.List<SaveManager.HediffSaveData>? Hediffs = null;
 				public float Venom = 0f;
+				// v0.7.3 (N20) — patrol route (interleaved x,y px) + current leg.
+				public System.Collections.Generic.List<float>? Patrol = null;
+				public int PatrolIndex = 0;
 			// v0.5.73 — full Shroomp.Inventory snapshot. Pre-v0.5.73 only
 			// the topmost stack (CarriedItem getter) was saved; a hauler
 			// with multiple stacks lost the rest. Loaders read Inventory
@@ -1112,6 +1156,17 @@ namespace Sporeholm
 			var list = new System.Collections.Generic.List<SaveManager.HediffSaveData>(hediffs.Count);
 			foreach (var h in hediffs)
 				list.Add(new SaveManager.HediffSaveData(h.BodyPart, h.Type.ToString(), h.Severity, h.Tended));
+			return list;
+		}
+
+		// v0.7.3 (N20) — flatten a patrol route to an interleaved [x0,y0,x1,y1,…]
+		// float list for the save record. Null when the shroomp isn't patrolling.
+		private static System.Collections.Generic.List<float>? SnapshotPatrol(
+			System.Collections.Generic.List<Vector2> waypoints)
+		{
+			if (waypoints == null || waypoints.Count == 0) return null;
+			var list = new System.Collections.Generic.List<float>(waypoints.Count * 2);
+			foreach (var p in waypoints) { list.Add(p.X); list.Add(p.Y); }
 			return list;
 		}
 
@@ -1168,6 +1223,8 @@ namespace Sporeholm
 				DislikedActivities = new System.Collections.Generic.List<string>(p.DislikedActivities),
 				LikedShroomps        = new System.Collections.Generic.List<string>(p.LikedShroomps),
 				DislikedShroomps     = new System.Collections.Generic.List<string>(p.DislikedShroomps),
+					Opinions             = new System.Collections.Generic.Dictionary<string, float>(p.Opinions),   // v0.7.3 (N9)
+					Lovers               = new System.Collections.Generic.List<string>(p.Lovers),                  // v0.7.3 (N9)
 			};
 		}
 
@@ -1682,6 +1739,16 @@ namespace Sporeholm
 				}
 				s.Venom = sd.Venom;
 
+				// v0.7.3 (N20) — restore a standing patrol route (null on older saves).
+				if (sd.Patrol != null && sd.Patrol.Count >= 4)
+				{
+					var wps = new System.Collections.Generic.List<Vector2>(sd.Patrol.Count / 2);
+					for (int pi = 0; pi + 1 < sd.Patrol.Count; pi += 2)
+						wps.Add(new Vector2(sd.Patrol[pi], sd.Patrol[pi + 1]));
+					s.PatrolWaypoints = wps;
+					s.PatrolIndex = (sd.PatrolIndex >= 0 && sd.PatrolIndex < wps.Count) ? sd.PatrolIndex : 0;
+				}
+
 				// v0.3.35 — restore SimPos / SimTarget / SimSpeed from the
 				// save so the shroomp re-enters the sim at its saved tile, not
 				// at Vector2.Zero (which SeedSimPositions would then clobber
@@ -1781,6 +1848,8 @@ namespace Sporeholm
 						DislikedActivities = new List<string>(sd.Preferences.DislikedActivities),
 						LikedShroomps        = new List<string>(sd.Preferences.LikedShroomps),
 						DislikedShroomps     = new List<string>(sd.Preferences.DislikedShroomps),
+						Opinions             = new Dictionary<string, float>(sd.Preferences.Opinions),   // v0.7.3 (N9)
+						Lovers               = new List<string>(sd.Preferences.Lovers),                  // v0.7.3 (N9)
 					};
 				}
 

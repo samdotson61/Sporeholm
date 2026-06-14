@@ -543,14 +543,23 @@ namespace Sporeholm.Simulation.Systems
                 }
             }
 
-            // v0.5.39 — RimWorld parity: with no stockpile/shelf available,
-            // drop the carried item in place rather than trucking it to
-            // the spawn cluster (the pre-v0.5.39 "default stockpile"
-            // behaviour Sam asked to remove). SelectHaulTarget refuses to
-            // create new haul tasks when no storage exists, so this branch
-            // only fires when storage was demolished mid-haul or a force-
-            // haul (priority) item has no matching zone — both edge cases
-            // where drop-in-place is the right graceful failure.
+            // v0.5.39 / v0.7.3 (E1) — no stockpile/shelf available. Drop at the
+            // nearest passable cell rather than blindly at SimPos: after a
+            // passability flip (vegetation regrowth, save/load race) the carrier
+            // can momentarily overlap an impassable tile, and dropping there
+            // strands the item inside a wall. FindNearestPassable returns SimPos's
+            // own tile when it's passable (the common case), so normal behaviour
+            // is unchanged. SelectHaulTarget refuses new haul tasks when no
+            // storage exists, so this branch only fires when storage was
+            // demolished mid-haul or a force-haul item has no matching zone —
+            // both edge cases where graceful drop-in-place is correct.
+            int fbx = (int)(s.SimPos.X / LocalMap.TileSize);
+            int fby = (int)(s.SimPos.Y / LocalMap.TileSize);
+            var fbSpot = map.FindNearestPassable(fbx, fby);
+            if (fbSpot.HasValue)
+                return new Vector2(
+                    fbSpot.Value.X * LocalMap.TileSize + LocalMap.TileSize * 0.5f,
+                    fbSpot.Value.Y * LocalMap.TileSize + LocalMap.TileSize * 0.5f);
             return s.SimPos;
         }
     }

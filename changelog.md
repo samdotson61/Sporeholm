@@ -7,6 +7,36 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.7.3] — 2026-06-14 — Patrol orders, mental breaks, relationships + backlog fixes
+
+A gameplay-depth pass: a player-issued patrol order, mood-collapse mental breaks, a social opinion/relationship ledger, a larger max world size, and several long-standing backlog fixes.
+
+### Patrol orders
+
+Select one or more colonists, pick the **🚩 Patrol** order, then click two points (hold **Shift** to add more) to set a looping route. The colonists patrol it as a standing order — overriding autonomous work and idle — while still yielding to critical needs (hunger / rest / safety) and combat, then resuming. A plain right-click move order cancels patrol. Squads start on staggered legs so they spread out along the route. Patrol routes persist through save/load.
+
+### Mental breaks
+
+When a colonist's mood collapses (the Breaking / Collapse band), they may briefly lose control: **sad wandering**, a **tantrum** (erratic stomping about), or a **daze** (standing catatonic). A break overrides work, draft, and patrol — but not combat self-defense or critical needs — and ends with a *catharsis* mood relief so it doesn't immediately recur. A message-log alert fires when a break starts.
+
+### Relationships (opinion ledger)
+
+Colonists now keep a numeric **opinion** of everyone they interact with, built up (or eroded) by social encounters. Opinions derive **relationships** — Acquaintance, Friend, Rival, and Lover (the last a hook for a future courtship system). Repeated good chats build friendship; repeated slights now build genuine rivalry (previously a slight only stung in the moment). The existing friend / enemy chat reactions ride on top of the ledger. Opinions + bonds persist through save/load.
+
+### Larger worlds
+
+The **192 × 192 "Max"** world-size option now actually generates a 192² world — previously it was silently clamped to 128².
+
+### Backlog fixes
+
+- **Haul fallback** — when no stockpile or shelf is available, a carried item is set down at the nearest passable cell rather than wherever the carrier happens to overlap (which could be inside a wall after a passability flip).
+- **Designation re-validation** — a Chop or Cut job is re-checked at the moment of work; if another colonist already cleared it or the player cancelled it, the colonist drops the job cleanly instead of swinging at nothing.
+- **Death reactions** — the "witnessed a death" mood broadcast now skips colonists walled off in another region and bounding-box-rejects distant ones before the distance math (perf + correctness tidy — no witnessing a death through a wall).
+
+Build clean, 0 warnings / 0 errors.
+
+---
+
 ## [0.7.2] — 2026-06-14 — Phase 7 completion: rescue, training buildings, apparel layers
 
 Closes out Phase 7 with the three remaining combat-arc features: carrying a downed colonist to a bed, combat training furniture, and worn-apparel sprites — plus a hardening pass from an adversarial review.

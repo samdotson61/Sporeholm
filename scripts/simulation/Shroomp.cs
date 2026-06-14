@@ -7,6 +7,9 @@ namespace Sporeholm.Simulation
 	public enum LifeStage { Sprout, Juvenile, Adult, Elder, LastSeason }
 	public enum Sex { Male, Female }
 	public enum MoodState { Inspired, Content, Stressed, Distressed, Breaking, Collapse }
+	// v0.7.3 (N8) — mental-break kinds. SadWander = drift aimlessly; Tantrum =
+	// erratic stomping about; Daze = stand catatonic. None = not breaking.
+	public enum MentalBreakType { None, SadWander, Tantrum, Daze }
 	public enum CauseOfDeath { Natural, Starvation, Combat, Dev, BloodLoss }
 
 	// v0.5.63 — Cap-and-stem geometry visual identity per shroomport.md §4.2.
@@ -62,6 +65,20 @@ namespace Sporeholm.Simulation
 			> 0f   => MoodState.Breaking,
 			_      => MoodState.Collapse
 		};
+
+		// v0.7.3 (N8) — mental break. When mood collapses a shroomp may lose
+		// player control for a spell. MentalBreakTicks counts down while broken;
+		// the BehaviorSystem mental-break pass owns the shroomp meanwhile.
+		// MentalBreakCooldown blocks an immediate re-break after recovery.
+		// WasMentalBreaking is the rising-edge flag SimulationCore uses to emit
+		// the player alert (mirrors WasStarving). BreakWanderTarget/RetargetTicks
+		// drive the SadWander/Tantrum drift. Not persisted (transient like combat).
+		public MentalBreakType MentalBreak         { get; set; } = MentalBreakType.None;
+		public int             MentalBreakTicks    { get; set; } = 0;
+		public int             MentalBreakCooldown { get; set; } = 0;
+		public bool            WasMentalBreaking   { get; set; } = false;
+		public Godot.Vector2   BreakWanderTarget   { get; set; } = Godot.Vector2.Zero;
+		public int             BreakRetargetTicks  { get; set; } = 0;
 
 		public LifeStage LifeStage => AgeInYears switch
 		{
@@ -638,6 +655,17 @@ namespace Sporeholm.Simulation
 		// (TaskType + target + optional targetId); v0.5.2 ships with Move
 		// only since combat is Phase 7.
 		public List<Godot.Vector2> MoveOrderQueue { get; } = new();
+
+		// v0.7.3 (N20) — patrol order. The player picks 2+ points (a route);
+		// the shroomp loops between them indefinitely as a standing order until
+		// a plain move order cancels it. PatrolWaypoints is pixel-space (same
+		// coordinate system as MoveOrderQueue / PlayerOrder.Target); PatrolIndex
+		// is the current leg the shroomp is walking toward. Same cross-thread
+		// contract as MoveOrderQueue (sim thread reads + mutates; main thread
+		// replaces via PostMainThreadCommand). Patrol yields to critical needs
+		// (Nutrition<20 / Rest<15 / Safety<20) and to combat, then resumes.
+		public List<Godot.Vector2> PatrolWaypoints { get; set; } = new();
+		public int                 PatrolIndex     { get; set; } = 0;
 
 		// v0.3.47 (Phase 4 sub-B) — RimWorld-style per-shroomp work
 		// priorities. Keyed by work-category string (Doctor / Mine /

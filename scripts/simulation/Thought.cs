@@ -119,6 +119,7 @@ namespace Sporeholm.Simulation
 			new("VisitedSpot",  "Visited a favourite spot.",    +3f,  1200, ThoughtCategory.Idle),
 			new("Wandered",     "Stretched the legs.",          +1f,   400, ThoughtCategory.Idle),
 			new("Trained",      "Sharpened my combat skills.",  +2f,   700, ThoughtCategory.Idle),   // v0.7.2 (Phase 7)
+			new("Catharsis",    "Let it all out.",              +4f,  1200, ThoughtCategory.Idle),   // v0.7.3 (N8) — post-mental-break relief
 
 			// v0.5.14 (Phase 5C — rimport.md N18) — buried-treasure thought.
 			// Fired by BehaviorSystem.GatherMaterial when an excavation

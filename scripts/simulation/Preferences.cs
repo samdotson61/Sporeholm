@@ -26,6 +26,10 @@ namespace Sporeholm.Simulation
     // negative matches penalise. Sensible defaults (everyone's neutral about
     // most things) keep this from dominating the existing logic — the
     // preferences just *colour* otherwise-equal choices.
+    // v0.7.3 (N9) — relationship classification derived from the opinion ledger
+    // (Friend / Rival from thresholds) plus the explicit Lover bond.
+    public enum RelationKind { Stranger, Acquaintance, Friend, Rival, Lover }
+
     public sealed class Preferences
     {
         // Persistent, rolled-at-creation.
@@ -63,6 +67,73 @@ namespace Sporeholm.Simulation
             LikedShroomps.Remove(name);
             DislikedShroomps.Add(name);
             while (DislikedShroomps.Count > SocialCap) DislikedShroomps.RemoveAt(0);
+        }
+
+        // ── v0.7.3 (N9) — opinion ledger + relationships ──────────────────
+        // A numeric opinion (−100..+100) per known shroomp, accumulated from
+        // social interactions. Friend / Rival are derived from thresholds; the
+        // binary LikedShroomps / DislikedShroomps lists above are kept in sync
+        // (inside AdjustOpinion) so the existing chat-thought logic still works.
+        // Lover is a distinct bond formed by FormLover (a future courtship system
+        // hook — not auto-formed yet).
+        public Dictionary<string, float> Opinions { get; set; } = new();
+        public List<string>              Lovers   { get; set; } = new();
+
+        public const float FriendThreshold = 40f;
+        public const float RivalThreshold  = -40f;
+        public const int   OpinionCap      = 16;   // bound the ledger size
+
+        public float OpinionOf(string name)
+            => name != null && Opinions.TryGetValue(name, out var v) ? v : 0f;
+
+        // Shift opinion toward `name` by delta, clamp to [-100,100], keep the
+        // ledger bounded, and re-derive the Friend/Rival binary lists.
+        public void AdjustOpinion(string name, float delta)
+        {
+            if (string.IsNullOrEmpty(name)) return;
+            float v = Math.Clamp(OpinionOf(name) + delta, -100f, 100f);
+            Opinions[name] = v;
+            if (Opinions.Count > OpinionCap) PruneWeakestOpinion(name);
+            if (v >= FriendThreshold)      Befriend(name);
+            else if (v <= RivalThreshold)  Sour(name);
+            else { LikedShroomps.Remove(name); DislikedShroomps.Remove(name); }
+        }
+
+        private void PruneWeakestOpinion(string keep)
+        {
+            string? weakest = null; float wabs = float.MaxValue;
+            foreach (var kv in Opinions)
+            {
+                if (kv.Key == keep) continue;
+                float a = Math.Abs(kv.Value);
+                if (a < wabs) { wabs = a; weakest = kv.Key; }
+            }
+            if (weakest != null)
+            {
+                Opinions.Remove(weakest);
+                LikedShroomps.Remove(weakest);
+                DislikedShroomps.Remove(weakest);
+            }
+        }
+
+        public RelationKind RelationTo(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return RelationKind.Stranger;
+            if (Lovers.Contains(name)) return RelationKind.Lover;
+            float op = OpinionOf(name);
+            if (op >= FriendThreshold) return RelationKind.Friend;
+            if (op <= RivalThreshold)  return RelationKind.Rival;
+            return Opinions.ContainsKey(name) ? RelationKind.Acquaintance : RelationKind.Stranger;
+        }
+
+        // Stub hook for a future courtship/romance system (Phase 9+). Forms a
+        // lover bond (caller forms both directions) + locks in a strong positive
+        // opinion. Not auto-invoked yet.
+        public void FormLover(string name)
+        {
+            if (string.IsNullOrEmpty(name) || Lovers.Contains(name)) return;
+            Lovers.Add(name);
+            AdjustOpinion(name, 60f);
         }
     }
 

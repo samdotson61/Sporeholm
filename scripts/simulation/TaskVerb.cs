@@ -47,6 +47,8 @@ namespace Sporeholm.Simulation
             TaskType.Train          => "Training",   // v0.7.2 (Phase 7)
             // Tier 0 — player override
             TaskType.PlayerOrder    => "On orders",
+            TaskType.Patrol         => "Patrolling",   // v0.7.3 (N20)
+            TaskType.MentalBreak    => "Breaking down",   // v0.7.3 (N8)
             TaskType.None           => "Idle",
             _                       => "—",
         };

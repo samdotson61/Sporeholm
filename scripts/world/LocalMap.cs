@@ -1649,6 +1649,27 @@ namespace Sporeholm.World
             return winner;
         }
 
+        // v0.7.3 (E1) — nearest passable tile to (fx,fy), spiralling outward.
+        // Returns (fx,fy) itself when it's passable (the common case). Used as
+        // the haul drop-site fallback so a carried item never lands on an
+        // impassable tile the carrier briefly overlapped after a passability
+        // flip. Null only if nothing passable is found within maxRadius.
+        public (int X, int Y)? FindNearestPassable(int fx, int fy, int maxRadius = 12)
+        {
+            if (IsPassable(fx, fy)) return (fx, fy);
+            for (int r = 1; r <= maxRadius; r++)
+            {
+                for (int dy = -r; dy <= r; dy++)
+                for (int dx = -r; dx <= r; dx++)
+                {
+                    if (System.Math.Abs(dx) != r && System.Math.Abs(dy) != r) continue;
+                    int nx = fx + dx, ny = fy + dy;
+                    if (IsPassable(nx, ny)) return (nx, ny);
+                }
+            }
+            return null;
+        }
+
         // v0.5.35 — find nearest built Bed for the Sleep task. Same linear
         // scan as FindNearestShelf; per-bed HashSet can come later if
         // bed-heavy bases need it. Returns null when no bed exists, which
