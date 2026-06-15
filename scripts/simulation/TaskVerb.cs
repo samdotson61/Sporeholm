@@ -53,6 +53,7 @@ namespace Sporeholm.Simulation
             TaskType.HarvestCrop    => "Harvesting crops", // v0.8.0 (Phase 8)
             TaskType.Hunt           => "Hunting",          // v0.8.1 (Phase 8)
             TaskType.Butcher        => "Butchering",       // v0.8.1 (Phase 8)
+            TaskType.Tame           => "Taming",           // v0.8.2 (Phase 8)
             TaskType.None           => "Idle",
             _                       => "—",
         };

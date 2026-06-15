@@ -38,7 +38,11 @@ namespace Sporeholm.Simulation.Entities
         // v0.8.1 (Phase 8) — hunt/butchery state (rendered + persisted).
         bool          MarkedForHunt,
         bool          AwaitingButchery,
-        int           ButcheryTtlTicks
+        int           ButcheryTtlTicks,
+        // v0.8.2 (Phase 8) — taming + produce state (persisted).
+        bool          MarkedForTame,
+        float         TamingProgress,
+        int           ProduceCooldownTicks
     )
     {
         public EntitySnapshot(Entity e) : this(
@@ -47,7 +51,8 @@ namespace Sporeholm.Simulation.Entities
             e.Speed, e.AttackPower,
             e.IsTamed, e.TamedByName, e.WanderHome, e.RandomSeed, e.AttackCooldownTicks,
             e.Nutrition, e.Rest, e.MoodLabel, e.TargetShroompId,
-            e.MarkedForHunt, e.AwaitingButchery, e.ButcheryTtlTicks)
+            e.MarkedForHunt, e.AwaitingButchery, e.ButcheryTtlTicks,
+            e.MarkedForTame, e.TamingProgress, e.ProduceCooldownTicks)
         {
         }
     }

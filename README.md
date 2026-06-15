@@ -2,7 +2,7 @@
 
 A colony simulation game about a tribe of mushroom-people (**Shroomps**) trying to survive in a strange, fungal world. Designed and developed by **Sam Dotson** in **Godot 4.6** (C#).
 
-Current version: **v0.8.1** (active development — Phase 8 (Agricultural). The **farming core** (v0.8.0) grows **nine crops** across three Botany tiers on a sow→tend→harvest loop; **v0.8.0a doubled the wildlife roster to 30 species**; and **v0.8.1 adds hunting + butchery** — mark wild creatures for the hunt (a colonist runs them down through the combat engine), then butcher the carcass into meat, hide, and bone at a Butcher Slab. Built on the complete Phase 7 combat system — body-part wounds, pain + venom, healer / medicine, material-aware armor, draft, rescue, training, apparel, attack + patrol orders, mental breaks, and a social relationship ledger.).
+Current version: **v0.8.2** (active development — Phase 8 (Agricultural): **farming** (v0.8.0, nine crops), the **roster doubled to 30 species** (v0.8.0a), **hunting + butchery** (v0.8.1 — run down wild game and butcher it for meat/hide/bone), and **taming + livestock** (v0.8.2 — win over wild creatures with the Husbandry skill; tamed animals graze peacefully and produce milk, wool, and eggs). Built on the complete Phase 7 combat system — body-part wounds, pain + venom, healer / medicine, material-aware armor, draft, rescue, training, apparel, attack + patrol orders, mental breaks, and a social relationship ledger.).
 
 ---
 
@@ -27,7 +27,7 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 | **Combat** | **Shipped — v0.7.x** (body-part combat, wounds, pain/venom, healer + rescue, layered armor, draft, training, weapons) |
 | **Farming (crops + grow-zones + sow/harvest)** | **Shipped — v0.8.0** (9 crops, 3 Botany tiers, Grow priority, Husbandry skill) |
 | **Hunting + butchery** | **Shipped — v0.8.1** (Hunt order, carcasses, Butcher Slab, meat/hide/bone) |
-| **Animal husbandry (taming / produce / breeding)** | Tagged — later Phase 8 slices |
+| **Animal husbandry (taming + livestock produce)** | **Shipped — v0.8.2** (Tame order, Husbandry job, milk/wool/eggs); pens + breeding in v0.8.3 |
 | **Weather & temperature** | Insulation half — Phase 10 |
 | **Disease, research, eras** | Future phases |
 
@@ -46,7 +46,7 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 - Five core needs: **Nutrition**, **Rest**, **Social**, **Magic Resonance**, **Safety**, with derived **Joy** and mood.
 - **Relationships**: colonists build a numeric opinion of one another from social encounters, forming **Acquaintance / Friend / Rival / Lover** bonds (the last a hook for a future courtship system). Repeated good chats build friendship; repeated slights build rivalry.
 - **Mental breaks**: a colonist whose mood collapses may briefly lose control — **sad wandering**, a **tantrum**, or a **daze** — overriding work and orders (but not self-defense), then recovering with a catharsis. A message-log alert fires when one starts.
-- **13 skills**: Botany, Mining, Athletics, Melee, Ranged, Crafting, **Cooking**, Construction, Magic, Social, Study, Healing, **Husbandry** (added v0.8.0 for Phase 8 farming + animals). Level 0–20 with diminishing XP curves. Farming reads **Botany** — it gates which crops a colonist can plant and scales the harvest yield.
+- **13 skills**: Botany, Mining, Athletics, Melee, Ranged, Crafting, **Cooking**, Construction, Magic, Social, Study, Healing, **Husbandry** (added v0.8.0 for Phase 8 farming + animals). Level 0–20 with diminishing XP curves. Farming reads **Botany** (gates plantable crops + harvest yield); taming reads **Husbandry** (gates taming speed); butchery yield reads **Cooking**.
 - **7 roles**: Forager, Crafter, Guardian, Caretaker, Scholar, Sage, Elder. Each role has skill bonuses + default work priorities.
 - **13 mushroom-themed biological traits** (penetrance 0–1) — active ones include **MyceliumAttuned** (magic resonance lasts longer), **ClusterFruiting** (social decays slower around colony-mates), **EfficientGills** (hunger decays slower), **RapidMetabolism** (hunger decays faster — biological cost), **SporeResonant**, **CompactStature** + **WispyFrame** (carry-capacity penalties). Plus personality archetypes + backstories + the **Pacifist** trait (auto-blocks weapon equipping, ~8% incidence).
 - Full body-part hierarchy (Cap, Stalk, Gills, Spore Vent, Filter, legs, feet, hands) with damage, bleeding, downed state, natural healing.
@@ -101,6 +101,13 @@ A full body-part combat system layered on the wildlife AI. Shroomps and creature
 - **🏹 Hunt order**: drag a box over wild creatures to mark them. A colonist with the **Hunt** job (Guardians by default, Foragers as backup) pursues and kills each one through the combat engine — only armed, non-pacifist colonists give chase, and a hunter that can't catch fast fleeing prey gives up and moves on. The **Remove** tool cancels a hunt mark.
 - **Carcasses**: a butcherable creature's body stays on the ground (a greyed corpse) instead of vanishing. A colonist butchers it in place into **Meat, Hide, and Bone** (drops vary by species); the **Cooking** skill drives the yield. A built **🔪 Butcher Slab** nearby boosts it. Un-butchered carcasses decay away over time.
 - Raw meat is food — it feeds straight into the existing **Cook Meal** recipe. Hunt marks and carcasses persist through save/load.
+
+### Taming + livestock (Phase 8 — v0.8.2)
+
+- **🤝 Tame order**: drag a box over tameable wild creatures to mark them. A colonist with the new **Husbandry** job (Caretakers by default; Foragers + Elders help) visits each and tames it over repeated trips — the **Husbandry skill** sets how fast. A marked creature holds still so the handler can walk up; even a marked predator can't lash out mid-tame. The **Remove** tool calls off a taming. Hunt and Tame are mutually exclusive.
+- **Tamed livestock** join the colony: they never turn on you, graze peacefully near home, and are kept fed so they don't starve.
+- **Produce on a cycle**: tamed milkable / shearable / egg-laying animals drop **milk / spore wool / eggs** about twice a day, hauled to your stockpiles (a Shroomgoat gives both milk and wool). Milk + eggs cook into meals; wool is a cloth material.
+- *(Pens / pasture zones and breeding land in v0.8.3 — for now tamed animals roam near where they were tamed.)*
 
 ### Construction
 
@@ -178,7 +185,7 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 | 5.5 | Crafting bills | Complete |
 | 6 | Entity system (animals + creatures) | Shipped (v0.6.0 — 15 species; expanded to 30 in v0.8.0a) |
 | 7 | Combat (Healer + Rescue + Training + Weapons/Apparel) | Shipped (v0.7.2 — full body-part combat) |
-| **8** | **Agricultural systems** (farming, animal husbandry, hunting) | **In progress** (v0.8.0 farming · v0.8.0a roster→30 · v0.8.1 hunting + butchery; taming/produce/breeding in v0.8.2–8.3) |
+| **8** | **Agricultural systems** (farming, animal husbandry, hunting) | **In progress** (v0.8.0 farming · v0.8.0a roster→30 · v0.8.1 hunting + butchery · v0.8.2 taming + livestock; pens + breeding in v0.8.3) |
 | 9 | Events + Storyteller (Peaceful / Random / Adventure — extensible) | Stub |
 | 10 | Weather + Environment (Insulation half done) | — |
 | 11 | Technology + Culture (research + power) | — |

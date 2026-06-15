@@ -231,6 +231,10 @@ public partial class SaveManager : Node
 		public bool MarkedForHunt    { get; init; } = false;
 		public bool AwaitingButchery { get; init; } = false;
 		public int  ButcheryTtlTicks { get; init; } = 0;
+		// v0.8.2 (Phase 8) — taming + produce state. Defaulted for old saves.
+		public bool  MarkedForTame        { get; init; } = false;
+		public float TamingProgress       { get; init; } = 0f;
+		public int   ProduceCooldownTicks { get; init; } = 0;
 	}
 
 	// v0.5.73 — one tile's structure snapshot. RoomId is NOT saved (the
@@ -785,6 +789,9 @@ public partial class SaveManager : Node
 				MarkedForHunt    = e.MarkedForHunt,      // v0.8.1
 				AwaitingButchery = e.AwaitingButchery,   // v0.8.1
 				ButcheryTtlTicks = e.ButcheryTtlTicks,   // v0.8.1
+				MarkedForTame        = e.MarkedForTame,       // v0.8.2
+				TamingProgress       = e.TamingProgress,      // v0.8.2
+				ProduceCooldownTicks = e.ProduceCooldownTicks,// v0.8.2
 			});
 		}
 		return list;

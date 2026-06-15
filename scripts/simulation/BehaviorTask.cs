@@ -110,6 +110,10 @@ namespace Sporeholm.Simulation
         //     map) and process it into Meat / Hide / Bone (Cooking skill scales
         //     the yield); has its own ApplyTaskEffect case.
         Hunt, Butcher,
+        // v0.8.2 (Phase 8) — Tame: a Husbandry-priority colonist visits a wild
+        // creature the player marked for taming and works it over repeated visits
+        // (TamingProgress, Husbandry-skill-scaled) until it joins the colony.
+        Tame,
     }
 
     // Roadmap §3.2 behavior task carried by each Shroomp. Target is in *pixel*

@@ -29,6 +29,8 @@ public partial class DragSelectionPreview : Node2D
     private static readonly Color FarmFill        = new(0.45f, 0.80f, 0.35f, 0.18f);
     private static readonly Color HuntOutline     = new(0.90f, 0.35f, 0.25f, 0.95f);   // v0.8.1 — kill-red
     private static readonly Color HuntFill        = new(0.90f, 0.35f, 0.25f, 0.18f);
+    private static readonly Color TameOutline     = new(0.40f, 0.65f, 0.95f, 0.95f);   // v0.8.2 — calm-blue
+    private static readonly Color TameFill        = new(0.40f, 0.65f, 0.95f, 0.18f);
     private static readonly Color NoneOutline     = new(0.85f, 0.85f, 0.85f, 0.80f);
     private static readonly Color NoneFill        = new(0.85f, 0.85f, 0.85f, 0.10f);
 
@@ -76,6 +78,7 @@ public partial class DragSelectionPreview : Node2D
             DesignationTool.Remove   => (RemoveOutline,   RemoveFill),
             DesignationTool.Farm     => (FarmOutline,     FarmFill),
             DesignationTool.Hunt     => (HuntOutline,     HuntFill),
+            DesignationTool.Tame     => (TameOutline,     TameFill),
             _                        => (NoneOutline,    NoneFill),
         };
 

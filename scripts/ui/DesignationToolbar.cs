@@ -64,6 +64,8 @@ public partial class DesignationToolbar : Control
         // v0.8.1 (Phase 8) — Butcher Slab painter + Hunt order.
         BuildButcherSlab = DesignationTool.BuildButcherSlab,
         Hunt             = DesignationTool.Hunt,
+        // v0.8.2 (Phase 8) — Tame order.
+        Tame             = DesignationTool.Tame,
         // v0.5.25 (Phase 5C polish) — Allowed-area painter (per-shroomp).
         AllowedArea    = DesignationTool.AllowedArea,
         Patrol         = DesignationTool.Patrol,   // v0.7.3 (N20)
@@ -136,6 +138,7 @@ public partial class DesignationToolbar : Control
         Tool.BuildTrainingDummy => DesignationTool.BuildTrainingDummy, // v0.7.2
         Tool.BuildButcherSlab => DesignationTool.BuildButcherSlab,     // v0.8.1
         Tool.Hunt             => DesignationTool.Hunt,                 // v0.8.1
+        Tool.Tame             => DesignationTool.Tame,                 // v0.8.2
         Tool.AllowedArea    => DesignationTool.AllowedArea,      // v0.5.25
         Tool.Patrol         => DesignationTool.Patrol,           // v0.7.3 (N20)
         Tool.Demolish   => DesignationTool.Demolish,    // v0.5.19
@@ -226,6 +229,9 @@ public partial class DesignationToolbar : Control
         // v0.8.1 (Phase 8) — Hunt order. Drag a box over wild creatures to mark
         // them for hunting; a colonist with Hunt priority kills + butchers them.
         AddToolButton(Tool.Hunt,     "🏹 Hunt",    "Drag a box over wild creatures to mark them for hunting. A colonist with the Hunt job pursues + kills each, then butchers the corpse for Meat / Hide / Bone.");
+        // v0.8.2 (Phase 8) — Tame order. Mark tameable wild creatures; a Husbandry
+        // colonist visits + tames each over repeated trips.
+        AddToolButton(Tool.Tame,     "🤝 Tame",    "Drag a box over tameable wild creatures to mark them. A colonist with the Husbandry job visits + tames each over repeated trips; tamed animals join the colony and produce milk / wool / eggs.");
         // v0.3.26 — Wall / Storage / Priorities moved to their own tabs in
         // BottomTabPanel (Build / Zones / Jobs). Orders tab is now just the
         // active order tools, mirroring RimWorld's tab separation.

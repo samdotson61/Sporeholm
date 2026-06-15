@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Godot;
 using Sporeholm.Simulation.Entities;
 using Sporeholm.Simulation.Combat;
+using Sporeholm.Simulation.Items;
 using Sporeholm.World;
 
 namespace Sporeholm.Simulation.Systems
@@ -62,13 +63,30 @@ namespace Sporeholm.Simulation.Systems
 
                 var def = EntityRegistry.Get(e.Kind);
 
+                // v0.8.2 (Phase 8) — tamed livestock: stay fed by the colony (slow
+                // Nutrition trickle so they don't starve in a pen) and drop produce
+                // (milk / wool / eggs) on a cooldown, hauled to stockpiles.
+                if (e.IsTamed)
+                {
+                    e.Nutrition = Math.Clamp(e.Nutrition + needDecay * 1.5f, 0f, 100f);
+                    if (e.ProduceCooldownTicks > 0) e.ProduceCooldownTicks--;
+                    else if (TryDropProduce(e, map, rng, currentTick))
+                        e.ProduceCooldownTicks = ProduceCooldownTicksFull;
+                }
+                // v0.8.2 — a hungry WILD grazer switches to Graze (abstract
+                // foraging) to recover; recovers fully then resumes wandering.
+                bool grazer = AgriculturalTags.Has(e.Kind, AgriculturalTag.Grazer);
+                if (e.State == EntityState.Graze)
+                    e.Nutrition = Math.Clamp(e.Nutrition + needDecay * 4f, 0f, 100f);
+
                 // State transitions ─────────────────────────────────────
                 switch (e.State)
                 {
                     case EntityState.Wander:
                     case EntityState.Graze:
-                        // Hostile → look for shroomp in aggro range.
-                        if (def.Disposition == Disposition.Hostile && def.AggroRangePx > 0f)
+                        // Hostile → look for shroomp in aggro range. A TAMED
+                        // creature never aggros the colony (even a tamed predator).
+                        if (!e.IsTamed && def.Disposition == Disposition.Hostile && def.AggroRangePx > 0f)
                         {
                             var target = FindNearestShroomp(e.SimPos, shroomps, def.AggroRangePx);
                             if (target != null)
@@ -76,6 +94,14 @@ namespace Sporeholm.Simulation.Systems
                                 e.State = EntityState.Hunt;
                                 e.TargetShroompId = target.Id;
                             }
+                        }
+                        // Hungry wild grazer → graze; sated grazer → back to wander.
+                        else if (grazer && !e.IsTamed && !e.MarkedForTame)
+                        {
+                            if (e.State == EntityState.Wander && e.Nutrition < 45f)
+                                e.State = EntityState.Graze;
+                            else if (e.State == EntityState.Graze && e.Nutrition > 85f)
+                                e.State = EntityState.Wander;
                         }
                         break;
                     case EntityState.Hunt:
@@ -141,11 +167,17 @@ namespace Sporeholm.Simulation.Systems
         // WanderHome every time they arrive or get stuck.
         private static void StepEntity(Entity e, EntityDef def, IReadOnlyList<Shroomp> shroomps, LocalMap map, float dt, Random rng)
         {
+            // v0.8.2 (Phase 8) — a creature the player marked for taming holds
+            // still (but isn't yet tamed) so the Husbandry colonist can walk up
+            // to it instead of chasing a wandering target.
+            if (e.MarkedForTame && !e.IsTamed) return;
+
             // Acquire / refresh target by state.
             switch (e.State)
             {
                 case EntityState.Wander:
                 case EntityState.Graze:
+                case EntityState.Tamed:   // v0.8.2 — tamed livestock graze near home
                     if (e.WanderHopsRemaining <= 0 || (e.SimPos - e.SimTarget).LengthSquared() <= ArrivalPx * ArrivalPx)
                         e.SimTarget = PickWanderTarget(e, map, rng);
                     break;
@@ -227,6 +259,36 @@ namespace Sporeholm.Simulation.Systems
             return e.SimPos;   // sat in place if everything's blocked
         }
 
+        // v0.8.2 (Phase 8) — produce cooldown for tamed livestock (~half an
+        // in-game day at the TickBody rate). Public so the tame-completion path
+        // can seed it (a freshly-tamed animal waits a full cooldown before its
+        // first drop instead of dumping produce the instant it's tamed).
+        public const int ProduceCooldownTicksFull = 30000;
+
+        // v0.8.2 (Phase 8) — drop a tamed creature's produce on its tile when the
+        // cooldown lapses: Milkable→Milk, EggLayer→Egg, Shearable→Wool (a creature
+        // can carry several tags, e.g. Shroomgoat = Milk + Wool). Returns true if
+        // anything dropped, so the caller resets the cooldown. The normal haul
+        // loop carries the produce to a stockpile.
+        private static bool TryDropProduce(Entity e, LocalMap map, Random rng, int currentTick)
+        {
+            bool any = false;
+            var pos = e.SimPos;
+            void Drop(string sub)
+            {
+                var kind = ItemRegistry.KindForSubType(sub);
+                if (kind == null) return;
+                var item = ItemFactory.Create(kind.Value, sub, null, rng, currentTick, quantity: 1);
+                item.TilePos = pos;
+                map.DropItem(item);
+                any = true;
+            }
+            if (AgriculturalTags.Has(e.Kind, AgriculturalTag.Milkable))  Drop("Milk");
+            if (AgriculturalTags.Has(e.Kind, AgriculturalTag.EggLayer))  Drop("Egg");
+            if (AgriculturalTags.Has(e.Kind, AgriculturalTag.Shearable)) Drop("Wool");
+            return any;
+        }
+
         // v0.7.0 (Phase 7) — react to being attacked by a shroomp. Friendlies
         // and flee-when-struck hostiles (Magic Wisp) flee toward safety; all
         // other hostiles and provoked neutrals turn on the attacker. Called by
@@ -235,6 +297,10 @@ namespace Sporeholm.Simulation.Systems
         public static void ProvokeEntity(Entity e, Guid attackerId)
         {
             if (e == null || !e.IsAlive) return;
+            // v0.8.2 (Phase 8) — a tamed colony animal never turns on the colony,
+            // even if struck (friendly-fire, a future slaughter order, stray AoE).
+            // It stays tamed + peaceful rather than flipping to Hunt/Flee.
+            if (e.IsTamed) return;
             var def = EntityRegistry.Get(e.Kind);
             bool fleer = def.Disposition == Disposition.Friendly
                          || (def.Disposition == Disposition.Hostile && def.FleeRangePx > 0f);

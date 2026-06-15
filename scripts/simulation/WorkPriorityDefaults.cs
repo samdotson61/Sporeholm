@@ -27,6 +27,7 @@ namespace Sporeholm.Simulation
             "Grow",        // farm — Phase 8+
             "Cook",        // cook meals — Phase 5+
             "Hunt",        // hunt — Phase 8+
+            "Husbandry",   // tame + tend animals — Phase 8.2+
             "Forage",      // gather wild food
             "Chop",        // chop wood
             "Haul",        // carry items to stockpiles — Phase 5+
@@ -46,6 +47,7 @@ namespace Sporeholm.Simulation
                 ["Patient"] = 1, ["BedRest"] = 1,
                 ["Forage"] = 1, ["Grow"] = 1, ["PlantCut"] = 2, ["Chop"] = 3,   // v0.8.0 — Foragers farm
                 ["Hunt"] = 3,                                   // v0.8.1 — Foragers help hunt + butcher
+                ["Husbandry"] = 2,                              // v0.8.2 — Foragers also tame/tend
                 ["Haul"] = 3, ["Clean"] = 4,
             },
             ["Crafter"]    = new()
@@ -72,6 +74,7 @@ namespace Sporeholm.Simulation
                 ["Patient"] = 1, ["BedRest"] = 1,
                 ["Healer"] = 1, ["Cook"] = 2, ["Craft"] = 2,   // v0.5.84s — Caretaker brews medicine
                 ["Grow"] = 3,                                   // v0.8.0 — farm fallback
+                ["Husbandry"] = 1,                              // v0.8.2 — Caretaker is the primary animal handler
                 ["Haul"] = 3, ["Clean"] = 3,
             },
             ["Guardian"]   = new()
@@ -84,6 +87,7 @@ namespace Sporeholm.Simulation
             {
                 ["Patient"] = 1, ["BedRest"] = 1,
                 ["Cook"] = 1, ["Healer"] = 2, ["Grow"] = 2,   // v0.8.0 — gardening is gentle work
+                ["Husbandry"] = 3,                            // v0.8.2 — Elders tend animals
                 ["Haul"] = 4, ["Clean"] = 4, ["Study"] = 2,
             },
             ["Unassigned"] = new()
@@ -116,6 +120,7 @@ namespace Sporeholm.Simulation
             "BedRest"   => "BedRest",
             "Grow"      => "Grow",
             "Hunt"      => "Hunt",
+            "Husbandry" => "Husbandry",
             "Clean"     => "Clean",
             "Study"  => "Study",
             "Attune"    => "Attune",
@@ -141,6 +146,7 @@ namespace Sporeholm.Simulation
             "BedRest"   => "Sleep in a bed when Rest is low. v0.5.35 wired bed-routing through this priority.",
             "Grow"      => "Plant + harvest farm plots. Set to '-' to forbid farming (Phase 8 lands the full surface).",
             "Hunt"      => "Hunt wild creatures for meat / hide. Set to '-' to forbid (Phase 8 lands the full surface).",
+            "Husbandry" => "Tame wild creatures + tend tamed livestock (Husbandry skill). Set to '-' to forbid animal handling.",
             "Clean"     => "Clean dirty tiles. Set to '-' to forbid (Phase 5+ polish; currently a stub).",
             "Study"  => "Research at a research bench. Set to '-' to forbid (Phase 11 lands the tech tree).",
             "Attune"    => "Mage attunement — restores MagicResonance. Set to '-' to forbid.",
@@ -169,6 +175,7 @@ namespace Sporeholm.Simulation
             TaskType.HarvestCrop    => "Grow",        // v0.8.0 — Phase 8 farming
             TaskType.Hunt           => "Hunt",        // v0.8.1 — Phase 8 hunting
             TaskType.Butcher        => "Hunt",        // v0.8.1 — hunters butcher their kills
+            TaskType.Tame           => "Husbandry",   // v0.8.2 — Phase 8 taming
             _ => null,
         };
 

@@ -97,6 +97,12 @@ namespace Sporeholm.Simulation
         public static float ButcherYieldFactor(int skillLevel) =>
             Mathf.Clamp(0.60f + 0.04f * skillLevel, 0.50f, 1.40f);
 
+        // v0.8.2 (Phase 8) — taming progress added per tamer visit, driven by the
+        // Husbandry skill. TamingProgress runs 0→100; lvl 0 ≈ 12/visit (~9 visits),
+        // lvl 10 ≈ 32/visit (~4 visits), lvl 20 ≈ 52/visit (~2 visits).
+        public static float TameProgressPerVisit(int skillLevel) =>
+            Mathf.Clamp(12f + 2f * skillLevel, 8f, 60f);
+
         // RimWorld: per-plant chance to RUIN the stalk on harvest at low
         // skill (yields nothing). Lvl 0 ≈ 25 % ruin, lvl 4 ≈ 12 %, lvl 8 = 0 %.
         // Our gather is per-tile (single-shot), so we apply this once: if

@@ -125,6 +125,10 @@ namespace Sporeholm.Simulation.Items
             // both feed the bone tool / weapon recipes. Without this row, every
             // ("Bone", …) ButcherDrops entry resolved to no item and was dropped.
             new() { Kind = ItemKind.Material, SubType = "Bone", DisplayName = "Bone",      Icon = "🦴", BaseDurability = 100f, BaseValue = 1.2f, AllowedFamilies = new[]{"Bone"} },
+            // v0.8.2 (Phase 8) — shearable produce. Spore-fleece "wool" from tamed
+            // Shearable livestock (Hamspore). A Cloth-family material so it feeds
+            // the same cloth recipes as MossCloth / GrassLinen.
+            new() { Kind = ItemKind.Material, SubType = "Wool", DisplayName = "Spore Wool", Icon = "🧶", BaseDurability = 40f, BaseValue = 1.4f, AllowedFamilies = new[]{"Cloth"} },
 
             // ── Material — Wood ────────────────────────────────────────
             // v0.4.2 — single WoodLog sub-type carrying the wood family on

@@ -769,6 +769,7 @@ namespace Sporeholm.Simulation
 							// branch can't re-flag it.)
 							e.AwaitingButchery = true;
 							e.MarkedForHunt    = false;
+							e.MarkedForTame    = false;   // v0.8.2 — clear both designation flags symmetrically
 							e.State            = Sporeholm.Simulation.Entities.EntityState.Dead;
 							e.ButcheryTtlTicks = CorpseButcheryTtlTicks;
 							continue;

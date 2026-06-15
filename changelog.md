@@ -7,6 +7,31 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.2] — 2026-06-15 — Phase 8: Taming, livestock + produce
+
+Turn wild creatures into colony livestock. Mark a tameable animal, a handler wins it over, and tamed livestock graze peacefully and produce milk, wool, and eggs.
+
+### Taming
+- **🤝 Tame order** — drag a box over tameable wild creatures to mark them. A colonist with the new **Husbandry** job (Caretakers by default; Foragers + Elders help) visits each marked creature and works it over repeated trips; the **Husbandry skill** drives how fast it comes around. A marked creature holds still so the handler can reach it. The **Remove** tool calls off a taming (or a hunt). Hunt and Tame are mutually exclusive — marking one clears the other.
+- Even a marked **predator** (e.g. a Fennec Fox) is safe to approach — it can't lash out while being tamed.
+
+### Livestock + produce
+- **Tamed animals join the colony**: they never turn on you (even a tamed predator), graze near home, and are kept fed so they don't starve.
+- **Produce on a cycle**: tamed **milkable** animals drop milk, **shearable** ones drop spore **wool**, and **egg-layers** drop eggs — about twice a day, hauled to your stockpiles. A Shroomgoat gives both milk and wool. Milk and eggs are food (they cook into meals); wool is a cloth material.
+- **Husbandry skill** (added in v0.8.0) now does real work: it gates taming speed.
+
+### Wildlife behaviour
+- Hungry wild **grazers** now actually graze to recover — the long-dormant Graze behaviour is live.
+
+### Under the hood
+- Tame marks, taming progress, and produce timers all persist through save/load (pre-v0.8.2 saves load clean).
+
+> *Note: animal **pens / pasture** zones and **breeding** are coupled, and both land together in **v0.8.3** — for now tamed animals roam near where they were tamed.*
+
+Build clean, 0 warnings / 0 errors; the taming + livestock loop was reviewed across the taming, AI, and save layers with each finding independently verified (4 fixes applied).
+
+---
+
 ## [0.8.1] — 2026-06-15 — Phase 8: Hunting + butchery
 
 Hunt wild creatures and turn them into food and materials. The first real use of the combat system outside self-defense — designate prey, a hunter runs it down, and the carcass is butchered into meat, hide, and bone.

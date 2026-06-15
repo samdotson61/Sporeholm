@@ -2295,6 +2295,26 @@ namespace Sporeholm.Simulation.Systems
             return best;
         }
 
+        // v0.8.2 — nearest alive, untamed, player-marked tameable creature the
+        // colonist can reach. No reservation (team taming is fine).
+        private static Entities.Entity? FindNearestTameTarget(Shroomp s, LocalMap map)
+        {
+            Entities.Entity? best = null; float bestD = float.MaxValue;
+            int cx = (int)(s.SimPos.X / LocalMap.TileSize);
+            int cy = (int)(s.SimPos.Y / LocalMap.TileSize);
+            for (int i = 0; i < _entities.Count; i++)
+            {
+                var e = _entities[i];
+                if (!e.IsAlive || !e.MarkedForTame || e.IsTamed) continue;
+                int ex = (int)(e.SimPos.X / LocalMap.TileSize);
+                int ey = (int)(e.SimPos.Y / LocalMap.TileSize);
+                if (!map.AreReachable(cx, cy, ex, ey)) continue;
+                float d = s.SimPos.DistanceSquaredTo(e.SimPos);
+                if (d < bestD) { bestD = d; best = e; }
+            }
+            return best;
+        }
+
         // v0.8.1 — nearest reachable, unclaimed corpse awaiting butchery. The
         // reservation skip keeps two butchers from converging on one corpse.
         private static Entities.Entity? FindNearestButcherCorpse(Shroomp s, LocalMap map)
@@ -2341,6 +2361,7 @@ namespace Sporeholm.Simulation.Systems
             {
                 var e = _entities[i];
                 if (!e.IsAlive) continue;
+                if (e.IsTamed) continue;   // v0.8.2 — tamed colony animals are never foes
                 bool threat = (e.State == Entities.EntityState.Hunt && e.TargetShroompId == s.Id)
                     || Entities.EntityRegistry.Get(e.Kind).Disposition == Entities.Disposition.Hostile;
                 if (!threat) continue;
@@ -2356,7 +2377,7 @@ namespace Sporeholm.Simulation.Systems
             for (int i = 0; i < es.Count; i++)
             {
                 var e = es[i];
-                if (!e.IsAlive) continue;
+                if (!e.IsAlive || e.IsTamed) continue;   // v0.8.2 — tamed animals aren't threats
                 if (e.State == Entities.EntityState.Hunt) return true;
                 if (Entities.EntityRegistry.Get(e.Kind).Disposition == Entities.Disposition.Hostile) return true;
             }
@@ -2372,7 +2393,7 @@ namespace Sporeholm.Simulation.Systems
             for (int i = 0; i < _entities.Count; i++)
             {
                 var e = _entities[i];
-                if (!e.IsAlive || e.State != Entities.EntityState.Hunt) continue;
+                if (!e.IsAlive || e.IsTamed || e.State != Entities.EntityState.Hunt) continue;   // v0.8.2 — skip tamed
                 float d2 = s.SimPos.DistanceSquaredTo(e.SimPos);
                 if (d2 <= r2 && d2 < bd) { bd = d2; best = e; }
             }
@@ -3557,6 +3578,22 @@ namespace Sporeholm.Simulation.Systems
                         return new BehaviorTask(TaskType.Butcher, TileToPixel((btx, bty)),
                             52f + jobTilt("Hunt"), tileX: btx, tileY: bty,
                             targetId: corpse.Id.ToString());
+                    }
+                }
+
+                // v0.8.2 (Phase 8) — tame a marked wild creature (Husbandry job).
+                // No tile claim: multiple tamers just add to the shared
+                // TamingProgress (team taming), so convergence is harmless.
+                if (designationsOk && jobOk("Husbandry"))
+                {
+                    var beast = FindNearestTameTarget(s, map);
+                    if (beast != null)
+                    {
+                        int ttx = (int)(beast.SimPos.X / LocalMap.TileSize);
+                        int tty = (int)(beast.SimPos.Y / LocalMap.TileSize);
+                        return new BehaviorTask(TaskType.Tame, TileToPixel((ttx, tty)),
+                            48f + jobTilt("Husbandry"), tileX: ttx, tileY: tty,
+                            targetId: beast.Id.ToString());
                     }
                 }
 
@@ -5045,6 +5082,44 @@ namespace Sporeholm.Simulation.Systems
                     // (success / already-butchered / unparseable target), not only
                     // inside the parse guard, so the reservation can never leak.
                     map?.ReleaseClaim(t.TargetTileX, t.TargetTileY, s.Id);
+                    s.CurrentTask = null;  // re-evaluate next tick
+                    break;
+                case TaskType.Tame:
+                    // v0.8.2 (Phase 8) — add taming progress to a marked wild
+                    // creature when adjacent. Husbandry scales the per-visit gain;
+                    // at 100 it joins the colony. The creature holds still while
+                    // marked (EntitySystem), so a single walk-up reaches it; if it
+                    // somehow drifted out of range we just re-evaluate + walk again.
+                    if (t.TargetId != null && Guid.TryParse(t.TargetId, out var tameId))
+                    {
+                        var beast = FindEntityAnyState(tameId);
+                        if (beast != null && beast.IsAlive && beast.MarkedForTame && !beast.IsTamed)
+                        {
+                            float near = LocalMap.TileSize * 2.5f;
+                            if (s.SimPos.DistanceSquaredTo(beast.SimPos) <= near * near)
+                            {
+                                int husb = SkillLevel(s, "Husbandry");
+                                beast.TamingProgress += SkillCurve.TameProgressPerVisit(husb);
+                                SkillRegistry.GainXp(s, "Husbandry", 30f);
+                                s.TaskDidWork = true;   // v0.4.19
+                                if (beast.TamingProgress >= 100f)
+                                {
+                                    beast.IsTamed       = true;
+                                    beast.TamedByName   = s.Name;
+                                    beast.MarkedForTame = false;
+                                    beast.MarkedForHunt = false;   // v0.8.2 — a tamed animal is no longer a hunt target
+                                    beast.State         = Entities.EntityState.Tamed;
+                                    beast.TargetShroompId = null;
+                                    // Wait a full cooldown before the first produce drop (don't
+                                    // dump milk/wool/eggs the instant it's tamed).
+                                    beast.ProduceCooldownTicks = EntitySystem.ProduceCooldownTicksFull;
+                                    EmitWorkThought(s, TaskType.Tame,
+                                        Entities.EntityRegistry.Get(beast.Kind).DisplayName);
+                                    SkillRegistry.GainXp(s, "Husbandry", 60f);   // taming bonus
+                                }
+                            }
+                        }
+                    }
                     s.CurrentTask = null;  // re-evaluate next tick
                     break;
                 case TaskType.GatherMaterial:

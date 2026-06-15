@@ -120,6 +120,10 @@ namespace Sporeholm.UI
         // them for hunting; a Hunt-priority colonist pursues + kills each via
         // the combat engine, then the corpse can be butchered for Meat/Hide/Bone.
         Hunt,
+        // v0.8.2 (Phase 8) — Tame order. Drag a box over tameable wild creatures
+        // to mark them; a Husbandry-priority colonist visits + tames each over
+        // repeated trips. Tamed creatures join the colony + produce milk/wool/eggs.
+        Tame,
     }
 
     // Roadmap §3.x.7 — single source of truth for floating-panel theme constants.

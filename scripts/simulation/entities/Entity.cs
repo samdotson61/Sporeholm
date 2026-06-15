@@ -66,6 +66,16 @@ namespace Sporeholm.Simulation.Entities
         public bool MarkedForHunt    { get; set; }
         public bool AwaitingButchery { get; set; }
         public int  ButcheryTtlTicks { get; set; }
+        // v0.8.2 (Phase 8) — taming + produce.
+        //   MarkedForTame: the player designated this wild creature for taming
+        //     (Tame drag-box). A Husbandry-priority colonist visits it and adds
+        //     TamingProgress; at 100 it becomes IsTamed. A marked creature holds
+        //     still so the tamer can reach it.
+        //   ProduceCooldownTicks: a tamed Milkable/Shearable/EggLayer drops its
+        //     produce (Milk/Wool/Egg) when this hits 0, then it resets.
+        public bool  MarkedForTame       { get; set; }
+        public float TamingProgress      { get; set; }
+        public int   ProduceCooldownTicks { get; set; }
         // v0.6.0 — wander state. The entity picks a target tile within
         // a small radius of its current pos and walks to it; on arrival
         // or stuck, picks a new one. Decoupled from the shroomp pathfind
@@ -93,6 +103,7 @@ namespace Sporeholm.Simulation.Entities
             get
             {
                 if (!IsAlive) return "Dead";
+                if (MarkedForTame && !IsTamed) return "Being tamed";   // v0.8.2
                 float healthFrac = MaxHealth > 0f ? Health / MaxHealth : 1f;
                 if (State == EntityState.Flee)  return "Fleeing";
                 if (State == EntityState.Hunt)  return "Aggressive";

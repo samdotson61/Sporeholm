@@ -640,15 +640,39 @@ namespace Sporeholm
 						int ex = (int)(e.SimPos.X / ts), ey = (int)(e.SimPos.Y / ts);
 						if (ex < hx0 || ex > hx1 || ey < hy0 || ey > hy1) continue;
 						e.MarkedForHunt = true;
+						e.MarkedForTame = false;   // v0.8.2 — Hunt + Tame are mutually exclusive
 					}
 				});
 				return;
 			}
 
-			// v0.8.1 (Phase 8) — the Remove brush CANCELS hunt marks on any
+			// v0.8.2 (Phase 8) — Tame order is entity-keyed like Hunt. Mark every
+			// alive, untamed, Tameable creature in the rect for taming; a
+			// Husbandry-priority colonist visits + tames each. Idempotent.
+			if (tool == Sporeholm.UI.DesignationTool.Tame)
+			{
+				int tx0 = xMin, ty0 = yMin, tx1 = xMax, ty1 = yMax;
+				_core.PostMainThreadCommand(() =>
+				{
+					const int ts = Sporeholm.World.LocalMap.TileSize;
+					foreach (var e in _core.AllEntities())
+					{
+						if (!e.IsAlive || e.IsTamed) continue;
+						if (!Sporeholm.Simulation.Entities.AgriculturalTags.Has(
+							e.Kind, Sporeholm.Simulation.Entities.AgriculturalTag.Tameable)) continue;
+						int ex = (int)(e.SimPos.X / ts), ey = (int)(e.SimPos.Y / ts);
+						if (ex < tx0 || ex > tx1 || ey < ty0 || ey > ty1) continue;
+						e.MarkedForTame = true;
+						e.MarkedForHunt = false;   // v0.8.2 — Hunt + Tame are mutually exclusive
+					}
+				});
+				return;
+			}
+
+			// v0.8.1 (Phase 8) — the Remove brush CANCELS hunt + tame marks on any
 			// creature in the rect (the entity-keyed counterpart to its per-tile
 			// designation clears below), giving the player a way to call off a
-			// hunt. Non-returning: the per-cell loop still clears tile
+			// hunt / taming. Non-returning: the per-cell loop still clears tile
 			// designations + stockpile / grow-zone cells.
 			if (tool == Sporeholm.UI.DesignationTool.Remove)
 			{
@@ -658,10 +682,11 @@ namespace Sporeholm
 					const int ts = Sporeholm.World.LocalMap.TileSize;
 					foreach (var e in _core.AllEntities())
 					{
-						if (!e.MarkedForHunt) continue;
+						if (!e.MarkedForHunt && !e.MarkedForTame) continue;
 						int ex = (int)(e.SimPos.X / ts), ey = (int)(e.SimPos.Y / ts);
 						if (ex < rx0 || ex > rx1 || ey < ry0 || ey > ry1) continue;
 						e.MarkedForHunt = false;
+						e.MarkedForTame = false;
 					}
 				});
 			}
@@ -2095,6 +2120,10 @@ namespace Sporeholm
 							MarkedForHunt       = rec.MarkedForHunt,
 							AwaitingButchery    = rec.AwaitingButchery,
 							ButcheryTtlTicks    = rec.ButcheryTtlTicks,
+							// v0.8.2 (Phase 8) — taming + produce state (defaulted on old saves).
+							MarkedForTame        = rec.MarkedForTame,
+							TamingProgress       = rec.TamingProgress,
+							ProduceCooldownTicks = rec.ProduceCooldownTicks,
 						// v0.6.2 — pre-v0.6.2 save records deserialise these
 						// as their default (70, 70) which is the same as a
 						// freshly-spawned entity, so old saves come back to
