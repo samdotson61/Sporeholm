@@ -2,7 +2,7 @@
 
 A colony simulation game about a tribe of mushroom-people (**Shroomps**) trying to survive in a strange, fungal world. Designed and developed by **Sam Dotson** in **Godot 4.6** (C#).
 
-Current version: **v0.8.2** (active development — Phase 8 (Agricultural): **farming** (v0.8.0, nine crops), the **roster doubled to 30 species** (v0.8.0a), **hunting + butchery** (v0.8.1 — run down wild game and butcher it for meat/hide/bone), and **taming + livestock** (v0.8.2 — win over wild creatures with the Husbandry skill; tamed animals graze peacefully and produce milk, wool, and eggs). Built on the complete Phase 7 combat system — body-part wounds, pain + venom, healer / medicine, material-aware armor, draft, rescue, training, apparel, attack + patrol orders, mental breaks, and a social relationship ledger.).
+Current version: **v0.8.3** (active development — Phase 8 (Agricultural) gameplay loop complete: **farming** (v0.8.0, nine crops), the **roster doubled to 30 species** (v0.8.0a), **hunting + butchery** (v0.8.1), **taming + livestock produce** (v0.8.2 — milk, wool, eggs), and **breeding** (v0.8.3 — tamed pairs raise young into a self-sustaining, pop-capped herd). Built on the complete Phase 7 combat system — body-part wounds, pain + venom, healer / medicine, material-aware armor, draft, rescue, training, apparel, attack + patrol orders, mental breaks, and a social relationship ledger. *(Pen/pasture containment zones are a deferred polish item.)*).
 
 ---
 
@@ -27,7 +27,7 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 | **Combat** | **Shipped — v0.7.x** (body-part combat, wounds, pain/venom, healer + rescue, layered armor, draft, training, weapons) |
 | **Farming (crops + grow-zones + sow/harvest)** | **Shipped — v0.8.0** (9 crops, 3 Botany tiers, Grow priority, Husbandry skill) |
 | **Hunting + butchery** | **Shipped — v0.8.1** (Hunt order, carcasses, Butcher Slab, meat/hide/bone) |
-| **Animal husbandry (taming + livestock produce)** | **Shipped — v0.8.2** (Tame order, Husbandry job, milk/wool/eggs); pens + breeding in v0.8.3 |
+| **Animal husbandry (taming + produce + breeding)** | **Shipped — v0.8.2–0.8.3** (Tame order, Husbandry job, milk/wool/eggs, breeding); pen/pasture zones deferred |
 | **Weather & temperature** | Insulation half — Phase 10 |
 | **Disease, research, eras** | Future phases |
 
@@ -107,7 +107,8 @@ A full body-part combat system layered on the wildlife AI. Shroomps and creature
 - **🤝 Tame order**: drag a box over tameable wild creatures to mark them. A colonist with the new **Husbandry** job (Caretakers by default; Foragers + Elders help) visits each and tames it over repeated trips — the **Husbandry skill** sets how fast. A marked creature holds still so the handler can walk up; even a marked predator can't lash out mid-tame. The **Remove** tool calls off a taming. Hunt and Tame are mutually exclusive.
 - **Tamed livestock** join the colony: they never turn on you, graze peacefully near home, and are kept fed so they don't starve.
 - **Produce on a cycle**: tamed milkable / shearable / egg-laying animals drop **milk / spore wool / eggs** about twice a day, hauled to your stockpiles (a Shroomgoat gives both milk and wool). Milk + eggs cook into meals; wool is a cloth material.
-- *(Pens / pasture zones and breeding land in v0.8.3 — for now tamed animals roam near where they were tamed.)*
+- **Breeding** (v0.8.3): two tamed, well-fed animals of the same breeding species, kept near each other, raise young — one of the pair gestates (~1.5 in-game days) and births a tamed offspring. A per-species **population cap** (8) lets a herd grow to a ceiling and hold, refilling after losses. Pregnant animals read "Expecting".
+- *(Pen / pasture containment zones — fencing animals into an area — are a deferred polish item; taming, produce, and breeding all work without them, with tamed animals roaming near where they were tamed.)*
 
 ### Construction
 
@@ -185,7 +186,7 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 | 5.5 | Crafting bills | Complete |
 | 6 | Entity system (animals + creatures) | Shipped (v0.6.0 — 15 species; expanded to 30 in v0.8.0a) |
 | 7 | Combat (Healer + Rescue + Training + Weapons/Apparel) | Shipped (v0.7.2 — full body-part combat) |
-| **8** | **Agricultural systems** (farming, animal husbandry, hunting) | **In progress** (v0.8.0 farming · v0.8.0a roster→30 · v0.8.1 hunting + butchery · v0.8.2 taming + livestock; pens + breeding in v0.8.3) |
+| **8** | **Agricultural systems** (farming, animal husbandry, hunting) | **Gameplay complete** (v0.8.0 farming · v0.8.0a roster→30 · v0.8.1 hunting + butchery · v0.8.2 taming + produce · v0.8.3 breeding; pen/pasture zones deferred) |
 | 9 | Events + Storyteller (Peaceful / Random / Adventure — extensible) | Stub |
 | 10 | Weather + Environment (Insulation half done) | — |
 | 11 | Technology + Culture (research + power) | — |

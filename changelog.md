@@ -7,6 +7,23 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.3] — 2026-06-15 — Phase 8: Livestock breeding
+
+Tamed livestock now **breed**, turning a handful of tamed animals into a self-sustaining herd — the payoff that closes the Phase 8 agricultural loop (farm → hunt → tame → produce → **breed**).
+
+### Breeding
+- Two tamed, **well-fed** animals of the same breeding species, kept near each other, raise young: one of the pair gestates (~1.5 in-game days) and births a tamed offspring that joins the colony.
+- **Population cap** per species (8 tamed) so a herd grows to a comfortable ceiling and then holds — no runaway. When you butcher or lose animals, breeding resumes to refill.
+- Newborns are tamed from birth and start their own produce/breed cycle. A pregnant animal reads **"Expecting"** on its card; tamed livestock are now kept rested as well as fed.
+- Gestation persists through save/load (pre-v0.8.3 saves load clean).
+
+### Phase 8 status
+This completes the Phase 8 **gameplay** loop. The one remaining piece — **pens / pasture containment zones** (fencing animals into an area) — is deferred to a later polish pass; it's organizational only, and taming, produce, and breeding all work without it (tamed animals roam near where they were tamed).
+
+Build clean, 0 warnings / 0 errors; the breeding loop was reviewed for population safety, birth plumbing, and save round-trip (1 cap-overshoot fix applied).
+
+---
+
 ## [0.8.2] — 2026-06-15 — Phase 8: Taming, livestock + produce
 
 Turn wild creatures into colony livestock. Mark a tameable animal, a handler wins it over, and tamed livestock graze peacefully and produce milk, wool, and eggs.

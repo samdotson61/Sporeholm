@@ -39,7 +39,8 @@ namespace Sporeholm.Simulation.Systems
             LocalMap map,
             float dt,
             Random rng,
-            int currentTick)
+            int currentTick,
+            List<Entity> birthsOut)   // v0.8.3 — breeding appends newborns here; caller merges into the roster
         {
             // Two passes per shroomp for proximity queries:
             // (a) Each entity walks the shroomp list to find nearest valid
@@ -69,9 +70,13 @@ namespace Sporeholm.Simulation.Systems
                 if (e.IsTamed)
                 {
                     e.Nutrition = Math.Clamp(e.Nutrition + needDecay * 1.5f, 0f, 100f);
+                    e.Rest      = Math.Clamp(e.Rest      + needDecay * 1.5f, 0f, 100f);   // v0.8.3 — cared-for livestock rest too
                     if (e.ProduceCooldownTicks > 0) e.ProduceCooldownTicks--;
                     else if (TryDropProduce(e, map, rng, currentTick))
                         e.ProduceCooldownTicks = ProduceCooldownTicksFull;
+                    // v0.8.3 (Phase 8) — breeding: a tamed Breeds-tagged pair raises young.
+                    if (AgriculturalTags.Has(e.Kind, AgriculturalTag.Breeds))
+                        TickBreeding(e, entities, birthsOut, rng);
                 }
                 // v0.8.2 — a hungry WILD grazer switches to Graze (abstract
                 // foraging) to recover; recovers fully then resumes wandering.
@@ -287,6 +292,72 @@ namespace Sporeholm.Simulation.Systems
             if (AgriculturalTags.Has(e.Kind, AgriculturalTag.EggLayer))  Drop("Egg");
             if (AgriculturalTags.Has(e.Kind, AgriculturalTag.Shearable)) Drop("Wool");
             return any;
+        }
+
+        // v0.8.3 (Phase 8) — breeding tuning. Gestation ~1.5 in-game days at the
+        // TickBody rate; a per-species tamed cap so a herd grows to a ceiling and
+        // then holds (RimWorld-style) instead of exploding.
+        private const int GestationTicksFull  = 90000;
+        private const int BreedPopCapPerKind  = 8;
+        private const float BreedRangeTiles   = 5f;
+
+        // v0.8.3 (Phase 8) — one tamed, well-fed Breeds creature per nearby
+        // same-species cluster gestates (the lowest-Guid member, so a cluster
+        // yields one pregnancy at a time, not one per animal). At term it births
+        // a tamed young into birthsOut, respecting the per-species cap.
+        private static void TickBreeding(Entity e, IReadOnlyList<Entity> entities, List<Entity> birthsOut, Random rng)
+        {
+            if (e.Nutrition < 50f) return;   // only well-fed animals breed
+            if (e.GestationTicks > 0)
+            {
+                e.GestationTicks--;
+                // Count pending newborns from THIS tick too — they aren't in the
+                // entity roster yet (they sit in birthsOut until the caller merges
+                // them), so without this two clusters birthing on the same tick
+                // would both read a stale count and overshoot the cap.
+                if (e.GestationTicks <= 0
+                    && CountTamedOfKind(entities, e.Kind) + CountKindIn(birthsOut, e.Kind) < BreedPopCapPerKind)
+                {
+                    var young = Entity.SpawnAt(e.Kind, e.SimPos, rng);
+                    young.IsTamed              = true;
+                    young.TamedByName          = e.TamedByName;
+                    young.State                = EntityState.Tamed;
+                    young.WanderHome           = e.SimPos;
+                    young.ProduceCooldownTicks = ProduceCooldownTicksFull;
+                    birthsOut.Add(young);
+                }
+                return;
+            }
+            if (CountTamedOfKind(entities, e.Kind) + CountKindIn(birthsOut, e.Kind) >= BreedPopCapPerKind) return;
+            float r = LocalMap.TileSize * BreedRangeTiles, r2 = r * r;
+            bool hasPartner = false, isLowestId = true;
+            for (int i = 0; i < entities.Count; i++)
+            {
+                var p = entities[i];
+                if (p == e || !p.IsAlive || !p.IsTamed || p.Kind != e.Kind || p.Nutrition < 50f) continue;
+                if (e.SimPos.DistanceSquaredTo(p.SimPos) > r2) continue;
+                hasPartner = true;
+                if (p.Id.CompareTo(e.Id) < 0) { isLowestId = false; break; }
+            }
+            if (hasPartner && isLowestId) e.GestationTicks = GestationTicksFull;
+        }
+
+        private static int CountTamedOfKind(IReadOnlyList<Entity> entities, EntityKind kind)
+        {
+            int n = 0;
+            for (int i = 0; i < entities.Count; i++)
+                if (entities[i].IsAlive && entities[i].IsTamed && entities[i].Kind == kind) n++;
+            return n;
+        }
+
+        // v0.8.3 — count this-tick newborns of `kind` still queued in birthsOut
+        // (not yet in the roster), so same-tick births can't overshoot the cap.
+        private static int CountKindIn(List<Entity> list, EntityKind kind)
+        {
+            int n = 0;
+            for (int i = 0; i < list.Count; i++)
+                if (list[i].Kind == kind) n++;
+            return n;
         }
 
         // v0.7.0 (Phase 7) — react to being attacked by a shroomp. Friendlies

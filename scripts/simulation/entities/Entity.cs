@@ -76,6 +76,11 @@ namespace Sporeholm.Simulation.Entities
         public bool  MarkedForTame       { get; set; }
         public float TamingProgress      { get; set; }
         public int   ProduceCooldownTicks { get; set; }
+        // v0.8.3 (Phase 8) — breeding. When two tamed, well-fed adults of the
+        // same Breeds-tagged species are near each other, ONE of the pair (the
+        // lower Guid) gestates: GestationTicks counts down to a birth, capped by
+        // a per-species tamed population limit so the herd doesn't explode.
+        public int   GestationTicks      { get; set; }
         // v0.6.0 — wander state. The entity picks a target tile within
         // a small radius of its current pos and walks to it; on arrival
         // or stuck, picks a new one. Decoupled from the shroomp pathfind
@@ -112,6 +117,7 @@ namespace Sporeholm.Simulation.Entities
                 if (Nutrition < 25f)            return "Starving";
                 if (Nutrition < 50f)            return "Hungry";
                 if (Rest      < 30f)            return "Exhausted";
+                if (GestationTicks > 0)         return "Expecting";   // v0.8.3
                 if (IsTamed)                    return "Content (Tamed)";
                 return "Calm";
             }

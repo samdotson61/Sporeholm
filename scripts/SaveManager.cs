@@ -235,6 +235,8 @@ public partial class SaveManager : Node
 		public bool  MarkedForTame        { get; init; } = false;
 		public float TamingProgress       { get; init; } = 0f;
 		public int   ProduceCooldownTicks { get; init; } = 0;
+		// v0.8.3 (Phase 8) — breeding gestation. Defaulted for old saves.
+		public int   GestationTicks       { get; init; } = 0;
 	}
 
 	// v0.5.73 — one tile's structure snapshot. RoomId is NOT saved (the
@@ -792,6 +794,7 @@ public partial class SaveManager : Node
 				MarkedForTame        = e.MarkedForTame,       // v0.8.2
 				TamingProgress       = e.TamingProgress,      // v0.8.2
 				ProduceCooldownTicks = e.ProduceCooldownTicks,// v0.8.2
+				GestationTicks       = e.GestationTicks,      // v0.8.3
 			});
 		}
 		return list;

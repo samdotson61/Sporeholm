@@ -812,7 +812,11 @@ namespace Sporeholm.Simulation
 			// set built above.
 			if (Map != null && entWork != null)
 			{
-				Sporeholm.Simulation.Systems.EntitySystem.Tick(entWork, working, Map, dt, _rng, (int)GlobalTick);
+				var entityBirths = new List<Sporeholm.Simulation.Entities.Entity>();
+				Sporeholm.Simulation.Systems.EntitySystem.Tick(entWork, working, Map, dt, _rng, (int)GlobalTick, entityBirths);
+				// v0.8.3 — merge any tamed-livestock newborns into the live roster
+				// (entWork is written back to _entities below), so they snapshot + save.
+				if (entityBirths.Count > 0) entWork.AddRange(entityBirths);
 				// v0.6.0 — once per in-game day, refill ambient population.
 				if (dayBoundary)
 					Sporeholm.Simulation.Systems.EntitySpawnSystem.MaintainPopulation(

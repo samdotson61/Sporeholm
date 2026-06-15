@@ -2124,6 +2124,7 @@ namespace Sporeholm
 							MarkedForTame        = rec.MarkedForTame,
 							TamingProgress       = rec.TamingProgress,
 							ProduceCooldownTicks = rec.ProduceCooldownTicks,
+							GestationTicks       = rec.GestationTicks,   // v0.8.3
 						// v0.6.2 — pre-v0.6.2 save records deserialise these
 						// as their default (70, 70) which is the same as a
 						// freshly-spawned entity, so old saves come back to
