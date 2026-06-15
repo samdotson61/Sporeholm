@@ -91,6 +91,12 @@ namespace Sporeholm.Simulation
         public static float PlantYieldFactor(int skillLevel) =>
             Mathf.Clamp(0.50f + 0.0625f * skillLevel, 0.40f, 1.30f);
 
+        // v0.8.1 (Phase 8) — butchery yield multiplier on a corpse's ButcherDrops,
+        // driven by the Cooking skill (per the SkillRegistry "Cooking drives
+        // butchery yield" note). Lvl 0 = 60 %, lvl 10 = 100 %, lvl 20 = 140 %.
+        public static float ButcherYieldFactor(int skillLevel) =>
+            Mathf.Clamp(0.60f + 0.04f * skillLevel, 0.50f, 1.40f);
+
         // RimWorld: per-plant chance to RUIN the stalk on harvest at low
         // skill (yields nothing). Lvl 0 ≈ 25 % ruin, lvl 4 ≈ 12 %, lvl 8 = 0 %.
         // Our gather is per-tile (single-shot), so we apply this once: if

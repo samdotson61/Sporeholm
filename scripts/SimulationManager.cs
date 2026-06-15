@@ -619,6 +619,53 @@ namespace Sporeholm
 				return;
 			}
 
+			// v0.8.1 (Phase 8) — Hunt order is entity-keyed, not tile-keyed. Mark
+			// every alive, untamed, huntable creature whose tile falls in the rect
+			// for hunting (a Hunt-priority colonist pursues + kills it via the
+			// combat engine). Runs as a sim-thread command since entity state is
+			// sim-owned. Re-painting the same box is idempotent.
+			if (tool == Sporeholm.UI.DesignationTool.Hunt)
+			{
+				int hx0 = xMin, hy0 = yMin, hx1 = xMax, hy1 = yMax;
+				_core.PostMainThreadCommand(() =>
+				{
+					const int ts = Sporeholm.World.LocalMap.TileSize;
+					foreach (var e in _core.AllEntities())
+					{
+						if (!e.IsAlive || e.IsTamed) continue;
+						bool huntable =
+							Sporeholm.Simulation.Entities.AgriculturalTags.Has(e.Kind, Sporeholm.Simulation.Entities.AgriculturalTag.Butcherable) ||
+							Sporeholm.Simulation.Entities.AgriculturalTags.Has(e.Kind, Sporeholm.Simulation.Entities.AgriculturalTag.HuntAnimal);
+						if (!huntable) continue;
+						int ex = (int)(e.SimPos.X / ts), ey = (int)(e.SimPos.Y / ts);
+						if (ex < hx0 || ex > hx1 || ey < hy0 || ey > hy1) continue;
+						e.MarkedForHunt = true;
+					}
+				});
+				return;
+			}
+
+			// v0.8.1 (Phase 8) — the Remove brush CANCELS hunt marks on any
+			// creature in the rect (the entity-keyed counterpart to its per-tile
+			// designation clears below), giving the player a way to call off a
+			// hunt. Non-returning: the per-cell loop still clears tile
+			// designations + stockpile / grow-zone cells.
+			if (tool == Sporeholm.UI.DesignationTool.Remove)
+			{
+				int rx0 = xMin, ry0 = yMin, rx1 = xMax, ry1 = yMax;
+				_core.PostMainThreadCommand(() =>
+				{
+					const int ts = Sporeholm.World.LocalMap.TileSize;
+					foreach (var e in _core.AllEntities())
+					{
+						if (!e.MarkedForHunt) continue;
+						int ex = (int)(e.SimPos.X / ts), ey = (int)(e.SimPos.Y / ts);
+						if (ex < rx0 || ex > rx1 || ey < ry0 || ey > ry1) continue;
+						e.MarkedForHunt = false;
+					}
+				});
+			}
+
 			// v0.4.27 — apply designations directly on the main thread
 			// instead of enqueueing for the sim to drain on its next
 			// Tick. Sam's gameplay requirement: "designations should
@@ -845,6 +892,16 @@ namespace Sporeholm
 							map.SetStructure(x, y,
 								Sporeholm.World.StructureSlot.Blueprint(
 									Sporeholm.World.StructureType.TrainingDummyPlanned,
+									buildMaterial ?? Sporeholm.World.StructureMat.DeadWood));
+							AutoAddPrepDesignations(map, x, y);
+						}
+						break;
+					case Sporeholm.UI.DesignationTool.BuildButcherSlab:   // v0.8.1
+						if (CanPlaceBlueprint(map, x, y))
+						{
+							map.SetStructure(x, y,
+								Sporeholm.World.StructureSlot.Blueprint(
+									Sporeholm.World.StructureType.ButcherSlabPlanned,
 									buildMaterial ?? Sporeholm.World.StructureMat.DeadWood));
 							AutoAddPrepDesignations(map, x, y);
 						}
@@ -2034,6 +2091,10 @@ namespace Sporeholm
 						WanderHome          = new Vector2(rec.WanderHomeX, rec.WanderHomeY),
 						RandomSeed          = rec.RandomSeed,
 						AttackCooldownTicks = rec.AttackCooldownTicks,
+							// v0.8.1 (Phase 8) — hunt/butchery state (defaulted on old saves).
+							MarkedForHunt       = rec.MarkedForHunt,
+							AwaitingButchery    = rec.AwaitingButchery,
+							ButcheryTtlTicks    = rec.ButcheryTtlTicks,
 						// v0.6.2 — pre-v0.6.2 save records deserialise these
 						// as their default (70, 70) which is the same as a
 						// freshly-spawned entity, so old saves come back to

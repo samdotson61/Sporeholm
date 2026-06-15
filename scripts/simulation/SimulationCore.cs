@@ -127,6 +127,11 @@ namespace Sporeholm.Simulation
 		// snapshot would be stale by the time the event fires.
 		public ConcurrentQueue<System.Guid> PendingEntityRemovals { get; } = new();
 
+		// v0.8.1 (Phase 8) — how long a Butcherable corpse lingers awaiting a
+		// Butcher task before it despawns (safety valve so un-butchered kills
+		// don't pile up forever). ~1.5 in-game days at 60000 ticks/day.
+		private const int CorpseButcheryTtlTicks = 90000;
+
 		// Full snapshot of the shroomp at the moment of birth
 		public ConcurrentQueue<ShroompSnapshot> PendingBirths { get; } = new();
 
@@ -741,10 +746,36 @@ namespace Sporeholm.Simulation
 				{
 					// v0.6.2 audit Fix 5 — enqueue removal events for every entity
 					// about to be pruned. UI uses these to auto-close EntityCardPanel.
+					// v0.8.1 (Phase 8) — a Butcherable creature's corpse LINGERS for
+					// butchery instead of being pruned the tick it dies. On first
+					// death it's flagged AwaitingButchery + given a despawn timer;
+					// it stays on the map (rendered as a corpse) until a Butcher task
+					// processes it (clears the flag) or the timer expires.
 					for (int i = 0; i < _entities.Count; i++)
-						if (!_entities[i].IsAlive)
-							PendingEntityRemovals.Enqueue(_entities[i].Id);
-					_entities.RemoveAll(e => !e.IsAlive);
+					{
+						var e = _entities[i];
+						if (e.IsAlive) continue;
+						if (e.AwaitingButchery)
+						{
+							if (e.ButcheryTtlTicks > 0) { e.ButcheryTtlTicks--; continue; }  // fresh corpse — keep
+							e.AwaitingButchery = false;   // timed out — fall through to removal
+						}
+						else if (e.ButcheryTtlTicks == 0
+							&& Sporeholm.Simulation.Entities.AgriculturalTags.Has(
+								e.Kind, Sporeholm.Simulation.Entities.AgriculturalTag.Butcherable))
+						{
+							// First sighting of this Butcherable creature dead → keep it.
+							// (A butchered corpse leaves ButcheryTtlTicks > 0, so this
+							// branch can't re-flag it.)
+							e.AwaitingButchery = true;
+							e.MarkedForHunt    = false;
+							e.State            = Sporeholm.Simulation.Entities.EntityState.Dead;
+							e.ButcheryTtlTicks = CorpseButcheryTtlTicks;
+							continue;
+						}
+						PendingEntityRemovals.Enqueue(e.Id);
+					}
+					_entities.RemoveAll(e => !e.IsAlive && !e.AwaitingButchery);
 					entWork = new List<Sporeholm.Simulation.Entities.Entity>(_entities);
 				}
 			}

@@ -890,6 +890,26 @@ namespace Sporeholm.Simulation.Systems
                 // v0.4.57 — post-abandon designation-task cooldown.
                 if (s.DesignationCooldownTicks > 0)
                     s.DesignationCooldownTicks -= tickInterval;
+                // v0.8.1 — per-prey hunt give-up cooldown (see FindNearestHuntTarget).
+                if (s.RecentHuntGiveUpTicks > 0)
+                {
+                    s.RecentHuntGiveUpTicks -= tickInterval;
+                    if (s.RecentHuntGiveUpTicks <= 0) s.RecentHuntGiveUp = null;
+                }
+
+                // v0.8.1 (Phase 8) — Hunt acquisition. A colonist with the Hunt
+                // job (armed, non-pacifist) and no current combat target locks
+                // onto the nearest reachable player-marked huntable creature. The
+                // combat pass below then pursues + kills it through the Phase 7
+                // engine — no separate hunt mover needed. (Skipped when a player
+                // attack order or auto-defense already set CombatTargetId.)
+                if (s.CombatTargetId == null && !s.IsPacifist && JobPriorityOn(s, "Hunt")
+                    && s.EquippedWeapon is { } hw
+                    && hw.State != Sporeholm.Simulation.Items.ItemState.Broken)
+                {
+                    var prey = FindNearestHuntTarget(s, map);
+                    if (prey != null) { s.CombatTargetId = prey.Id; s.CombatTargetName = "enemy"; }
+                }
 
                 // v0.7.0 (Phase 7) — combat pass. Tick down the attack cooldown,
                 // then (if a hostile is ordered-targeted or auto-acquired in
@@ -2093,6 +2113,12 @@ namespace Sporeholm.Simulation.Systems
                     // gave up — couldn't close on a faster / fleeing target
                     s.CombatTargetId = null;
                     s.CombatPursuitTicks = 0;
+                    // v0.8.1 — record the abandoned target on a cooldown so Hunt
+                    // acquisition doesn't instantly re-lock the same uncatchable
+                    // prey next tick (which would livelock the hunter). Harmless
+                    // for player attack orders — those don't re-acquire via Hunt.
+                    s.RecentHuntGiveUp      = ordered.Id;
+                    s.RecentHuntGiveUpTicks = HuntGiveUpCooldownTicks;
                 }
                 else if (s.HealthFraction < Combat.CombatTuning.FleeHealthFraction)
                 {
@@ -2227,6 +2253,82 @@ namespace Sporeholm.Simulation.Systems
                 if (_entities[i].Id == id)
                     return _entities[i].IsAlive ? _entities[i] : null;
             return null;
+        }
+
+        // v0.8.1 — like FindCombatEntity but returns the entity in ANY state
+        // (incl. a dead corpse AwaitingButchery), used by the Butcher task.
+        private static Entities.Entity? FindEntityAnyState(Guid id)
+        {
+            for (int i = 0; i < _entities.Count; i++)
+                if (_entities[i].Id == id) return _entities[i];
+            return null;
+        }
+
+        // v0.8.1 — how long a hunter skips a prey it just gave up chasing (the
+        // pursuit leash bailed). Long enough that it does other work / hunts other
+        // prey in between, instead of instantly re-locking the same uncatchable
+        // target (~30 s at 1×; the leash itself is MaxPursuitTicks = 600).
+        private const int HuntGiveUpCooldownTicks = 1800;
+
+        // v0.8.1 — nearest alive, untamed, player-marked huntable creature the
+        // colonist can reach. Fed into CombatTargetId so the combat pass kills it.
+        private static Entities.Entity? FindNearestHuntTarget(Shroomp s, LocalMap? map)
+        {
+            Entities.Entity? best = null; float bestD = float.MaxValue;
+            int cx = (int)(s.SimPos.X / LocalMap.TileSize);
+            int cy = (int)(s.SimPos.Y / LocalMap.TileSize);
+            for (int i = 0; i < _entities.Count; i++)
+            {
+                var e = _entities[i];
+                if (!e.IsAlive || !e.MarkedForHunt || e.IsTamed) continue;
+                // Skip a prey this colonist recently gave up chasing (cooldown).
+                if (s.RecentHuntGiveUpTicks > 0 && s.RecentHuntGiveUp == e.Id) continue;
+                if (map != null)
+                {
+                    int ex = (int)(e.SimPos.X / LocalMap.TileSize);
+                    int ey = (int)(e.SimPos.Y / LocalMap.TileSize);
+                    if (!map.AreReachable(cx, cy, ex, ey)) continue;
+                }
+                float d = s.SimPos.DistanceSquaredTo(e.SimPos);
+                if (d < bestD) { bestD = d; best = e; }
+            }
+            return best;
+        }
+
+        // v0.8.1 — nearest reachable, unclaimed corpse awaiting butchery. The
+        // reservation skip keeps two butchers from converging on one corpse.
+        private static Entities.Entity? FindNearestButcherCorpse(Shroomp s, LocalMap map)
+        {
+            Entities.Entity? best = null; float bestD = float.MaxValue;
+            int cx = (int)(s.SimPos.X / LocalMap.TileSize);
+            int cy = (int)(s.SimPos.Y / LocalMap.TileSize);
+            for (int i = 0; i < _entities.Count; i++)
+            {
+                var e = _entities[i];
+                if (!e.AwaitingButchery) continue;
+                int ex = (int)(e.SimPos.X / LocalMap.TileSize);
+                int ey = (int)(e.SimPos.Y / LocalMap.TileSize);
+                if (map.IsClaimedByOther(ex, ey, s.Id)) continue;
+                if (!map.AreReachable(cx, cy, ex, ey)) continue;
+                float d = s.SimPos.DistanceSquaredTo(e.SimPos);
+                if (d < bestD) { bestD = d; best = e; }
+            }
+            return best;
+        }
+
+        // v0.8.1 — does a built structure of `type` sit within `radius` tiles of
+        // (x,y)? Used for the Butcher-Slab proximity yield bonus.
+        private const int ButcherSlabBonusRadius = 8;
+        private static bool HasBuiltStructureNear(LocalMap map, int x, int y, StructureType type, int radius)
+        {
+            for (int dy = -radius; dy <= radius; dy++)
+            for (int dx = -radius; dx <= radius; dx++)
+            {
+                int nx = x + dx, ny = y + dy;
+                if (!map.InBounds(nx, ny)) continue;
+                if (map.GetStructure(nx, ny).Type == type) return true;
+            }
+            return false;
         }
 
         // Nearest threat within `tiles`: a Hostile-disposition creature OR any
@@ -3047,7 +3149,8 @@ namespace Sporeholm.Simulation.Systems
             || t == TaskType.ChopWood || t == TaskType.CutVegetation
             || t == TaskType.Build                         // v0.5.19 Phase 5B
             || t == TaskType.BuildHaul                      // v0.5.60
-            || t == TaskType.PlantCrop || t == TaskType.HarvestCrop;  // v0.8.0 Phase 8
+            || t == TaskType.PlantCrop || t == TaskType.HarvestCrop  // v0.8.0 Phase 8
+            || t == TaskType.Butcher;                                 // v0.8.1 Phase 8
 
         // v0.5.19 (Phase 5B) — consume materials for a Build task. Returns
         // true if the full cost was taken from the colony Inventory; false
@@ -3439,6 +3542,22 @@ namespace Sporeholm.Simulation.Systems
                     if (sow.HasValue)
                         return ClaimAndMakeDesignationTask(s, map, TaskType.PlantCrop,
                             sow.Value, 45f + jobTilt("Grow"));
+                }
+
+                // v0.8.1 (Phase 8) — butcher a hunted creature's corpse (Hunt
+                // priority). Reservation-aware finder so butchers don't converge.
+                if (designationsOk && jobOk("Hunt"))
+                {
+                    var corpse = FindNearestButcherCorpse(s, map);
+                    if (corpse != null)
+                    {
+                        int btx = (int)(corpse.SimPos.X / LocalMap.TileSize);
+                        int bty = (int)(corpse.SimPos.Y / LocalMap.TileSize);
+                        map.TryClaim(btx, bty, s.Id);
+                        return new BehaviorTask(TaskType.Butcher, TileToPixel((btx, bty)),
+                            52f + jobTilt("Hunt"), tileX: btx, tileY: bty,
+                            targetId: corpse.Id.ToString());
+                    }
                 }
 
                 // v0.4.2 — Haul task. After Gather / Excavate / Chop /
@@ -4880,6 +4999,54 @@ namespace Sporeholm.Simulation.Systems
                     }
                     s.CurrentTask = null;  // re-evaluate next tick
                     break;
+                case TaskType.Butcher:
+                    // v0.8.1 (Phase 8) — process a hunted creature's corpse into
+                    // Meat / Hide / Bone. Yield = ButcherDrops rolled × Cooking-skill
+                    // factor × a Butcher-Slab proximity bonus. Grants Cooking XP (+ a
+                    // little Husbandry). The corpse is then cleared so it's pruned.
+                    if (map != null && t.TargetId != null
+                        && Guid.TryParse(t.TargetId, out var butcherId))
+                    {
+                        var corpse = FindEntityAnyState(butcherId);
+                        if (corpse != null && corpse.AwaitingButchery)
+                        {
+                            int cookSkill = SkillLevel(s, "Cooking");
+                            float yieldMul = SkillCurve.ButcherYieldFactor(cookSkill);
+                            // A built Butcher Slab within range → +30 % yield.
+                            if (HasBuiltStructureNear(map, t.TargetTileX, t.TargetTileY,
+                                    StructureType.ButcherSlab, ButcherSlabBonusRadius))
+                                yieldMul *= 1.30f;
+                            var dropPos = new Vector2(
+                                t.TargetTileX * LocalMap.TileSize + LocalMap.TileSize * 0.5f,
+                                t.TargetTileY * LocalMap.TileSize + LocalMap.TileSize * 0.5f);
+                            var drops = Entities.EntityRegistry.Get(corpse.Kind).ButcherDrops;
+                            for (int di = 0; di < drops.Count; di++)
+                            {
+                                var (sub, mn, mx) = drops[di];
+                                int baseQty = mn + rng.Next(System.Math.Max(1, mx - mn + 1));
+                                int qty = SkillCurve.ApplyYieldMul(baseQty, yieldMul, rng);
+                                if (qty <= 0) continue;
+                                var kind = ItemRegistry.KindForSubType(sub);
+                                if (kind == null) continue;   // unknown drop subtype — skip safely
+                                var item = ItemFactory.Create(kind.Value, sub, null, rng,
+                                    globalTick, skillLevel: cookSkill, quantity: qty);
+                                item.TilePos = dropPos;
+                                map.DropItem(item);
+                            }
+                            EmitWorkThought(s, TaskType.Butcher,
+                                Entities.EntityRegistry.Get(corpse.Kind).DisplayName);
+                            s.TaskDidWork = true;   // v0.4.19
+                            SkillRegistry.GainXp(s, "Cooking", 40f);
+                            SkillRegistry.GainXp(s, "Husbandry", 12f);
+                            corpse.AwaitingButchery = false;   // cleared → pruned next tick
+                        }
+                    }
+                    // v0.8.1 — release the corpse-tile claim on EVERY exit path
+                    // (success / already-butchered / unparseable target), not only
+                    // inside the parse guard, so the reservation can never leak.
+                    map?.ReleaseClaim(t.TargetTileX, t.TargetTileY, s.Id);
+                    s.CurrentTask = null;  // re-evaluate next tick
+                    break;
                 case TaskType.GatherMaterial:
                     if (map != null && t.TargetTileX >= 0 && t.TargetTileY >= 0)
                     {
@@ -5720,6 +5887,7 @@ namespace Sporeholm.Simulation.Systems
                                     StructureType.CookingTablePlanned => StructureType.CookingTable, // v0.6.2 (Phase 5.6)
                                     StructureType.SparringYardPlanned  => StructureType.SparringYard,  // v0.7.2
                                     StructureType.TrainingDummyPlanned => StructureType.TrainingDummy, // v0.7.2
+                                    StructureType.ButcherSlabPlanned   => StructureType.ButcherSlab,   // v0.8.1
                                     _                               => StructureType.Floor,       // FloorPlanned + safety default
                                 };
                                 built.BuildProgress = StructureSlot.BuildProgressTarget;
@@ -6310,7 +6478,8 @@ namespace Sporeholm.Simulation.Systems
             }
             if (t.Type != TaskType.GatherFood && t.Type != TaskType.GatherMaterial
                 && t.Type != TaskType.ChopWood && t.Type != TaskType.CutVegetation
-                && t.Type != TaskType.PlantCrop && t.Type != TaskType.HarvestCrop) return;  // v0.8.0 Phase 8
+                && t.Type != TaskType.PlantCrop && t.Type != TaskType.HarvestCrop  // v0.8.0 Phase 8
+                && t.Type != TaskType.Butcher) return;                             // v0.8.1 Phase 8
             if (t.TargetTileX < 0 || t.TargetTileY < 0) return;
             map.ReleaseClaim(t.TargetTileX, t.TargetTileY, s.Id);
         }

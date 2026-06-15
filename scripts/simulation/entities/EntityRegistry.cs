@@ -138,7 +138,7 @@ namespace Sporeholm.Simulation.Entities
                 MaxHealth: 14f, BaseSpeedPxPerSec: 18f, BodyRadiusPx: 5f,
                 AttackPower: 3f, AggroRangePx: 90f, FleeRangePx: 30f,   // flees when struck
                 MinGroupSize: 1, MaxGroupSize: 1, PopulationCapPerMap: 2, SpawnWeight: 0.3f,
-                ButcherDrops: new[] { ("MagicEssence", 1, 1) }));
+                ButcherDrops: new[] { ("RawEssence", 1, 1) }));   // v0.8.1 — "MagicEssence" wasn't a registered item SubType
 
             // ── v0.8.0a (Phase 8) roster expansion 15 → 30 ─────────────
             // Stats follow the v0.6.0 baselines (mounts/large game get more

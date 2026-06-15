@@ -37,6 +37,7 @@ namespace Sporeholm.UI
         private Button              _cookingTableBtn = null!; // v0.6.2 (Phase 5.6)
         private Button              _sparringYardBtn  = null!; // v0.7.2
         private Button              _trainingDummyBtn = null!; // v0.7.2
+        private Button              _butcherSlabBtn   = null!; // v0.8.1
         private Button              _demolishBtn = null!;
         // v0.5.32 — material picker chips. One per StructureMat option.
         // Visibility + enabled state filtered per-tool by RefreshMaterialChips.
@@ -255,6 +256,14 @@ namespace Sporeholm.UI
             _cookingTableBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.BuildCookingTable);
             row.AddChild(_cookingTableBtn);
 
+            // v0.8.1 (Phase 8) — Butcher Slab. Processing workstation: a colonist
+            // butchers hunted creatures' corpses into Meat / Hide / Bone. A built
+            // slab within range boosts the yield (Cooking skill drives the base).
+            _butcherSlabBtn = MakeButton("🔪 Butcher Slab",
+                tips ? "Plan a Butcher Slab. Boosts butchery yield from hunted creatures' corpses (the Cooking skill drives the base yield). Costs 3 wood." : "");
+            _butcherSlabBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.BuildButcherSlab);
+            row.AddChild(_butcherSlabBtn);
+
             _bonfireBtn = MakeButton("🔥 Bonfire",
                 tips ? "Plan a bonfire. Warms the room (+10°C per bonfire) and serves as a half-speed cooking fallback when no Cooking Table is built. Needed for cold-climate colonies." : "");
             _bonfireBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.BuildBonfire);
@@ -423,6 +432,7 @@ namespace Sporeholm.UI
             // v0.6.2 (Phase 5.6 ship) — Workbench + CookingTable in Production.
             _workbenchBtn   .Visible = _subCat == SubCat.Production;
             _cookingTableBtn.Visible = _subCat == SubCat.Production;
+            _butcherSlabBtn .Visible = _subCat == SubCat.Production;   // v0.8.1
             // Furniture: shelf / bonfire / bed / table / torch (interior pieces).
             _shelfBtn    .Visible = _subCat == SubCat.Furniture;
             _bonfireBtn   .Visible = _subCat == SubCat.Furniture;

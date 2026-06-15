@@ -119,6 +119,12 @@ namespace Sporeholm.Simulation.Items
             new() { Kind = ItemKind.Food,     SubType = "Egg",  DisplayName = "Egg",       Icon = "🥚", BaseNutrition = 4f, BaseDurability = 35f, BaseFreshDays = 8f, BaseValue = 1.2f, AllowedFamilies = new[]{"Meat"} },
             new() { Kind = ItemKind.Food,     SubType = "Milk", DisplayName = "Milk",      Icon = "🥛", BaseNutrition = 5f, BaseDurability = 25f, BaseFreshDays = 2f, BaseValue = 1.3f, AllowedFamilies = new[]{"Meat"} },
             new() { Kind = ItemKind.Material, SubType = "Hide", DisplayName = "Hide",      Icon = "🟫", BaseDurability = 70f, BaseValue = 1.8f, AllowedFamilies = new[]{"Hide"} },
+            // v0.8.1 (Phase 8) — whole bone from butchering larger creatures
+            // (mammals / reptiles), distinct from the smaller BoneFragment that
+            // insects + Skeleton-mining drop. Both carry the "Bone" family so
+            // both feed the bone tool / weapon recipes. Without this row, every
+            // ("Bone", …) ButcherDrops entry resolved to no item and was dropped.
+            new() { Kind = ItemKind.Material, SubType = "Bone", DisplayName = "Bone",      Icon = "🦴", BaseDurability = 100f, BaseValue = 1.2f, AllowedFamilies = new[]{"Bone"} },
 
             // ── Material — Wood ────────────────────────────────────────
             // v0.4.2 — single WoodLog sub-type carrying the wood family on
@@ -258,6 +264,17 @@ namespace Sporeholm.Simulation.Items
 
         public static ItemSubTypeDef? Get(ItemKind kind, string subType) =>
             _byKey.TryGetValue((kind, subType), out var d) ? d : null;
+
+        // v0.8.1 (Phase 8) — resolve the ItemKind that owns a SubType, when only
+        // the SubType is known (e.g. an EntityDef.ButcherDrops entry like "Meat"
+        // / "Hide" / "Bone"). SubTypes are unique across kinds in practice, so
+        // the first registered match wins. Returns null for an unknown SubType.
+        public static ItemKind? KindForSubType(string subType)
+        {
+            foreach (var def in All)
+                if (def.SubType == subType) return def.Kind;
+            return null;
+        }
 
         public static IReadOnlyList<ItemSubTypeDef> InKind(ItemKind kind) =>
             _byKind.TryGetValue(kind, out var list) ? list : System.Array.Empty<ItemSubTypeDef>();

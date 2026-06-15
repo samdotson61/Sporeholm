@@ -128,6 +128,11 @@ namespace Sporeholm.UI
                 Color tint = e.IsTamed
                     ? new Color(1.10f, 1.00f, 0.85f, alpha)
                     : new Color(1.00f, 1.00f, 1.00f, alpha);
+                // v0.8.1 (Phase 8) — a dead creature awaiting butchery reads as a
+                // greyed, semi-transparent carcass (distinct from a faded-but-live
+                // wounded one) so the player can spot kills ready to butcher.
+                if (e.State == Sporeholm.Simulation.Entities.EntityState.Dead)
+                    tint = new Color(0.55f, 0.50f, 0.48f, 0.70f);
                 // v0.7.0 — combat animation: lunge / knockback offset + hit flash.
                 if (_anims.TryGetValue(e.Id, out var a))
                 {

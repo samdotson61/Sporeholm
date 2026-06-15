@@ -871,6 +871,14 @@ namespace Sporeholm.Simulation
 		// combat pass abandons the order past CombatTuning.MaxPursuitTicks so a
 		// colonist can't chase a faster fleeing creature across the whole map.
 		public int CombatPursuitTicks { get; set; } = 0;
+		// v0.8.1 (Phase 8) — per-prey hunt give-up cooldown. When the pursuit
+		// leash abandons a target, the abandoned entity is recorded here with a
+		// cooldown so the Hunt acquisition doesn't instantly re-lock the same
+		// uncatchable prey next tick (which would livelock the hunter). The
+		// hunter does other work / hunts other prey until the cooldown lapses.
+		// Transient (not persisted) — a reload just lets one fresh attempt run.
+		public Guid? RecentHuntGiveUp     { get; set; }
+		public int   RecentHuntGiveUpTicks { get; set; } = 0;
 
 		// v0.7.1 (Phase 7) — wounds + pain + venom + rescue plumbing. Hediffs are
 		// the medical layer (pain + tend targets) alongside the condition-based

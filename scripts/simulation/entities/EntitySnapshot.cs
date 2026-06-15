@@ -34,7 +34,11 @@ namespace Sporeholm.Simulation.Entities
         string        MoodLabel,
         // v0.7.4 (#9) — hunt/flee target so SaveManager can persist it from the
         // snapshot. Null when the entity isn't targeting a colonist.
-        Guid?         TargetShroompId
+        Guid?         TargetShroompId,
+        // v0.8.1 (Phase 8) — hunt/butchery state (rendered + persisted).
+        bool          MarkedForHunt,
+        bool          AwaitingButchery,
+        int           ButcheryTtlTicks
     )
     {
         public EntitySnapshot(Entity e) : this(
@@ -42,7 +46,8 @@ namespace Sporeholm.Simulation.Entities
             e.Health, e.MaxHealth,
             e.Speed, e.AttackPower,
             e.IsTamed, e.TamedByName, e.WanderHome, e.RandomSeed, e.AttackCooldownTicks,
-            e.Nutrition, e.Rest, e.MoodLabel, e.TargetShroompId)
+            e.Nutrition, e.Rest, e.MoodLabel, e.TargetShroompId,
+            e.MarkedForHunt, e.AwaitingButchery, e.ButcheryTtlTicks)
         {
         }
     }

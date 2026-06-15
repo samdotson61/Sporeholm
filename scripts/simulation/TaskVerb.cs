@@ -51,6 +51,8 @@ namespace Sporeholm.Simulation
             TaskType.MentalBreak    => "Breaking down",   // v0.7.3 (N8)
             TaskType.PlantCrop      => "Planting",         // v0.8.0 (Phase 8)
             TaskType.HarvestCrop    => "Harvesting crops", // v0.8.0 (Phase 8)
+            TaskType.Hunt           => "Hunting",          // v0.8.1 (Phase 8)
+            TaskType.Butcher        => "Butchering",       // v0.8.1 (Phase 8)
             TaskType.None           => "Idle",
             _                       => "—",
         };

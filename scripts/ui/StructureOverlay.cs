@@ -49,6 +49,7 @@ namespace Sporeholm.UI
         private MultiMeshInstance2D _cookingTableMmi = null!; // v0.6.2 (Phase 5.6)
         private MultiMeshInstance2D _sparringYardMmi  = null!; // v0.7.2
         private MultiMeshInstance2D _trainingDummyMmi = null!; // v0.7.2
+        private MultiMeshInstance2D _butcherSlabMmi   = null!; // v0.8.1
         private MultiMeshInstance2D _blueprintMmi = null!;
         // v0.6.2 — Demolish-as-task. Red X overlay drawn over any built
         // structure whose StructureSlot.MarkedForDemolition flag is set.
@@ -160,6 +161,7 @@ namespace Sporeholm.UI
             _cookingTableMmi = CreateMmi(quad, BakeCookingTableSprite()); // v0.6.2 (Phase 5.6)
             _sparringYardMmi  = CreateMmi(quad, BakeSparringYardSprite());  // v0.7.2
             _trainingDummyMmi = CreateMmi(quad, BakeTrainingDummySprite()); // v0.7.2
+            _butcherSlabMmi   = CreateMmi(quad, BakeButcherSlabSprite());   // v0.8.1
             _blueprintMmi   = CreateMmi(quad, BakeBlueprintSprite());
             _demolishMarkMmi = CreateMmi(quad, BakeDemolishMarkSprite()); // v0.6.2 — demolish-as-task
         }
@@ -285,6 +287,7 @@ namespace Sporeholm.UI
                 tableCount = 0, torchCount = 0,
                 cookingTableCount = 0,   // v0.6.2 (Phase 5.6)
                 sparringYardCount = 0, trainingDummyCount = 0,   // v0.7.2
+                butcherSlabCount = 0,    // v0.8.1
                 demolishMarkCount = 0;   // v0.6.2 — demolish-as-task
             for (int y = 0; y < _map.Height; y++)
             for (int x = 0; x < _map.Width;  x++)
@@ -488,6 +491,11 @@ namespace Sporeholm.UI
                         _trainingDummyMmi.Multimesh.SetInstanceColor(trainingDummyCount, tint);
                         trainingDummyCount++;
                         break;
+                    case StructureType.ButcherSlab when butcherSlabCount < MaxInstances:   // v0.8.1
+                        _butcherSlabMmi.Multimesh.SetInstanceTransform2D(butcherSlabCount, new Transform2D(0f, origin));
+                        _butcherSlabMmi.Multimesh.SetInstanceColor(butcherSlabCount, tint);
+                        butcherSlabCount++;
+                        break;
                     case StructureType.WallPlanned:
                     case StructureType.FloorPlanned:
                     case StructureType.DoorPlanned:
@@ -503,6 +511,7 @@ namespace Sporeholm.UI
                     case StructureType.CookingTablePlanned:      // v0.6.2 (Phase 5.6)
                     case StructureType.SparringYardPlanned:      // v0.7.2
                     case StructureType.TrainingDummyPlanned:     // v0.7.2
+                    case StructureType.ButcherSlabPlanned:       // v0.8.1
                         if (blueprintCount < MaxInstances)
                         {
                             _blueprintMmi.Multimesh.SetInstanceTransform2D(blueprintCount, new Transform2D(0f, origin));
@@ -553,6 +562,7 @@ namespace Sporeholm.UI
             _cookingTableMmi.Multimesh.VisibleInstanceCount = cookingTableCount; // v0.6.2 (Phase 5.6)
             _sparringYardMmi .Multimesh.VisibleInstanceCount = sparringYardCount;  // v0.7.2
             _trainingDummyMmi.Multimesh.VisibleInstanceCount = trainingDummyCount; // v0.7.2
+            _butcherSlabMmi  .Multimesh.VisibleInstanceCount = butcherSlabCount;   // v0.8.1
             _blueprintMmi  .Multimesh.VisibleInstanceCount = blueprintCount;
             _demolishMarkMmi.Multimesh.VisibleInstanceCount = demolishMarkCount; // v0.6.2 — demolish-as-task
         }
@@ -1665,6 +1675,43 @@ namespace Sporeholm.UI
             // Wrapped grips at the lower ends of each sword.
             img.SetPixel(12, 12, grip); img.SetPixel(13, 13, grip);
             img.SetPixel(3, 12, grip);  img.SetPixel(2, 13, grip);
+            return ImageTexture.CreateFromImage(img);
+        }
+
+        // v0.8.1 (Phase 8) — Butcher Slab sprite. A heavy wooden block with a
+        // pale stone cutting surface and a steel cleaver resting on it. Reads as
+        // a meat-processing station. 16×16.
+        private static ImageTexture BakeButcherSlabSprite()
+        {
+            var legs    = new Color(0.40f, 0.28f, 0.16f, 1f);   // dark wood legs
+            var block   = new Color(0.55f, 0.40f, 0.24f, 1f);   // wood chopping block
+            var surface = new Color(0.80f, 0.78f, 0.72f, 1f);   // pale stone top
+            var stain   = new Color(0.62f, 0.20f, 0.18f, 1f);   // butchery stain
+            var steel   = new Color(0.72f, 0.74f, 0.78f, 1f);   // cleaver blade
+            var handle  = new Color(0.34f, 0.22f, 0.12f, 1f);   // cleaver handle
+            var dark    = new Color(0f, 0f, 0f, 0f);
+
+            var img = Image.CreateEmpty(TS, TS, false, Image.Format.Rgba8);
+            for (int y = 0; y < TS; y++)
+            for (int x = 0; x < TS; x++)
+                img.SetPixel(x, y, dark);
+
+            // Wooden block body (rows 7..13).
+            for (int y = 7; y <= 13; y++)
+            for (int x = 2; x <= 13; x++)
+                img.SetPixel(x, y, block);
+            // Stone cutting surface (rows 5..6).
+            for (int x = 2; x <= 13; x++) { img.SetPixel(x, 5, surface); img.SetPixel(x, 6, surface); }
+            // A couple of butchery stains on the surface.
+            img.SetPixel(5, 6, stain); img.SetPixel(9, 5, stain); img.SetPixel(10, 6, stain);
+            // Short legs.
+            img.SetPixel(3, 14, legs);  img.SetPixel(3, 15, legs);
+            img.SetPixel(12, 14, legs); img.SetPixel(12, 15, legs);
+            // Cleaver resting on the right: square blade + handle.
+            for (int y = 2; y <= 5; y++)
+            for (int x = 10; x <= 13; x++)
+                img.SetPixel(x, y, steel);
+            img.SetPixel(13, 6, handle); img.SetPixel(13, 7, handle); img.SetPixel(12, 7, handle);
             return ImageTexture.CreateFromImage(img);
         }
 

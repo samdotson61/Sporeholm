@@ -129,6 +129,8 @@ namespace Sporeholm.World
             // v0.7.2 — combat-practice furniture.
             StructureType.SparringYardPlanned  or StructureType.SparringYard  => 4,
             StructureType.TrainingDummyPlanned or StructureType.TrainingDummy => 2,
+            // v0.8.1 — Butcher Slab: 3 units (chopping block + stone surface).
+            StructureType.ButcherSlabPlanned   or StructureType.ButcherSlab   => 3,
             _ => 1,
         };
 
@@ -147,7 +149,8 @@ namespace Sporeholm.World
                                 || Type == StructureType.TorchPlanned              // v0.5.84t
                                 || Type == StructureType.CookingTablePlanned       // v0.6.2 (Phase 5.6)
                                 || Type == StructureType.SparringYardPlanned       // v0.7.2
-                                || Type == StructureType.TrainingDummyPlanned;     // v0.7.2
+                                || Type == StructureType.TrainingDummyPlanned      // v0.7.2
+                                || Type == StructureType.ButcherSlabPlanned;       // v0.8.1
         public bool IsBuilt    => Type == StructureType.Wall
                                || Type == StructureType.Floor
                                || Type == StructureType.Door            // v0.5.20
@@ -162,7 +165,8 @@ namespace Sporeholm.World
                                || Type == StructureType.Torch                      // v0.5.84t
                                || Type == StructureType.CookingTable               // v0.6.2 (Phase 5.6)
                                || Type == StructureType.SparringYard               // v0.7.2
-                               || Type == StructureType.TrainingDummy;             // v0.7.2
+                               || Type == StructureType.TrainingDummy              // v0.7.2
+                               || Type == StructureType.ButcherSlab;               // v0.8.1
         public bool IsImpassable => Type == StructureType.Wall;   // Floors / Doors / Shelves are passable
 
         public static StructureSlot Empty => default;
@@ -253,6 +257,12 @@ namespace Sporeholm.World
         SparringYard         = 31,
         TrainingDummyPlanned = 32,
         TrainingDummy        = 33,
+        // v0.8.1 (Phase 8) — Butcher Slab. A cutting surface for processing
+        // hunted creatures' corpses into Meat / Hide / Bone. Butchery happens
+        // at the corpse, but a built slab within range boosts the yield (the
+        // Cooking skill drives the base yield). 3 units (2 wood block + 1 stone).
+        ButcherSlabPlanned   = 34,
+        ButcherSlab          = 35,
     }
 
     // v0.5.19 — structure material. Mirrors the v0.5.16 MaterialKey families

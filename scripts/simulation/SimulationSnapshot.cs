@@ -48,7 +48,10 @@ namespace Sporeholm.Simulation
             var elist = new List<Sporeholm.Simulation.Entities.EntitySnapshot>();
             foreach (var e in entities)
             {
-                if (!e.IsAlive) continue;
+                // v0.8.1 (Phase 8) — keep dead-but-AwaitingButchery creatures in
+                // the snapshot so their corpse renders (and is clickable) until a
+                // Butcher task processes it. Other dead entities are skipped.
+                if (!e.IsAlive && !e.AwaitingButchery) continue;
                 elist.Add(new Sporeholm.Simulation.Entities.EntitySnapshot(e));
             }
             Entities = elist;

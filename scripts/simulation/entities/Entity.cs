@@ -54,6 +54,18 @@ namespace Sporeholm.Simulation.Entities
         // designated shroomp. Untamed entities ignore this field.
         public bool   IsTamed     { get; set; }
         public string? TamedByName { get; set; }
+        // v0.8.1 (Phase 8) — hunting + butchery.
+        //   MarkedForHunt: the player designated this wild creature for hunting
+        //     (Hunt drag-box). A Hunt-priority colonist pursues + kills it via
+        //     the Phase 7 combat engine (target assigned into CombatTargetId).
+        //   AwaitingButchery: set when a Butcherable creature dies, so the prune
+        //     loop KEEPS the corpse on the map instead of removing it. A Butcher
+        //     task processes it (drops ButcherDrops, Cooking XP) then clears the
+        //     flag so the next prune removes it. ButcheryTtlTicks is a safety
+        //     timer so an un-butchered corpse eventually despawns.
+        public bool MarkedForHunt    { get; set; }
+        public bool AwaitingButchery { get; set; }
+        public int  ButcheryTtlTicks { get; set; }
         // v0.6.0 — wander state. The entity picks a target tile within
         // a small radius of its current pos and walks to it; on arrival
         // or stuck, picks a new one. Decoupled from the shroomp pathfind

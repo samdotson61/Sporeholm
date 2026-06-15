@@ -2,7 +2,7 @@
 
 A colony simulation game about a tribe of mushroom-people (**Shroomps**) trying to survive in a strange, fungal world. Designed and developed by **Sam Dotson** in **Godot 4.6** (C#).
 
-Current version: **v0.8.0a** (active development — Phase 8 (Agricultural). The **farming core** (v0.8.0) lets you paint grow-zones and grow **nine crops** across three Botany tiers on a sow→tend→harvest loop, with the **Grow** work priority and the **Husbandry** skill. **v0.8.0a doubles the wildlife roster to 30 species** — adding mounts, the first shear/egg producers, and huntable game across the desert, island, and magic-grove biomes, all tagged for the husbandry + hunting loops to come. Built on the complete Phase 7 combat system — body-part wounds, pain + venom, healer / medicine, material-aware armor, draft, rescue, training, apparel, attack + patrol orders, mental breaks, and a social relationship ledger.).
+Current version: **v0.8.1** (active development — Phase 8 (Agricultural). The **farming core** (v0.8.0) grows **nine crops** across three Botany tiers on a sow→tend→harvest loop; **v0.8.0a doubled the wildlife roster to 30 species**; and **v0.8.1 adds hunting + butchery** — mark wild creatures for the hunt (a colonist runs them down through the combat engine), then butcher the carcass into meat, hide, and bone at a Butcher Slab. Built on the complete Phase 7 combat system — body-part wounds, pain + venom, healer / medicine, material-aware armor, draft, rescue, training, apparel, attack + patrol orders, mental breaks, and a social relationship ledger.).
 
 ---
 
@@ -26,6 +26,7 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 | Save / load | Shipped |
 | **Combat** | **Shipped — v0.7.x** (body-part combat, wounds, pain/venom, healer + rescue, layered armor, draft, training, weapons) |
 | **Farming (crops + grow-zones + sow/harvest)** | **Shipped — v0.8.0** (9 crops, 3 Botany tiers, Grow priority, Husbandry skill) |
+| **Hunting + butchery** | **Shipped — v0.8.1** (Hunt order, carcasses, Butcher Slab, meat/hide/bone) |
 | **Animal husbandry (taming / produce / breeding)** | Tagged — later Phase 8 slices |
 | **Weather & temperature** | Insulation half — Phase 10 |
 | **Disease, research, eras** | Future phases |
@@ -94,6 +95,12 @@ A full body-part combat system layered on the wildlife AI. Shroomps and creature
 - **Nine crops, three Botany tiers**: Simple (Small Mushroom, Cave Moss, Spring Greens — Botany 0), Medium (Capberry, Sunberry, Pumpkin — Botany 3–5), Hard (Magic Herb, Large Mushroom, Magic Flower — Botany 6–9). Each crop chip shows its Botany requirement. Fungal crops yield more underground; the rest favour the surface.
 - **Sow → grow → harvest loop**: crops grow autonomously through five stages (Sown → Sprouting → Growing → Ripening → Ripe). **Botany** gates which crops a colonist can plant and scales the harvest yield. Harvested plots reset and re-sow themselves, so a tended field is a standing food supply.
 - A translucent **grow-zone tint** shades each plot from tilled brown through green to gold when ripe; **hover** for the crop + stage, **click** for a Grow Zone inspector (crop / stage / Botany requirement / yield). The **Remove** brush clears grow-zone cells. Crops persist through save/load.
+
+### Hunting + butchery (Phase 8 — v0.8.1)
+
+- **🏹 Hunt order**: drag a box over wild creatures to mark them. A colonist with the **Hunt** job (Guardians by default, Foragers as backup) pursues and kills each one through the combat engine — only armed, non-pacifist colonists give chase, and a hunter that can't catch fast fleeing prey gives up and moves on. The **Remove** tool cancels a hunt mark.
+- **Carcasses**: a butcherable creature's body stays on the ground (a greyed corpse) instead of vanishing. A colonist butchers it in place into **Meat, Hide, and Bone** (drops vary by species); the **Cooking** skill drives the yield. A built **🔪 Butcher Slab** nearby boosts it. Un-butchered carcasses decay away over time.
+- Raw meat is food — it feeds straight into the existing **Cook Meal** recipe. Hunt marks and carcasses persist through save/load.
 
 ### Construction
 
@@ -171,7 +178,7 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 | 5.5 | Crafting bills | Complete |
 | 6 | Entity system (animals + creatures) | Shipped (v0.6.0 — 15 species; expanded to 30 in v0.8.0a) |
 | 7 | Combat (Healer + Rescue + Training + Weapons/Apparel) | Shipped (v0.7.2 — full body-part combat) |
-| **8** | **Agricultural systems** (farming, animal husbandry, hunting) | **In progress** (v0.8.0 — farming core: crops + grow-zones + sow/harvest; husbandry + hunting in later v0.8.x slices) |
+| **8** | **Agricultural systems** (farming, animal husbandry, hunting) | **In progress** (v0.8.0 farming · v0.8.0a roster→30 · v0.8.1 hunting + butchery; taming/produce/breeding in v0.8.2–8.3) |
 | 9 | Events + Storyteller (Peaceful / Random / Adventure — extensible) | Stub |
 | 10 | Weather + Environment (Insulation half done) | — |
 | 11 | Technology + Culture (research + power) | — |

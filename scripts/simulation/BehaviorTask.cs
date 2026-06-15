@@ -101,6 +101,15 @@ namespace Sporeholm.Simulation
         // HarvestCrop = harvest a ripe crop tile. Gated by the Grow work
         // priority; mirror the GatherFood designation-work lifecycle.
         PlantCrop, HarvestCrop,
+        // v0.8.1 (Phase 8) — hunting + butchery (Hunt work priority).
+        //   Hunt: a player-designated wild creature is pursued + killed through
+        //     the Phase 7 combat engine (the target is assigned into
+        //     CombatTargetId, so the existing combat pass owns movement +
+        //     striking — Hunt has no ApplyTaskEffect case, like Attack).
+        //   Butcher: walk to a Butcherable corpse (a dead creature kept on the
+        //     map) and process it into Meat / Hide / Bone (Cooking skill scales
+        //     the yield); has its own ApplyTaskEffect case.
+        Hunt, Butcher,
     }
 
     // Roadmap §3.2 behavior task carried by each Shroomp. Target is in *pixel*

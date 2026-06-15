@@ -7,6 +7,29 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.1] — 2026-06-15 — Phase 8: Hunting + butchery
+
+Hunt wild creatures and turn them into food and materials. The first real use of the combat system outside self-defense — designate prey, a hunter runs it down, and the carcass is butchered into meat, hide, and bone.
+
+### Hunting
+- **🏹 Hunt order** — drag a box over wild creatures to mark them for hunting. A colonist with the **Hunt** job (Guardians by default; Foragers help) pursues and kills each one through the existing combat engine. Only armed, non-pacifist colonists take up the chase. The **Remove** tool cancels a hunt mark.
+- A hunter that can't catch a fast, fleeing animal gives up after a while and moves on to other work or other prey, instead of chasing forever.
+
+### Butchery
+- When a butcherable creature dies, its **carcass** stays on the ground (rendered as a greyed corpse) instead of vanishing. A colonist with the Hunt job butchers it in place into **Meat, Hide, and Bone** (the exact drops vary by species).
+- The **Cooking** skill drives the butchery yield — a skilled cook gets more from each carcass.
+- A new **🔪 Butcher Slab** (Production tab, 3 wood) boosts butchery yield when one is built nearby.
+- Carcasses left un-butchered eventually decay away, so kills don't pile up forever.
+- Raw meat is food: it feeds directly into the existing **Cook Meal** recipe at the Cooking Table.
+
+### Under the hood
+- Hunt marks + carcasses persist through save/load (pre-v0.8.1 saves load clean).
+- Butchery yields drop the right items for every species (a new whole-**Bone** material joins the smaller Bone Fragment).
+
+Build clean, 0 warnings / 0 errors; the hunting + butchery loop was reviewed across the combat-reuse, corpse-lifecycle, and save layers with each finding independently verified (4 fixes applied).
+
+---
+
 ## [0.8.0a] — 2026-06-15 — Phase 8: Wildlife roster 15 → 30
 
 A content slice parallel to the Phase 8 systems: **fifteen new creatures** join the world, doubling the wildlife roster and filling out the biomes and agricultural roles the husbandry/hunting loops will use. Because those loops are tag-driven, each new species already carries its agricultural tags and "just works" the moment its loop ships.

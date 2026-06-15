@@ -273,6 +273,9 @@ public partial class TilePropertiesPanel : Control
             Sporeholm.World.StructureType.SparringYardPlanned     => "Sparring Yard",
             Sporeholm.World.StructureType.TrainingDummy           or
             Sporeholm.World.StructureType.TrainingDummyPlanned    => "Training Dummy",
+            // v0.8.1 (Phase 8) — Butcher Slab.
+            Sporeholm.World.StructureType.ButcherSlab             or
+            Sporeholm.World.StructureType.ButcherSlabPlanned      => "Butcher Slab",
             _                                                     => s.Type.ToString(),
         };
         // v0.5.55 — show the actual sub-material (FungalWood / DeadWood /

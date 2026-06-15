@@ -226,6 +226,11 @@ public partial class SaveManager : Node
 		// fleeing (State Hunt/Flee). Null when not targeting. Shroomp Guids are
 		// now restored on load, so this resolves to the right colonist.
 		public string? TargetShroompId { get; init; } = null;
+		// v0.8.1 (Phase 8) — hunt/butchery state. Defaulted so pre-v0.8.1 saves
+		// deserialise to "not marked / not a corpse" (the prior behaviour).
+		public bool MarkedForHunt    { get; init; } = false;
+		public bool AwaitingButchery { get; init; } = false;
+		public int  ButcheryTtlTicks { get; init; } = 0;
 	}
 
 	// v0.5.73 — one tile's structure snapshot. RoomId is NOT saved (the
@@ -777,6 +782,9 @@ public partial class SaveManager : Node
 				Nutrition = e.Nutrition,
 				Rest      = e.Rest,
 					TargetShroompId = e.TargetShroompId?.ToString(),   // v0.7.4 (#9)
+				MarkedForHunt    = e.MarkedForHunt,      // v0.8.1
+				AwaitingButchery = e.AwaitingButchery,   // v0.8.1
+				ButcheryTtlTicks = e.ButcheryTtlTicks,   // v0.8.1
 			});
 		}
 		return list;

@@ -2694,6 +2694,12 @@ namespace Sporeholm.World
         public void ReleaseClaim(int x, int y, Guid claimerId)
             => Reservations.ReleaseTile(x, y, Sporeholm.Simulation.ReservationManager.LayerWork, claimerId);
 
+        // v0.8.1 — public work-claim test for finders that live outside LocalMap
+        // (e.g. BehaviorSystem's corpse-butchery finder, which scans entities,
+        // not tiles). Mirrors the in-loop reservation skip the tile finders use.
+        public bool IsClaimedByOther(int x, int y, Guid claimerId)
+            => Reservations.IsTileReservedByOther(x, y, Sporeholm.Simulation.ReservationManager.LayerWork, claimerId);
+
         // Snapshot of every flagged tile for the visual overlay. Returned as
         // a freshly allocated list — callers shouldn't mutate it. v0.3.38
         // — `Kind` distinguishes Excavate / Gather / ChopWood / Cut so the

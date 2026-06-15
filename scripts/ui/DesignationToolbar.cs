@@ -61,6 +61,9 @@ public partial class DesignationToolbar : Control
         // v0.7.2 (Phase 7) — combat-practice furniture painters.
         BuildSparringYard  = DesignationTool.BuildSparringYard,
         BuildTrainingDummy = DesignationTool.BuildTrainingDummy,
+        // v0.8.1 (Phase 8) — Butcher Slab painter + Hunt order.
+        BuildButcherSlab = DesignationTool.BuildButcherSlab,
+        Hunt             = DesignationTool.Hunt,
         // v0.5.25 (Phase 5C polish) — Allowed-area painter (per-shroomp).
         AllowedArea    = DesignationTool.AllowedArea,
         Patrol         = DesignationTool.Patrol,   // v0.7.3 (N20)
@@ -131,6 +134,8 @@ public partial class DesignationToolbar : Control
         Tool.BuildCookingTable => DesignationTool.BuildCookingTable, // v0.6.2 (Phase 5.6)
         Tool.BuildSparringYard  => DesignationTool.BuildSparringYard,  // v0.7.2
         Tool.BuildTrainingDummy => DesignationTool.BuildTrainingDummy, // v0.7.2
+        Tool.BuildButcherSlab => DesignationTool.BuildButcherSlab,     // v0.8.1
+        Tool.Hunt             => DesignationTool.Hunt,                 // v0.8.1
         Tool.AllowedArea    => DesignationTool.AllowedArea,      // v0.5.25
         Tool.Patrol         => DesignationTool.Patrol,           // v0.7.3 (N20)
         Tool.Demolish   => DesignationTool.Demolish,    // v0.5.19
@@ -218,6 +223,9 @@ public partial class DesignationToolbar : Control
         // select shroomp(s), then click 2+ points (Shift to add more) to set
         // a looping patrol route. A plain right-click move cancels it.
         AddToolButton(Tool.Patrol,   "🚩 Patrol",  "Select shroomp(s), then click two points (hold Shift to add more) — they patrol the loop between them. A plain right-click move cancels patrol.");
+        // v0.8.1 (Phase 8) — Hunt order. Drag a box over wild creatures to mark
+        // them for hunting; a colonist with Hunt priority kills + butchers them.
+        AddToolButton(Tool.Hunt,     "🏹 Hunt",    "Drag a box over wild creatures to mark them for hunting. A colonist with the Hunt job pursues + kills each, then butchers the corpse for Meat / Hide / Bone.");
         // v0.3.26 — Wall / Storage / Priorities moved to their own tabs in
         // BottomTabPanel (Build / Zones / Jobs). Orders tab is now just the
         // active order tools, mirroring RimWorld's tab separation.

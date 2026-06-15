@@ -45,6 +45,7 @@ namespace Sporeholm.Simulation
             {
                 ["Patient"] = 1, ["BedRest"] = 1,
                 ["Forage"] = 1, ["Grow"] = 1, ["PlantCut"] = 2, ["Chop"] = 3,   // v0.8.0 — Foragers farm
+                ["Hunt"] = 3,                                   // v0.8.1 — Foragers help hunt + butcher
                 ["Haul"] = 3, ["Clean"] = 4,
             },
             ["Crafter"]    = new()
@@ -166,6 +167,8 @@ namespace Sporeholm.Simulation
             TaskType.DoBill         => "Craft",       // v0.5.84s — Phase 5.5
             TaskType.PlantCrop      => "Grow",        // v0.8.0 — Phase 8 farming
             TaskType.HarvestCrop    => "Grow",        // v0.8.0 — Phase 8 farming
+            TaskType.Hunt           => "Hunt",        // v0.8.1 — Phase 8 hunting
+            TaskType.Butcher        => "Hunt",        // v0.8.1 — hunters butcher their kills
             _ => null,
         };
 

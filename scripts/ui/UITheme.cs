@@ -97,6 +97,9 @@ namespace Sporeholm.UI
         // idle colonists) drill here for combat XP with no real damage.
         BuildSparringYard,
         BuildTrainingDummy,
+        // v0.8.1 (Phase 8) — Butcher Slab painter. Processing station for
+        // hunted creatures' corpses (boosts butchery yield when nearby).
+        BuildButcherSlab,
         // Demolish removes built structures (Wall / Floor / Door / Shelf
         // / Workbench / Bonfire / Bed / Joy furniture / Table) AND cancels
         // pending blueprints. v0.5.20 added partial material refund (50%
@@ -113,6 +116,10 @@ namespace Sporeholm.UI
         // points (Shift to add more) to set a looping patrol route. Not a
         // tile-paint designation — GameController collects the points directly.
         Patrol,
+        // v0.8.1 (Phase 8) — Hunt order. Drag a box over wild creatures to mark
+        // them for hunting; a Hunt-priority colonist pursues + kills each via
+        // the combat engine, then the corpse can be butchered for Meat/Hide/Bone.
+        Hunt,
     }
 
     // Roadmap §3.x.7 — single source of truth for floating-panel theme constants.

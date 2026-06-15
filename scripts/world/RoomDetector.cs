@@ -137,6 +137,7 @@ namespace Sporeholm.World
                         // room furniture/beauty like any other interior piece.
                         case StructureType.SparringYard:     furnitureCount++; furnitureBeauty += qMul; break;
                         case StructureType.TrainingDummy:    furnitureCount++; furnitureBeauty += qMul; break;
+                        case StructureType.ButcherSlab:      furnitureCount++; furnitureBeauty += qMul; break;   // v0.8.1
                     }
 
                     // 4-neighbour expansion. Diagonal not used (keeps room
