@@ -57,6 +57,12 @@ namespace Sporeholm.Simulation.Combat
                 EntityKind.Shroomalo       => (WeaponType.Blunt,    0.65f, 1.3f, "headbutt"),
                 EntityKind.HermitCrab      => (WeaponType.Piercing, 0.70f, 1.4f, "pincer"),
                 EntityKind.MagicWisp       => (WeaponType.Magical,  0.72f, 3.0f, "energy drain"),
+                // v0.8.0a roster — huntable game + the desert predator.
+                EntityKind.Grumper         => (WeaponType.Blunt,    0.76f, 1.7f, "maul"),
+                EntityKind.Truffleboar     => (WeaponType.Blunt,    0.78f, 1.6f, "tusks"),
+                EntityKind.FennecFox       => (WeaponType.Edged,    0.80f, 1.5f, "fangs"),
+                EntityKind.SkyPony         => (WeaponType.Blunt,    0.70f, 1.5f, "hooves"),
+                EntityKind.RoyalAntelope   => (WeaponType.Piercing, 0.72f, 1.5f, "horns"),
                 // Glowbunny / Mouse / Ladybug — harmless; only bite if forced.
                 _                          => (WeaponType.Unarmed,  0.65f, 1.3f, "nip"),
             };
@@ -77,6 +83,11 @@ namespace Sporeholm.Simulation.Combat
             EntityKind.ForestBoar      => 0.20f,   // thick bristled hide
             EntityKind.HermitCrab      => 0.30f,   // borrowed shell
             EntityKind.Wolf            => 0.10f,
+            // v0.8.0a roster — shelled / hide-tough newcomers.
+            EntityKind.PygmyTortoise   => 0.45f,   // domed shell
+            EntityKind.Mushroomoise    => 0.40f,   // mushroom-garden shell
+            EntityKind.Grumper         => 0.25f,   // thick swamp hide
+            EntityKind.Truffleboar     => 0.20f,   // bristled hide
             _                          => 0.0f,
         };
 

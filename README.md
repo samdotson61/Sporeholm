@@ -2,7 +2,7 @@
 
 A colony simulation game about a tribe of mushroom-people (**Shroomps**) trying to survive in a strange, fungal world. Designed and developed by **Sam Dotson** in **Godot 4.6** (C#).
 
-Current version: **v0.8.0** (active development — Phase 8 (Agricultural) opens with the **farming core**: paint a grow-zone, pick from **nine crops** across three Botany tiers, and Growers sow, tend, and harvest them on a continuous loop. Adds the **Grow** work priority, the **Husbandry** skill, a per-stage grow-zone tint, and crop save/load. Built on the complete Phase 7 combat system — a shared body-part combat engine with wounds, pain + venom, a healer / medicine loop, material-aware armor, draft, rescue, training buildings, apparel layers, attack + patrol orders, mental breaks, and a social relationship ledger.).
+Current version: **v0.8.0a** (active development — Phase 8 (Agricultural). The **farming core** (v0.8.0) lets you paint grow-zones and grow **nine crops** across three Botany tiers on a sow→tend→harvest loop, with the **Grow** work priority and the **Husbandry** skill. **v0.8.0a doubles the wildlife roster to 30 species** — adding mounts, the first shear/egg producers, and huntable game across the desert, island, and magic-grove biomes, all tagged for the husbandry + hunting loops to come. Built on the complete Phase 7 combat system — body-part wounds, pain + venom, healer / medicine, material-aware armor, draft, rescue, training, apparel, attack + patrol orders, mental breaks, and a social relationship ledger.).
 
 ---
 
@@ -22,7 +22,7 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 | Room detection + room types (Bedroom / Kitchen / Workshop / Storage) | Shipped |
 | Natural cavern roofs | Shipped |
 | Per-tick mining scaled by skill + tools | Shipped |
-| **Wildlife (15 species: friendly + neutral + hostile)** | **Shipped — v0.6.0** |
+| **Wildlife (30 species: friendly + neutral + hostile)** | **Shipped — v0.6.0 (15), expanded to 30 in v0.8.0a** |
 | Save / load | Shipped |
 | **Combat** | **Shipped — v0.7.x** (body-part combat, wounds, pain/venom, healer + rescue, layered armor, draft, training, weapons) |
 | **Farming (crops + grow-zones + sow/harvest)** | **Shipped — v0.8.0** (9 crops, 3 Botany tiers, Grow priority, Husbandry skill) |
@@ -54,7 +54,7 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 
 ### Wildlife (v0.6.0)
 
-The map is populated with 15 species across friendly, neutral, and hostile dispositions. Each has its own sprite, stats, AI behaviour, and butcher drops; per-individual stats jitter ±10 % at spawn so a pack of three wolves isn't three clones.
+The map is populated with **30 species** (15 in v0.6.0, 15 more in v0.8.0a) across friendly, neutral, and hostile dispositions — including mounts (Sky Pony, Shore Frog, Royal Antelope…), shear/egg producers (Hamspore, Honey Bee Swarm), and huntable game (Grumper, Truffleboar, Pygmy Rabbit…). Each has its own sprite, stats, AI behaviour, butcher drops, and agricultural tags; per-individual stats jitter ±10 % at spawn so a pack of three wolves isn't three clones.
 
 - **Friendly / Passive** — Glowbunny, Shroomgoat, Shroomalo (the very-friendly mushroom-hamster), Mouse, Ladybug, Hermit Crab.
 - **Neutral** — Squirrel, Bonecrest Beetle, Forest Boar, Cave Lizard.
@@ -169,7 +169,7 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 | 4 | Resource gathering, procedural items, starting inventory | Complete |
 | 5 | Tile-based construction | Complete |
 | 5.5 | Crafting bills | Complete |
-| 6 | Entity system (animals + creatures) | Shipped (v0.6.0 — 15 species + AI + sprites + save/load) |
+| 6 | Entity system (animals + creatures) | Shipped (v0.6.0 — 15 species; expanded to 30 in v0.8.0a) |
 | 7 | Combat (Healer + Rescue + Training + Weapons/Apparel) | Shipped (v0.7.2 — full body-part combat) |
 | **8** | **Agricultural systems** (farming, animal husbandry, hunting) | **In progress** (v0.8.0 — farming core: crops + grow-zones + sow/harvest; husbandry + hunting in later v0.8.x slices) |
 | 9 | Events + Storyteller (Peaceful / Random / Adventure — extensible) | Stub |

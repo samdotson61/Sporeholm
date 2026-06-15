@@ -49,6 +49,22 @@ namespace Sporeholm.UI
                 case EntityKind.Snake:           PaintSnake(img);           break;
                 case EntityKind.Wolf:            PaintWolf(img);            break;
                 case EntityKind.MagicWisp:       PaintMagicWisp(img);       break;
+                // ── v0.8.0a roster expansion 15 → 30 ──────────────────────
+                case EntityKind.ShoreFrog:       PaintShoreFrog(img);       break;
+                case EntityKind.HoneyBeeSwarm:   PaintHoneyBeeSwarm(img);   break;
+                case EntityKind.SkyPony:         PaintSkyPony(img);         break;
+                case EntityKind.Grumper:         PaintGrumper(img);         break;
+                case EntityKind.PygmyRabbit:     PaintPygmyRabbit(img);     break;
+                case EntityKind.Truffleboar:     PaintTruffleboar(img);     break;
+                case EntityKind.RoyalAntelope:   PaintRoyalAntelope(img);   break;
+                case EntityKind.PygmyTortoise:   PaintPygmyTortoise(img);   break;
+                case EntityKind.MeerkatSentry:   PaintMeerkatSentry(img);   break;
+                case EntityKind.FennecFox:       PaintFennecFox(img);       break;
+                case EntityKind.Hamspore:        PaintHamspore(img);        break;
+                case EntityKind.Mushroomoise:    PaintMushroomoise(img);    break;
+                case EntityKind.Quokka:          PaintQuokka(img);          break;
+                case EntityKind.PygmyMarmoset:   PaintPygmyMarmoset(img);   break;
+                case EntityKind.Hamster:         PaintHamster(img);         break;
                 default:                         PaintFallback(img);        break;
             }
             return ImageTexture.CreateFromImage(img);
@@ -392,6 +408,278 @@ namespace Sporeholm.UI
             img.SetPixel(16, 7,  sparkle);
             img.SetPixel(13, 16, sparkle);
             img.SetPixel(5,  15, sparkle);
+        }
+
+        // ── v0.8.0a roster expansion painters ─────────────────────────
+        // Same conventions: 20×20, centred (10,10); warm = Friendly,
+        // earthy = Neutral, cold/sharp = Hostile. Mounts read chunkier.
+
+        private static void PaintShoreFrog(Image img)
+        {
+            var body = new Color(0.40f, 0.62f, 0.40f);
+            var belly = new Color(0.78f, 0.85f, 0.62f);
+            var eye  = new Color(0.95f, 0.90f, 0.30f);
+            var dark = new Color(0.10f, 0.08f, 0.06f);
+            FillEllipse(img, 10, 12, 7, 4, body);     // broad back
+            FillEllipse(img, 10, 13, 5, 2, belly);    // pale underside
+            // Bulging eyes on top
+            FillCircle(img, 7, 8, 2, body);
+            FillCircle(img, 13, 8, 2, body);
+            img.SetPixel(7, 8, eye); img.SetPixel(13, 8, eye);
+            img.SetPixel(7, 8, dark); img.SetPixel(13, 8, dark);
+            // Webbed feet
+            img.SetPixel(4, 15, body); img.SetPixel(5, 16, body);
+            img.SetPixel(16, 15, body); img.SetPixel(15, 16, body);
+            img.SetPixel(8, 16, body); img.SetPixel(12, 16, body);
+        }
+
+        private static void PaintHoneyBeeSwarm(Image img)
+        {
+            var amber = new Color(0.95f, 0.75f, 0.20f, 0.85f);
+            var black = new Color(0.20f, 0.15f, 0.08f, 0.85f);
+            var haze  = new Color(0.95f, 0.85f, 0.45f, 0.20f);
+            FillCircle(img, 10, 10, 7, haze);   // swarm cloud
+            // Scattered bees (alternating amber/black dots)
+            int[,] bees = { {6,7},{9,6},{13,8},{7,11},{11,11},{14,12},{8,14},{12,14},{10,9} };
+            for (int i = 0; i < bees.GetLength(0); i++)
+            {
+                var c = (i % 2 == 0) ? amber : black;
+                img.SetPixel(bees[i,0], bees[i,1], c);
+            }
+        }
+
+        private static void PaintSkyPony(Image img)
+        {
+            var coat = new Color(0.88f, 0.86f, 0.92f);   // pale cloud-grey
+            var mane = new Color(0.70f, 0.80f, 0.95f);   // sky-blue mane
+            var hoof = new Color(0.30f, 0.28f, 0.32f);
+            var eye  = new Color(0.10f, 0.08f, 0.06f);
+            FillEllipse(img, 9, 11, 6, 3, coat);   // body
+            FillCircle(img, 15, 9, 2, coat);       // head
+            // Mane + tail
+            FillRect(img, 12, 6, 2, 4, mane);
+            img.SetPixel(3, 9, mane); img.SetPixel(2, 10, mane); img.SetPixel(3, 11, mane);
+            img.SetPixel(16, 8, eye);
+            // Legs
+            img.SetPixel(6, 15, hoof); img.SetPixel(9, 15, hoof);
+            img.SetPixel(12, 15, hoof); img.SetPixel(14, 15, hoof);
+            img.SetPixel(6, 16, hoof); img.SetPixel(9, 16, hoof);
+            img.SetPixel(12, 16, hoof); img.SetPixel(14, 16, hoof);
+        }
+
+        private static void PaintGrumper(Image img)
+        {
+            var hide = new Color(0.30f, 0.38f, 0.32f);   // mossy swamp-green
+            var dark = new Color(0.20f, 0.26f, 0.22f);
+            var eye  = new Color(0.85f, 0.30f, 0.20f);   // angry red
+            var tooth = new Color(0.90f, 0.88f, 0.80f);
+            FillEllipse(img, 10, 12, 7, 4, hide);     // hulking body
+            FillRect(img, 4, 14, 13, 1, dark);        // belly shadow
+            FillCircle(img, 15, 10, 3, hide);         // big head
+            // Brow + eyes
+            img.SetPixel(14, 9, eye); img.SetPixel(16, 9, eye);
+            // Tusks/teeth
+            img.SetPixel(15, 12, tooth); img.SetPixel(17, 11, tooth);
+            // Stubby legs
+            img.SetPixel(6, 16, dark); img.SetPixel(9, 16, dark); img.SetPixel(12, 16, dark);
+            img.SetPixel(5, 16, dark); img.SetPixel(8, 16, dark); img.SetPixel(11, 16, dark);
+        }
+
+        private static void PaintPygmyRabbit(Image img)
+        {
+            var fur  = new Color(0.72f, 0.66f, 0.58f);
+            var ear  = new Color(0.62f, 0.55f, 0.48f);
+            var eye  = new Color(0.10f, 0.08f, 0.06f);
+            FillEllipse(img, 10, 12, 4, 3, fur);   // small body
+            FillCircle(img, 12, 9, 2, fur);        // head
+            // Short upright ears
+            FillRect(img, 11, 5, 1, 3, ear);
+            FillRect(img, 13, 5, 1, 3, ear);
+            img.SetPixel(13, 9, eye);
+            img.SetPixel(7, 13, new Color(1f, 1f, 1f));   // cotton tail
+            img.SetPixel(8, 16, fur); img.SetPixel(11, 16, fur);
+        }
+
+        private static void PaintTruffleboar(Image img)
+        {
+            var fur  = new Color(0.34f, 0.26f, 0.30f);   // dark mushroom-purple tint
+            var furL = new Color(0.48f, 0.36f, 0.40f);
+            var tusk = new Color(0.85f, 0.80f, 0.70f);
+            var cap  = new Color(0.80f, 0.45f, 0.42f);   // little mushroom on back
+            var hoof = new Color(0.10f, 0.08f, 0.06f);
+            var eye  = new Color(0.10f, 0.08f, 0.06f);
+            FillEllipse(img, 9, 11, 6, 3, fur);
+            FillEllipse(img, 9, 10, 6, 2, furL);
+            FillCircle(img, 15, 11, 2, fur);
+            // Fungal cap sprouting from the back
+            FillEllipse(img, 8, 8, 2, 1, cap);
+            // Tusks
+            img.SetPixel(17, 10, tusk); img.SetPixel(17, 12, tusk);
+            img.SetPixel(16, 10, eye);
+            img.SetPixel(5, 15, hoof); img.SetPixel(8, 15, hoof);
+            img.SetPixel(11, 15, hoof); img.SetPixel(14, 15, hoof);
+        }
+
+        private static void PaintRoyalAntelope(Image img)
+        {
+            var coat = new Color(0.70f, 0.50f, 0.32f);
+            var belly = new Color(0.88f, 0.80f, 0.68f);
+            var horn = new Color(0.20f, 0.15f, 0.10f);
+            var hoof = new Color(0.12f, 0.10f, 0.08f);
+            var eye  = new Color(0.10f, 0.08f, 0.06f);
+            FillEllipse(img, 9, 11, 5, 2, coat);
+            FillRect(img, 5, 12, 9, 1, belly);
+            FillCircle(img, 14, 9, 2, coat);
+            // Tiny horns
+            img.SetPixel(14, 6, horn); img.SetPixel(15, 6, horn);
+            img.SetPixel(15, 9, eye);
+            // Slender legs
+            img.SetPixel(6, 14, hoof); img.SetPixel(8, 14, hoof);
+            img.SetPixel(11, 14, hoof); img.SetPixel(13, 14, hoof);
+            img.SetPixel(6, 16, hoof); img.SetPixel(8, 16, hoof);
+            img.SetPixel(11, 16, hoof); img.SetPixel(13, 16, hoof);
+        }
+
+        private static void PaintPygmyTortoise(Image img)
+        {
+            var shell = new Color(0.42f, 0.36f, 0.22f);
+            var ring  = new Color(0.30f, 0.26f, 0.16f);
+            var skin  = new Color(0.62f, 0.58f, 0.42f);
+            var eye   = new Color(0.10f, 0.08f, 0.06f);
+            // Domed shell
+            FillCircle(img, 10, 11, 6, shell);
+            FillCircle(img, 10, 11, 4, ring);
+            img.SetPixel(10, 11, shell);
+            // Head poking out
+            FillCircle(img, 16, 12, 2, skin);
+            img.SetPixel(17, 12, eye);
+            // Stubby legs
+            img.SetPixel(6, 16, skin); img.SetPixel(9, 16, skin);
+            img.SetPixel(12, 16, skin); img.SetPixel(5, 15, skin);
+        }
+
+        private static void PaintMeerkatSentry(Image img)
+        {
+            var fur  = new Color(0.72f, 0.62f, 0.45f);
+            var dark = new Color(0.40f, 0.32f, 0.24f);
+            var eye  = new Color(0.10f, 0.08f, 0.06f);
+            // Upright standing posture
+            FillEllipse(img, 10, 12, 3, 4, fur);   // standing torso
+            FillCircle(img, 10, 7, 2, fur);        // head up high
+            // Dark eye patches (sentinel look)
+            img.SetPixel(9, 7, eye); img.SetPixel(11, 7, eye);
+            img.SetPixel(10, 8, dark);
+            // Little forepaws + tail
+            img.SetPixel(8, 11, fur); img.SetPixel(12, 11, fur);
+            img.SetPixel(13, 14, dark); img.SetPixel(14, 15, dark);
+            img.SetPixel(9, 16, fur); img.SetPixel(11, 16, fur);
+        }
+
+        private static void PaintFennecFox(Image img)
+        {
+            var coat = new Color(0.90f, 0.82f, 0.62f);   // sandy
+            var ear  = new Color(0.82f, 0.72f, 0.52f);
+            var dark = new Color(0.30f, 0.22f, 0.16f);
+            var eye  = new Color(0.20f, 0.30f, 0.40f);   // cool slit (hostile)
+            FillEllipse(img, 9, 12, 5, 3, coat);
+            FillCircle(img, 14, 10, 2, coat);
+            // Oversized ears
+            int[,] earL = { {12,5},{12,6},{12,7},{13,6} };
+            int[,] earR = { {16,5},{16,6},{16,7},{15,6} };
+            for (int i = 0; i < earL.GetLength(0); i++) img.SetPixel(earL[i,0], earL[i,1], ear);
+            for (int i = 0; i < earR.GetLength(0); i++) img.SetPixel(earR[i,0], earR[i,1], ear);
+            img.SetPixel(15, 10, eye);
+            img.SetPixel(16, 11, dark);   // nose
+            // Bushy dark-tipped tail
+            FillCircle(img, 4, 11, 2, coat);
+            img.SetPixel(3, 11, dark);
+            img.SetPixel(7, 15, dark); img.SetPixel(11, 15, dark);
+        }
+
+        private static void PaintHamspore(Image img)
+        {
+            var wool = new Color(0.90f, 0.88f, 0.80f);   // spore-fibre fleece
+            var fung = new Color(0.62f, 0.72f, 0.55f);   // greenish spore tint
+            var face = new Color(0.80f, 0.70f, 0.58f);
+            var eye  = new Color(0.10f, 0.08f, 0.06f);
+            var foot = new Color(0.62f, 0.52f, 0.42f);
+            FillEllipse(img, 10, 12, 7, 5, wool);   // big fluffy fleece
+            // Spore flecks in the fleece
+            img.SetPixel(7, 10, fung); img.SetPixel(11, 9, fung); img.SetPixel(13, 12, fung); img.SetPixel(8, 13, fung);
+            FillCircle(img, 10, 8, 2, face);
+            img.SetPixel(9, 8, eye); img.SetPixel(11, 8, eye);
+            img.SetPixel(7, 17, foot); img.SetPixel(13, 17, foot);
+        }
+
+        private static void PaintMushroomoise(Image img)
+        {
+            var shell = new Color(0.50f, 0.40f, 0.30f);
+            var skin  = new Color(0.55f, 0.62f, 0.45f);
+            var cap   = new Color(0.85f, 0.45f, 0.42f);   // mushroom garden on shell
+            var capDot = new Color(0.98f, 0.95f, 0.90f);
+            var eye   = new Color(0.10f, 0.08f, 0.06f);
+            FillCircle(img, 10, 12, 6, shell);     // big shell
+            // Mushrooms growing on the shell
+            FillEllipse(img, 8, 8, 2, 1, cap);
+            FillEllipse(img, 12, 7, 2, 1, cap);
+            img.SetPixel(8, 8, capDot); img.SetPixel(12, 7, capDot);
+            // Head
+            FillCircle(img, 16, 13, 2, skin);
+            img.SetPixel(17, 13, eye);
+            // Legs
+            img.SetPixel(6, 17, skin); img.SetPixel(9, 17, skin); img.SetPixel(12, 17, skin);
+        }
+
+        private static void PaintQuokka(Image img)
+        {
+            var fur  = new Color(0.66f, 0.50f, 0.38f);
+            var face = new Color(0.74f, 0.58f, 0.44f);
+            var eye  = new Color(0.10f, 0.08f, 0.06f);
+            var mouth = new Color(0.40f, 0.26f, 0.22f);
+            FillEllipse(img, 9, 12, 4, 4, fur);    // round body
+            FillCircle(img, 13, 9, 3, face);       // big friendly head
+            // Round ears
+            FillCircle(img, 11, 6, 1, fur); FillCircle(img, 15, 6, 1, fur);
+            img.SetPixel(12, 9, eye); img.SetPixel(14, 9, eye);
+            // The famous smile
+            img.SetPixel(13, 11, mouth); img.SetPixel(14, 11, mouth);
+            // Feet + small tail
+            img.SetPixel(7, 16, fur); img.SetPixel(10, 16, fur);
+            img.SetPixel(5, 12, fur);
+        }
+
+        private static void PaintPygmyMarmoset(Image img)
+        {
+            var fur  = new Color(0.55f, 0.45f, 0.32f);
+            var face = new Color(0.72f, 0.62f, 0.48f);
+            var eye  = new Color(0.10f, 0.08f, 0.06f);
+            var tail = new Color(0.45f, 0.36f, 0.26f);
+            FillEllipse(img, 10, 12, 3, 3, fur);   // tiny body
+            FillCircle(img, 10, 8, 2, face);       // head
+            // Tufted cheeks
+            img.SetPixel(7, 8, fur); img.SetPixel(13, 8, fur);
+            img.SetPixel(9, 8, eye); img.SetPixel(11, 8, eye);
+            // Long curling tail
+            img.SetPixel(13, 13, tail); img.SetPixel(14, 12, tail);
+            img.SetPixel(15, 13, tail); img.SetPixel(15, 14, tail);
+            img.SetPixel(8, 15, fur); img.SetPixel(11, 15, fur);
+        }
+
+        private static void PaintHamster(Image img)
+        {
+            var fur  = new Color(0.88f, 0.72f, 0.50f);
+            var belly = new Color(0.95f, 0.88f, 0.74f);
+            var eye  = new Color(0.10f, 0.08f, 0.06f);
+            var ear  = new Color(0.78f, 0.62f, 0.46f);
+            var foot = new Color(0.82f, 0.62f, 0.48f);
+            FillEllipse(img, 10, 12, 6, 5, fur);   // round hoarder body
+            FillEllipse(img, 10, 13, 4, 3, belly);
+            // Fat cheek pouches
+            FillCircle(img, 6, 11, 2, fur); FillCircle(img, 14, 11, 2, fur);
+            FillCircle(img, 10, 8, 2, fur);
+            img.SetPixel(8, 6, ear); img.SetPixel(12, 6, ear);
+            img.SetPixel(9, 8, eye); img.SetPixel(11, 8, eye);
+            img.SetPixel(7, 17, foot); img.SetPixel(13, 17, foot);
         }
 
         private static void PaintFallback(Image img)

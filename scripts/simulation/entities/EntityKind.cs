@@ -36,5 +36,28 @@ namespace Sporeholm.Simulation.Entities
         Snake           = 12,  // F/P/D  ambush predator
         Wolf            = 13,  // F/H/M  pack hunter
         MagicWisp       = 14,  // G      rare floating MagicResonance drain
+
+        // ── v0.8.0a (Phase 8) roster expansion 15 → 30 ────────────────────
+        // Content track parallel to the husbandry/hunting systems. Curated
+        // per Phase8 plan §15 to fill agricultural roles (mounts, shear/egg
+        // producers, huntable game, pack), disposition + biome coverage
+        // (Desert / Island / Coast / Magic Grove were thin), and the four
+        // un-coded canon "original Sporeholm creations" (★). Tag-driven loops
+        // mean each "just works" the moment it's registered + tagged.
+        ShoreFrog       = 15,  // ★ C/I/S  aquatic mount; fishing tie-in
+        HoneyBeeSwarm   = 16,  // ★ F/P/G  first egg/honey producer
+        SkyPony         = 17,  // ★ P/H    iconic fast mount
+        Grumper         = 18,  // ★ S      high-threat swamp game
+        PygmyRabbit     = 19,  // P/H      fast-breeding starter meat
+        Truffleboar     = 20,  // G/F      fungal game; war-trainable
+        RoyalAntelope   = 21,  // P/H      small-deer game + light mount
+        PygmyTortoise   = 22,  // P/D      tanky pack/mount; desert
+        MeerkatSentry   = 23,  // D/P      social pack; desert
+        FennecFox       = 24,  // D        desert predator; hard tame
+        Hamspore        = 25,  // G/P      fungal "wool" shear producer
+        Mushroomoise    = 26,  // G        fungal mount; regrows mushrooms
+        Quokka          = 27,  // I/C      island friendly starter
+        PygmyMarmoset   = 28,  // F/G      utility pet (forage synergy)
+        Hamster         = 29,  // P/D      cheap early livestock / meat
     }
 }

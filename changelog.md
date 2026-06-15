@@ -7,6 +7,24 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.0a] — 2026-06-15 — Phase 8: Wildlife roster 15 → 30
+
+A content slice parallel to the Phase 8 systems: **fifteen new creatures** join the world, doubling the wildlife roster and filling out the biomes and agricultural roles the husbandry/hunting loops will use. Because those loops are tag-driven, each new species already carries its agricultural tags and "just works" the moment its loop ships.
+
+### New creatures
+- **Friendly (8):** Shore Frog (aquatic mount), Honey Bee Swarm (the first honey/egg producer), Sky Pony (fast mount), Hamspore (spore-fleece shear animal), Mushroomoise (a slow fungal mount with a mushroom garden on its shell), Quokka (cheerful island grazer), Pygmy Marmoset (shoulder-riding pet), Hamster (cheap starter livestock).
+- **Neutral (5):** Grumper (hulking swamp brute), Pygmy Rabbit (fast-breeding game), Truffleboar (fungal-tusked, war-trainable), Royal Antelope (swift game + light mount), Pygmy Tortoise (armoured pack/mount).
+- **Hostile (1):** Fennec Fox (a quick desert predator — and a prize tame for the patient).
+- Each has its own hand-drawn sprite, stats, butcher drops, and agricultural tags (mount / shear / egg / pack / huntable, etc.).
+
+### Coverage
+- **Biomes filled out:** Desert (Pygmy Tortoise, Meerkat Sentry, Fennec Fox, Hamster), Island/Coast (Shore Frog, Quokka), Magic Grove (Truffleboar, Mushroomoise, Hamspore, Pygmy Marmoset).
+- **New agricultural roles now represented:** the first **shearable** (Hamspore) and **egg-layer** (Honey Bee Swarm), five rideable **mounts**, **pack** animals, and plenty of huntable game — all ready for the husbandry + hunting slices.
+
+Build clean, 0 warnings / 0 errors; roster reviewed for spawn viability + tag consistency.
+
+---
+
 ## [0.8.0] — 2026-06-15 — Phase 8: Farming core (crops, grow-zones, sow + harvest)
 
 The first Phase 8 (Agricultural) slice: plant and harvest your own food. Paint a grow-zone, pick a crop, and Growers sow it, tend it through five growth stages, and harvest the yield on a continuous loop — then the plot re-sows itself.

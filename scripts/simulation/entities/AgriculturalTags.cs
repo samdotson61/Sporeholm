@@ -52,6 +52,26 @@ namespace Sporeholm.Simulation.Entities
             [EntityKind.Snake]           = AgriculturalTag.HuntAnimal | AgriculturalTag.Butcherable,
             [EntityKind.Wolf]            = AgriculturalTag.HuntAnimal | AgriculturalTag.Carnivore | AgriculturalTag.Butcherable,
             [EntityKind.MagicWisp]       = AgriculturalTag.None,
+
+            // ── v0.8.0a (Phase 8) roster expansion 15 → 30 ──────────────
+            // Friendly
+            [EntityKind.ShoreFrog]       = AgriculturalTag.Tameable | AgriculturalTag.Mount | AgriculturalTag.Butcherable,
+            [EntityKind.HoneyBeeSwarm]   = AgriculturalTag.Tameable | AgriculturalTag.EggLayer | AgriculturalTag.Breeds,
+            [EntityKind.SkyPony]         = AgriculturalTag.Tameable | AgriculturalTag.Mount | AgriculturalTag.Breeds,
+            [EntityKind.Hamspore]        = AgriculturalTag.Tameable | AgriculturalTag.Shearable | AgriculturalTag.Grazer,
+            [EntityKind.Mushroomoise]    = AgriculturalTag.Tameable | AgriculturalTag.Mount | AgriculturalTag.Grazer,
+            [EntityKind.Quokka]          = AgriculturalTag.Tameable | AgriculturalTag.Pet | AgriculturalTag.Grazer | AgriculturalTag.Breeds,
+            [EntityKind.PygmyMarmoset]   = AgriculturalTag.Tameable | AgriculturalTag.Pet,
+            [EntityKind.Hamster]         = AgriculturalTag.Tameable | AgriculturalTag.Grazer | AgriculturalTag.Butcherable,
+            // Neutral
+            [EntityKind.Grumper]         = AgriculturalTag.HuntAnimal | AgriculturalTag.Butcherable,
+            [EntityKind.PygmyRabbit]     = AgriculturalTag.Tameable | AgriculturalTag.Grazer | AgriculturalTag.Breeds | AgriculturalTag.Butcherable,
+            [EntityKind.Truffleboar]     = AgriculturalTag.Tameable | AgriculturalTag.HuntAnimal | AgriculturalTag.War | AgriculturalTag.Omnivore | AgriculturalTag.Butcherable,
+            [EntityKind.RoyalAntelope]   = AgriculturalTag.Tameable | AgriculturalTag.Mount | AgriculturalTag.Grazer | AgriculturalTag.Butcherable,
+            [EntityKind.PygmyTortoise]   = AgriculturalTag.Tameable | AgriculturalTag.Mount | AgriculturalTag.Pack,
+            [EntityKind.MeerkatSentry]   = AgriculturalTag.Tameable | AgriculturalTag.Pet | AgriculturalTag.Pack,
+            // Hostile
+            [EntityKind.FennecFox]       = AgriculturalTag.Tameable | AgriculturalTag.Carnivore | AgriculturalTag.HuntAnimal | AgriculturalTag.Butcherable,
         };
 
         public static AgriculturalTag For(EntityKind kind) =>

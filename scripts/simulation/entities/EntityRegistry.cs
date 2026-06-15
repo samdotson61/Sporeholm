@@ -140,6 +140,135 @@ namespace Sporeholm.Simulation.Entities
                 MinGroupSize: 1, MaxGroupSize: 1, PopulationCapPerMap: 2, SpawnWeight: 0.3f,
                 ButcherDrops: new[] { ("MagicEssence", 1, 1) }));
 
+            // ── v0.8.0a (Phase 8) roster expansion 15 → 30 ─────────────
+            // Stats follow the v0.6.0 baselines (mounts/large game get more
+            // HP; fast movers higher speed; predators carry Aggro). Tags live
+            // in AgriculturalTags.cs; the husbandry/hunt loops dispatch off
+            // those, so these rows just need real stats + drops + a painter.
+
+            // Friendly (8 new)
+            Register(new EntityDef(
+                EntityKind.ShoreFrog, "Shore Frog", "Broad-backed amphibian of the shallows. Calm and rideable once tamed; hops between water and shore.", EntityClass.Reptile, Disposition.Friendly,
+                BiomeTag.Coast | BiomeTag.Island | BiomeTag.Swamp,
+                MaxHealth: 30f, BaseSpeedPxPerSec: 24f, BodyRadiusPx: 8f,
+                AttackPower: 2f, AggroRangePx: 0f, FleeRangePx: 80f,
+                MinGroupSize: 1, MaxGroupSize: 2, PopulationCapPerMap: 4, SpawnWeight: 0.6f,
+                ButcherDrops: new[] { ("Meat", 1, 2), ("Hide", 1, 1) }));
+
+            Register(new EntityDef(
+                EntityKind.HoneyBeeSwarm, "Honey Bee Swarm", "A drifting cloud of fungal-pollen bees. Tame them to a hive and they yield honey on a cycle.", EntityClass.Insect, Disposition.Friendly,
+                BiomeTag.Forest | BiomeTag.Plains | BiomeTag.MagicGrove,
+                MaxHealth: 10f, BaseSpeedPxPerSec: 34f, BodyRadiusPx: 5f,
+                AttackPower: 1f, AggroRangePx: 0f, FleeRangePx: 70f,
+                MinGroupSize: 1, MaxGroupSize: 2, PopulationCapPerMap: 4, SpawnWeight: 0.5f,
+                ButcherDrops: new[] { ("BoneFragment", 1, 1) }));   // chitin substitute; not a real butcher target
+
+            Register(new EntityDef(
+                EntityKind.SkyPony, "Sky Pony", "Lithe, cloud-maned pony bred for speed. The colony's iconic fast mount once tamed.", EntityClass.Mammal, Disposition.Friendly,
+                BiomeTag.Plains | BiomeTag.Hills,
+                MaxHealth: 45f, BaseSpeedPxPerSec: 40f, BodyRadiusPx: 9f,
+                AttackPower: 3f, AggroRangePx: 0f, FleeRangePx: 100f,
+                MinGroupSize: 1, MaxGroupSize: 2, PopulationCapPerMap: 3, SpawnWeight: 0.5f,
+                ButcherDrops: new[] { ("Meat", 2, 3), ("Hide", 1, 2), ("Bone", 1, 2) }));
+
+            Register(new EntityDef(
+                EntityKind.Hamspore, "Hamspore", "Plump, spore-fleeced grazer. Shear its fungal fibre for cloth without harming it.", EntityClass.Mammal, Disposition.Friendly,
+                BiomeTag.MagicGrove | BiomeTag.Plains,
+                MaxHealth: 24f, BaseSpeedPxPerSec: 22f, BodyRadiusPx: 7f,
+                AttackPower: 1f, AggroRangePx: 0f, FleeRangePx: 80f,
+                MinGroupSize: 1, MaxGroupSize: 3, PopulationCapPerMap: 6, SpawnWeight: 0.8f,
+                ButcherDrops: new[] { ("Meat", 1, 2), ("Hide", 1, 1) }));
+
+            Register(new EntityDef(
+                EntityKind.Mushroomoise, "Mushroomoise", "Tortoise whose shell sprouts a living mushroom garden. A slow, steady fungal mount.", EntityClass.Reptile, Disposition.Friendly,
+                BiomeTag.MagicGrove,
+                MaxHealth: 38f, BaseSpeedPxPerSec: 16f, BodyRadiusPx: 8f,
+                AttackPower: 2f, AggroRangePx: 0f, FleeRangePx: 50f,
+                MinGroupSize: 1, MaxGroupSize: 2, PopulationCapPerMap: 4, SpawnWeight: 0.6f,
+                ButcherDrops: new[] { ("Meat", 1, 2), ("SmallMushroom", 1, 2), ("Bone", 1, 1) }));
+
+            Register(new EntityDef(
+                EntityKind.Quokka, "Quokka", "Perpetually smiling island grazer. Friendly to a fault; an easy first tame.", EntityClass.Mammal, Disposition.Friendly,
+                BiomeTag.Island | BiomeTag.Coast,
+                MaxHealth: 20f, BaseSpeedPxPerSec: 26f, BodyRadiusPx: 6f,
+                AttackPower: 0f, AggroRangePx: 0f, FleeRangePx: 60f,
+                MinGroupSize: 1, MaxGroupSize: 3, PopulationCapPerMap: 6, SpawnWeight: 1.0f,
+                ButcherDrops: new[] { ("Meat", 1, 2), ("Hide", 1, 1) }));
+
+            Register(new EntityDef(
+                EntityKind.PygmyMarmoset, "Pygmy Marmoset", "Thumb-sized primate that rides a forager's shoulder. As a pet it sharpens its keeper's eye for forage.", EntityClass.Mammal, Disposition.Friendly,
+                BiomeTag.Forest | BiomeTag.MagicGrove,
+                MaxHealth: 12f, BaseSpeedPxPerSec: 32f, BodyRadiusPx: 4f,
+                AttackPower: 0f, AggroRangePx: 0f, FleeRangePx: 70f,
+                MinGroupSize: 1, MaxGroupSize: 3, PopulationCapPerMap: 5, SpawnWeight: 0.8f,
+                ButcherDrops: new[] { ("Meat", 1, 1) }));
+
+            Register(new EntityDef(
+                EntityKind.Hamster, "Hamster", "Round-cheeked hoarder. Cheap to keep and quick to multiply — early livestock and meat.", EntityClass.Mammal, Disposition.Friendly,
+                BiomeTag.Plains | BiomeTag.Desert,
+                MaxHealth: 12f, BaseSpeedPxPerSec: 24f, BodyRadiusPx: 5f,
+                AttackPower: 0f, AggroRangePx: 0f, FleeRangePx: 70f,
+                MinGroupSize: 1, MaxGroupSize: 3, PopulationCapPerMap: 8, SpawnWeight: 1.0f,
+                ButcherDrops: new[] { ("Meat", 1, 2) }));
+
+            // Neutral (5 new)
+            Register(new EntityDef(
+                EntityKind.Grumper, "Grumper", "Hulking, foul-tempered swamp brute. Ignores the colony until provoked, then hits like a landslide.", EntityClass.Reptile, Disposition.Neutral,
+                BiomeTag.Swamp,
+                MaxHealth: 50f, BaseSpeedPxPerSec: 18f, BodyRadiusPx: 9f,
+                AttackPower: 11f, AggroRangePx: 70f, FleeRangePx: 0f,
+                MinGroupSize: 1, MaxGroupSize: 1, PopulationCapPerMap: 3, SpawnWeight: 0.6f,
+                ButcherDrops: new[] { ("Meat", 3, 5), ("Hide", 1, 2), ("Bone", 1, 2) }));
+
+            Register(new EntityDef(
+                EntityKind.PygmyRabbit, "Pygmy Rabbit", "Tiny, fast-breeding rabbit. Skittish wild game; a reliable starter meat animal once penned.", EntityClass.Mammal, Disposition.Neutral,
+                BiomeTag.Plains | BiomeTag.Hills,
+                MaxHealth: 14f, BaseSpeedPxPerSec: 34f, BodyRadiusPx: 5f,
+                AttackPower: 0f, AggroRangePx: 0f, FleeRangePx: 90f,
+                MinGroupSize: 2, MaxGroupSize: 4, PopulationCapPerMap: 8, SpawnWeight: 1.2f,
+                ButcherDrops: new[] { ("Meat", 1, 2), ("Hide", 1, 1) }));
+
+            Register(new EntityDef(
+                EntityKind.Truffleboar, "Truffleboar", "Fungal-tusked boar that roots out buried truffles. Trainable for war; raids unfenced mushroom plots.", EntityClass.Mammal, Disposition.Neutral,
+                BiomeTag.MagicGrove | BiomeTag.Forest,
+                MaxHealth: 44f, BaseSpeedPxPerSec: 26f, BodyRadiusPx: 9f,
+                AttackPower: 9f, AggroRangePx: 60f, FleeRangePx: 0f,
+                MinGroupSize: 1, MaxGroupSize: 2, PopulationCapPerMap: 4, SpawnWeight: 0.7f,
+                ButcherDrops: new[] { ("Meat", 2, 4), ("Hide", 1, 2), ("SmallMushroom", 1, 2) }));
+
+            Register(new EntityDef(
+                EntityKind.RoyalAntelope, "Royal Antelope", "Hare-sized antelope, swift and wary. Small game; a light, fast mount when tamed.", EntityClass.Mammal, Disposition.Neutral,
+                BiomeTag.Plains | BiomeTag.Hills,
+                MaxHealth: 30f, BaseSpeedPxPerSec: 38f, BodyRadiusPx: 7f,
+                AttackPower: 4f, AggroRangePx: 0f, FleeRangePx: 110f,
+                MinGroupSize: 1, MaxGroupSize: 3, PopulationCapPerMap: 5, SpawnWeight: 0.8f,
+                ButcherDrops: new[] { ("Meat", 2, 3), ("Hide", 1, 2) }));
+
+            Register(new EntityDef(
+                EntityKind.PygmyTortoise, "Pygmy Tortoise", "Armoured plodder. Slow but unflappable — a tanky pack-beast and beginner's mount.", EntityClass.Reptile, Disposition.Neutral,
+                BiomeTag.Plains | BiomeTag.Desert,
+                MaxHealth: 40f, BaseSpeedPxPerSec: 10f, BodyRadiusPx: 7f,
+                AttackPower: 3f, AggroRangePx: 0f, FleeRangePx: 40f,
+                MinGroupSize: 1, MaxGroupSize: 2, PopulationCapPerMap: 4, SpawnWeight: 0.6f,
+                ButcherDrops: new[] { ("Meat", 1, 2), ("Bone", 1, 2) }));
+
+            Register(new EntityDef(
+                EntityKind.MeerkatSentry, "Meerkat Sentry", "Upright desert sentinel that watches for hawks. Bonds in packs; alert and trainable.", EntityClass.Mammal, Disposition.Neutral,
+                BiomeTag.Desert | BiomeTag.Plains,
+                MaxHealth: 16f, BaseSpeedPxPerSec: 30f, BodyRadiusPx: 5f,
+                AttackPower: 3f, AggroRangePx: 0f, FleeRangePx: 70f,
+                MinGroupSize: 2, MaxGroupSize: 4, PopulationCapPerMap: 6, SpawnWeight: 0.9f,
+                ButcherDrops: new[] { ("Meat", 1, 1), ("Hide", 1, 1) }));
+
+            // Hostile (1 new)
+            Register(new EntityDef(
+                EntityKind.FennecFox, "Fennec Fox", "Big-eared desert hunter. Quick and bite-prone in the wild; a prize tame for the patient.", EntityClass.Mammal, Disposition.Hostile,
+                BiomeTag.Desert,
+                MaxHealth: 20f, BaseSpeedPxPerSec: 36f, BodyRadiusPx: 6f,
+                AttackPower: 6f, AggroRangePx: 110f, FleeRangePx: 40f,   // skittish — flees when struck
+                MinGroupSize: 1, MaxGroupSize: 2, PopulationCapPerMap: 4, SpawnWeight: 0.6f,
+                ButcherDrops: new[] { ("Meat", 1, 2), ("Hide", 1, 1) }));
+
             _all = new EntityDef[_byKind.Count];
             int i = 0;
             foreach (var def in _byKind.Values) _all[i++] = def;
