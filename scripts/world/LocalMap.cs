@@ -130,6 +130,12 @@ namespace Sporeholm.World
         private readonly Dictionary<int, StockpileZone> _stockpileZones = new();
         private int[]                                   _cellZoneId      = System.Array.Empty<int>();
         private int                                     _nextStockpileId = 1;
+
+		// v0.8.0 (Phase 8) — farm crops. A tile is "farmland" iff it has a
+		// CropSlot in this sparse dict (Crop = what to grow, Stage = lifecycle).
+		// The Farm tool adds Empty slots; Remove deletes them. Under _designationsLock.
+		private readonly Dictionary<(int X, int Y), CropSlot> _crops = new();
+		public event Action?                            CropsChanged;
         public event Action<int, int>?                  StockpileChanged;
 
         // v0.5.14 (Phase 5C — rimport.md N18) — buried-treasure markers.
@@ -1652,6 +1658,180 @@ namespace Sporeholm.World
             }
             return winner;
         }
+
+        // ── v0.8.0 (Phase 8) — farm crops ──────────────────────────────────
+        public bool HasAnyCrop() { lock (_designationsLock) return _crops.Count > 0; }
+
+        public CropSlot GetCrop(int x, int y)
+        {
+            lock (_designationsLock)
+                return _crops.TryGetValue((x, y), out var c) ? c : CropSlot.Empty;
+        }
+
+        public void SetCrop(int x, int y, CropSlot slot)
+        {
+            lock (_designationsLock) _crops[(x, y)] = slot;
+            CropsChanged?.Invoke();
+        }
+
+        // Above-ground crops want soil (Mud / Grass / ForestFloor); cave-only
+        // crops (Cave Moss) want a roofed tile instead.
+        private bool IsFarmable(int x, int y, CropDef def)
+        {
+            if (def.UndergroundOnly) return _tiles[x, y].IsRoofed;
+            var terr = _tiles[x, y].Terrain;
+            return terr == TerrainType.Mud || terr == TerrainType.Grass || terr == TerrainType.ForestFloor;
+        }
+
+        // Paint a rectangle as farmland for `crop`. Valid tiles (in-bounds,
+        // passable, fertile/roofed) become Empty CropSlots ready to sow;
+        // already-growing tiles keep their existing crop.
+        public int PaintGrowZone(int x0, int y0, int x1, int y1, CropType crop)
+        {
+            var def = CropRegistry.Get(crop);
+            if (def == null) return 0;
+            int count = 0;
+            lock (_designationsLock)
+            {
+                int yLo = System.Math.Min(y0, y1), yHi = System.Math.Max(y0, y1);
+                int xLo = System.Math.Min(x0, x1), xHi = System.Math.Max(x0, x1);
+                for (int y = yLo; y <= yHi; y++)
+                for (int x = xLo; x <= xHi; x++)
+                {
+                    if (!InBounds(x, y) || !IsPassable(x, y)) continue;
+                    if (!IsFarmable(x, y, def)) continue;
+                    if (_crops.TryGetValue((x, y), out var ex) && ex.IsPlanted) continue;
+                    _crops[(x, y)] = new CropSlot { Crop = crop, Stage = CropStage.Empty, GrowthTicks = 0 };
+                    count++;
+                }
+            }
+            if (count > 0) CropsChanged?.Invoke();
+            return count;
+        }
+
+        public void ClearGrowZone(int x0, int y0, int x1, int y1)
+        {
+            bool any = false;
+            lock (_designationsLock)
+            {
+                int yLo = System.Math.Min(y0, y1), yHi = System.Math.Max(y0, y1);
+                int xLo = System.Math.Min(x0, x1), xHi = System.Math.Max(x0, x1);
+                for (int y = yLo; y <= yHi; y++)
+                for (int x = xLo; x <= xHi; x++)
+                    if (_crops.Remove((x, y))) any = true;
+            }
+            if (any) CropsChanged?.Invoke();
+        }
+
+        // Advance sown crops by dtTicks (called each sim tick). Time-based growth;
+        // cheap — iterates only farmland tiles. Botany affects sow speed + harvest
+        // yield (in BehaviorSystem), not the autonomous growth rate.
+        public void TickCrops(int dtTicks)
+        {
+            if (dtTicks <= 0) return;
+            bool changed = false;
+            lock (_designationsLock)
+            {
+                if (_crops.Count == 0) return;
+                var keys = new List<(int X, int Y)>(_crops.Keys);
+                foreach (var key in keys)
+                {
+                    var c = _crops[key];
+                    if (!c.IsPlanted || c.Stage == CropStage.Ripe || c.Stage == CropStage.Wilted) continue;
+                    var def = CropRegistry.Get(c.Crop);
+                    if (def == null) continue;
+                    c.GrowthTicks += dtTicks;
+                    int step = c.GrowthTicks / System.Math.Max(1, def.GrowTicksPerStage);
+                    CropStage target = step >= 4 ? CropStage.Ripe
+                        : step == 3 ? CropStage.Ripening
+                        : step == 2 ? CropStage.Growing
+                        : step == 1 ? CropStage.Sprouting
+                        : CropStage.Sown;
+                    if (target != c.Stage) { c.Stage = target; changed = true; }
+                    _crops[key] = c;
+                }
+            }
+            if (changed) CropsChanged?.Invoke();
+        }
+
+        // v0.8.0 (Phase 8) — nearest sowable (Empty + plantable-at-`botany`) grow-zone
+        // tile the shroomp can actually use. Mirrors FindNearestGather's anti-
+        // convergence filtering so several Growers don't all walk to the same plot:
+        //   • botany gate — skip crops above the planter's Botany (no unplantable loop)
+        //   • avoid — skip tiles this shroomp recently abandoned (StuckThreshold)
+        //   • reservation — skip tiles already claimed by ANOTHER shroomp
+        //   • reachability — return the nearest REACHABLE plot, not the nearest plot
+        //     overall (so a walled-off plot can't shadow a reachable one)
+        // Crops sit on passable tiles (the shroomp stands ON the plot), so there's no
+        // approach-occupancy filter — the per-tile reservation is the anti-jam guard.
+        public (int X, int Y)? FindNearestSowable(Vector2 fromPixel, Guid claimerId, int botany,
+            (int X, int Y, int TicksLeft)[]? avoid = null)
+        {
+            int cx = (int)(fromPixel.X / TileSize);
+            int cy = (int)(fromPixel.Y / TileSize);
+            long best = long.MaxValue;
+            (int X, int Y)? winner = null;
+            EnsureRegions();
+            lock (_designationsLock)
+            {
+                foreach (var kv in _crops)
+                {
+                    if (!kv.Value.IsEmpty || kv.Value.Crop == CropType.None) continue;
+                    if (!CropRegistry.CanPlant(kv.Value.Crop, botany)) continue;
+                    if (IsInAvoidList(avoid, kv.Key.X, kv.Key.Y)) continue;
+                    if (Reservations.IsTileReservedByOther(kv.Key.X, kv.Key.Y, Sporeholm.Simulation.ReservationManager.LayerWork, claimerId)) continue;
+                    if (!IsWorkReachable(cx, cy, kv.Key.X, kv.Key.Y)) continue;
+                    long dx = kv.Key.X - cx, dy = kv.Key.Y - cy, d = dx * dx + dy * dy;
+                    if (d < best) { best = d; winner = kv.Key; }
+                }
+            }
+            return winner;
+        }
+
+        // v0.8.0 (Phase 8) — nearest ripe crop the shroomp can reach, with the same
+        // reservation / avoid / reachability filtering as FindNearestSowable.
+        public (int X, int Y)? FindNearestRipeCrop(Vector2 fromPixel, Guid claimerId,
+            (int X, int Y, int TicksLeft)[]? avoid = null)
+        {
+            int cx = (int)(fromPixel.X / TileSize);
+            int cy = (int)(fromPixel.Y / TileSize);
+            long best = long.MaxValue;
+            (int X, int Y)? winner = null;
+            EnsureRegions();
+            lock (_designationsLock)
+            {
+                foreach (var kv in _crops)
+                {
+                    if (!kv.Value.IsRipe) continue;
+                    if (IsInAvoidList(avoid, kv.Key.X, kv.Key.Y)) continue;
+                    if (Reservations.IsTileReservedByOther(kv.Key.X, kv.Key.Y, Sporeholm.Simulation.ReservationManager.LayerWork, claimerId)) continue;
+                    if (!IsWorkReachable(cx, cy, kv.Key.X, kv.Key.Y)) continue;
+                    long dx = kv.Key.X - cx, dy = kv.Key.Y - cy, d = dx * dx + dy * dy;
+                    if (d < best) { best = d; winner = kv.Key; }
+                }
+            }
+            return winner;
+        }
+
+        // Save/load: snapshot every farmland tile; ApplyCrop restores one.
+        public List<(int X, int Y, CropType Crop, byte Stage, int Growth)> SnapshotCrops()
+        {
+            var list = new List<(int, int, CropType, byte, int)>();
+            lock (_designationsLock)
+                foreach (var kv in _crops)
+                    list.Add((kv.Key.X, kv.Key.Y, kv.Value.Crop, (byte)kv.Value.Stage, kv.Value.GrowthTicks));
+            return list;
+        }
+
+        public void ApplyCrop(int x, int y, CropType crop, byte stage, int growth)
+        {
+            lock (_designationsLock)
+                _crops[(x, y)] = new CropSlot { Crop = crop, Stage = (CropStage)stage, GrowthTicks = growth };
+        }
+
+        // v0.8.0 — public roof query for the harvest biome-yield multiplier
+        // (underground crops bonus when roofed; above-ground crops bonus when open).
+        public bool IsRoofedTile(int x, int y) => InBounds(x, y) && _tiles[x, y].IsRoofed;
 
         // v0.7.3 (E1) — nearest passable tile to (fx,fy), spiralling outward.
         // Returns (fx,fy) itself when it's passable (the common case). Used as

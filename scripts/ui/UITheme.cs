@@ -37,6 +37,12 @@ namespace Sporeholm.UI
         // is idempotent. Right-click via the Remove tool clears stockpile
         // membership from a cell.
         Stockpile,
+        // v0.8.0 (Phase 8) — Farm grow-zone painter. Player picks a crop in
+        // the Zones tab, then drags a rectangle over fertile (or roofed, for
+        // cave crops) tiles; each valid cell becomes a tilled grow-zone plot
+        // (a CropSlot on LocalMap). Growers sow + harvest it via the Grow work
+        // priority. The Remove brush clears grow-zone cells like stockpiles.
+        Farm,
         // v0.5.19 (Phase 5B — rimport N3) — Construction blueprints.
         // Player drags a rectangle to plant Wall / Floor blueprints on
         // every passable tile in the box. Blueprints sit as ghost-state

@@ -25,6 +25,8 @@ public partial class DragSelectionPreview : Node2D
     private static readonly Color ExcavateFill    = new(1.00f, 0.60f, 0.20f, 0.18f);
     private static readonly Color RemoveOutline   = new(1.00f, 0.30f, 0.30f, 0.95f);
     private static readonly Color RemoveFill      = new(1.00f, 0.30f, 0.30f, 0.18f);
+    private static readonly Color FarmOutline     = new(0.45f, 0.80f, 0.35f, 0.95f);   // v0.8.0
+    private static readonly Color FarmFill        = new(0.45f, 0.80f, 0.35f, 0.18f);
     private static readonly Color NoneOutline     = new(0.85f, 0.85f, 0.85f, 0.80f);
     private static readonly Color NoneFill        = new(0.85f, 0.85f, 0.85f, 0.10f);
 
@@ -70,6 +72,7 @@ public partial class DragSelectionPreview : Node2D
             DesignationTool.Gather   => (GatherOutline,   GatherFill),
             DesignationTool.Excavate => (ExcavateOutline, ExcavateFill),
             DesignationTool.Remove   => (RemoveOutline,   RemoveFill),
+            DesignationTool.Farm     => (FarmOutline,     FarmFill),
             _                        => (NoneOutline,    NoneFill),
         };
 

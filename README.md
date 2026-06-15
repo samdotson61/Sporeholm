@@ -2,13 +2,13 @@
 
 A colony simulation game about a tribe of mushroom-people (**Shroomps**) trying to survive in a strange, fungal world. Designed and developed by **Sam Dotson** in **Godot 4.6** (C#).
 
-Current version: **v0.7.4** (active development — Phase 7 combat plus a depth pass: a shared body-part combat engine with wounds, pain + venom, a healer / medicine loop, material-aware armor, draft, rescue, training buildings, apparel layers, right-click attack orders, **patrol orders**, **mental breaks** on mood collapse, and a **social opinion / relationship** ledger — plus a 24-fix audit-hardening pass: crash-safe saving, fuller save/load persistence, and render + patrol UX fixes).
+Current version: **v0.8.0** (active development — Phase 8 (Agricultural) opens with the **farming core**: paint a grow-zone, pick from **nine crops** across three Botany tiers, and Growers sow, tend, and harvest them on a continuous loop. Adds the **Grow** work priority, the **Husbandry** skill, a per-stage grow-zone tint, and crop save/load. Built on the complete Phase 7 combat system — a shared body-part combat engine with wounds, pain + venom, a healer / medicine loop, material-aware armor, draft, rescue, training buildings, apparel layers, attack + patrol orders, mental breaks, and a social relationship ledger.).
 
 ---
 
 ## Project status at a glance
 
-Sporeholm is mid-development. The core simulation loop — colony of pawns, needs, work, construction, crafting, mood, wildlife, save/load — is shipped and stable. **Combat (Phase 7) is now complete** — a full body-part combat system with wounds, pain/venom, healing, rescue, layered armor, training, and weapons. Farming/husbandry, weather, events, and disease are the next phases.
+Sporeholm is mid-development. The core simulation loop — colony of pawns, needs, work, construction, crafting, mood, wildlife, save/load — is shipped and stable. Combat (Phase 7) is complete. **Phase 8 (Agricultural) is now underway** — the farming core (crops + grow-zones + sow/harvest) ships in v0.8.0; animal husbandry (taming, produce, breeding) and hunting follow in later v0.8.x slices. Weather, events, and disease are future phases.
 
 | Layer | State |
 |---|---|
@@ -25,7 +25,8 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 | **Wildlife (15 species: friendly + neutral + hostile)** | **Shipped — v0.6.0** |
 | Save / load | Shipped |
 | **Combat** | **Shipped — v0.7.x** (body-part combat, wounds, pain/venom, healer + rescue, layered armor, draft, training, weapons) |
-| **Husbandry & farming** | Stubs only — Phase 8 |
+| **Farming (crops + grow-zones + sow/harvest)** | **Shipped — v0.8.0** (9 crops, 3 Botany tiers, Grow priority, Husbandry skill) |
+| **Animal husbandry (taming / produce / breeding)** | Tagged — later Phase 8 slices |
 | **Weather & temperature** | Insulation half — Phase 10 |
 | **Disease, research, eras** | Future phases |
 
@@ -44,7 +45,7 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 - Five core needs: **Nutrition**, **Rest**, **Social**, **Magic Resonance**, **Safety**, with derived **Joy** and mood.
 - **Relationships**: colonists build a numeric opinion of one another from social encounters, forming **Acquaintance / Friend / Rival / Lover** bonds (the last a hook for a future courtship system). Repeated good chats build friendship; repeated slights build rivalry.
 - **Mental breaks**: a colonist whose mood collapses may briefly lose control — **sad wandering**, a **tantrum**, or a **daze** — overriding work and orders (but not self-defense), then recovering with a catharsis. A message-log alert fires when one starts.
-- **12 skills**: Botany, Mining, Athletics, Melee, Ranged, Crafting, **Cooking**, Construction, Magic, Social, Study, Healing. Level 0–20 with diminishing XP curves. Phase 7 combat ships on the existing **Melee / Ranged / Healing** skills; **Husbandry** is the planned Phase 8 addition (farming + animals).
+- **13 skills**: Botany, Mining, Athletics, Melee, Ranged, Crafting, **Cooking**, Construction, Magic, Social, Study, Healing, **Husbandry** (added v0.8.0 for Phase 8 farming + animals). Level 0–20 with diminishing XP curves. Farming reads **Botany** — it gates which crops a colonist can plant and scales the harvest yield.
 - **7 roles**: Forager, Crafter, Guardian, Caretaker, Scholar, Sage, Elder. Each role has skill bonuses + default work priorities.
 - **13 mushroom-themed biological traits** (penetrance 0–1) — active ones include **MyceliumAttuned** (magic resonance lasts longer), **ClusterFruiting** (social decays slower around colony-mates), **EfficientGills** (hunger decays slower), **RapidMetabolism** (hunger decays faster — biological cost), **SporeResonant**, **CompactStature** + **WispyFrame** (carry-capacity penalties). Plus personality archetypes + backstories + the **Pacifist** trait (auto-blocks weapon equipping, ~8% incidence).
 - Full body-part hierarchy (Cap, Stalk, Gills, Spore Vent, Filter, legs, feet, hands) with damage, bleeding, downed state, natural healing.
@@ -81,11 +82,18 @@ A full body-part combat system layered on the wildlife AI. Shroomps and creature
 
 ### Work + designations
 
-- Drag-paint orders: Gather food, Excavate stone/wood, Chop trees, Cut plants, Build (walls/floors/doors/furniture), Stockpile zones, Allowed Areas, Demolish.
+- Drag-paint orders: Gather food, Excavate stone/wood, Chop trees, Cut plants, Build (walls/floors/doors/furniture), Stockpile zones, **Farm grow-zones**, Allowed Areas, Demolish.
 - **Stockpile zones** with priority levels + per-zone item-type filters + Forbid/Allow flag.
 - **Haul system** with destination reservation + crowd-aware pathing.
 - **Per-tick mining** — skill curve activates: a level-0 novice takes ~8 sec / boulder; a level-20 master with a Masterwork Pick clears it in ~0.1 sec.
 - **Tool bonuses**: equipping the right tool for the task (Pick for mining, Sickle for cutting, Sage Staff for Attune) gives a 1.30 × QualityMul speed multiplier.
+
+### Farming (Phase 8 — v0.8.0)
+
+- **Farm tool** in the Zones tab: pick a crop, then drag a rectangle over fertile ground (or roofed cave tiles for cave crops) to lay out a grow-zone. The **Grow** work priority drives it (Foragers farm by default; Elders / Caretakers / unassigned colonists fill in).
+- **Nine crops, three Botany tiers**: Simple (Small Mushroom, Cave Moss, Spring Greens — Botany 0), Medium (Capberry, Sunberry, Pumpkin — Botany 3–5), Hard (Magic Herb, Large Mushroom, Magic Flower — Botany 6–9). Each crop chip shows its Botany requirement. Fungal crops yield more underground; the rest favour the surface.
+- **Sow → grow → harvest loop**: crops grow autonomously through five stages (Sown → Sprouting → Growing → Ripening → Ripe). **Botany** gates which crops a colonist can plant and scales the harvest yield. Harvested plots reset and re-sow themselves, so a tended field is a standing food supply.
+- A translucent **grow-zone tint** shades each plot from tilled brown through green to gold when ripe; **hover** for the crop + stage, **click** for a Grow Zone inspector (crop / stage / Botany requirement / yield). The **Remove** brush clears grow-zone cells. Crops persist through save/load.
 
 ### Construction
 
@@ -163,7 +171,7 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 | 5.5 | Crafting bills | Complete |
 | 6 | Entity system (animals + creatures) | Shipped (v0.6.0 — 15 species + AI + sprites + save/load) |
 | 7 | Combat (Healer + Rescue + Training + Weapons/Apparel) | Shipped (v0.7.2 — full body-part combat) |
-| **8** | **Agricultural systems** (animal husbandry, farming, hunting) | **Next** |
+| **8** | **Agricultural systems** (farming, animal husbandry, hunting) | **In progress** (v0.8.0 — farming core: crops + grow-zones + sow/harvest; husbandry + hunting in later v0.8.x slices) |
 | 9 | Events + Storyteller (Peaceful / Random / Adventure — extensible) | Stub |
 | 10 | Weather + Environment (Insulation half done) | — |
 | 11 | Technology + Culture (research + power) | — |

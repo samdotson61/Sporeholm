@@ -33,6 +33,8 @@ public partial class DesignationToolbar : Control
         Haul     = DesignationTool.Haul,
         // v0.5.0 (Phase 5A) — stockpile zone painter (no longer a stub).
         Stockpile = DesignationTool.Stockpile,
+        // v0.8.0 (Phase 8) — farm grow-zone painter (Zones tab).
+        Farm      = DesignationTool.Farm,
         // v0.5.19 (Phase 5B) — construction blueprints (no longer a stub).
         BuildWall  = DesignationTool.BuildWall,
         BuildFloor = DesignationTool.BuildFloor,
@@ -81,6 +83,12 @@ public partial class DesignationToolbar : Control
     // because LocalMap auto-creates that area at world construction.
     [Signal] public delegate void ActiveAreaNameChangedEventHandler(string newAreaName);
 
+    // v0.8.0 (Phase 8) — which crop the Farm grow-zone painter sows. Set by
+    // ZonesPanel's crop-chip row; DesignateRect reads ActiveCrop when painting
+    // a Farm rectangle. Carried as the int enum value through the signal so
+    // it matches the existing BuildMaterialChanged(int) convention.
+    [Signal] public delegate void ActiveCropChangedEventHandler(int newCrop);
+
     public Tool ActiveTool { get; private set; } = Tool.None;
     // v0.5.84i — default changed from generic Stone to Granite. Sam:
     // "remove generic wood/stone entirely from the game and replace
@@ -90,6 +98,11 @@ public partial class DesignationToolbar : Control
     public Sporeholm.World.StructureMat ActiveBuildMaterial { get; private set; }
         = Sporeholm.World.StructureMat.Granite;
     public string ActiveAreaName { get; private set; } = "Home";
+    // v0.8.0 (Phase 8) — Farm painter's selected crop. Defaults to Small
+    // Mushroom (Botany 0, plantable by any colonist) so a fresh Farm drag
+    // always produces a valid plot before the player picks a crop.
+    public Sporeholm.World.CropType ActiveCrop { get; private set; }
+        = Sporeholm.World.CropType.SmallMushroom;
 
     // Maps the live-mode tools onto the shared sim enum so GameController
     // can hand the active tool straight to SimulationManager.DesignateRect
@@ -102,6 +115,7 @@ public partial class DesignationToolbar : Control
         Tool.Cut       => DesignationTool.Cut,
         Tool.Haul      => DesignationTool.Haul,
         Tool.Stockpile => DesignationTool.Stockpile,   // v0.5.0
+        Tool.Farm      => DesignationTool.Farm,         // v0.8.0 (Phase 8)
         Tool.BuildWall  => DesignationTool.BuildWall,   // v0.5.19
         Tool.BuildFloor => DesignationTool.BuildFloor,  // v0.5.19
         Tool.BuildDoor  => DesignationTool.BuildDoor,   // v0.5.20
@@ -251,6 +265,15 @@ public partial class DesignationToolbar : Control
         if (string.IsNullOrEmpty(areaName) || areaName == ActiveAreaName) return;
         ActiveAreaName = areaName;
         EmitSignal(SignalName.ActiveAreaNameChanged, areaName);
+    }
+
+    // v0.8.0 (Phase 8) — Farm crop picker setter. ZonesPanel crop-chip → here.
+    // DesignateRect reads ActiveCrop when painting a Farm rectangle.
+    public void SetActiveCrop(Sporeholm.World.CropType crop)
+    {
+        if (crop == ActiveCrop) return;
+        ActiveCrop = crop;
+        EmitSignal(SignalName.ActiveCropChanged, (int)crop);
     }
 
     private void AddToolButton(Tool tool, string text, string tooltip, bool disabled = false)

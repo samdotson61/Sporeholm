@@ -38,6 +38,7 @@ public partial class GameController : Node
 	private DesignationOverlay    _designations    = null!;
 	private ItemDropOverlay       _itemOverlay     = null!;
 	private StockpileOverlay      _stockpileOverlay = null!;   // v0.5.0 Phase 5A
+	private GrowZoneOverlay       _growZoneOverlay  = null!;   // v0.8.0 Phase 8
 	private StructureOverlay      _structureOverlay = null!;   // v0.5.19 Phase 5B
 	private EntityColonyView      _entityColonyView = null!;   // v0.6.0 Phase 6 — wildlife renderer
 	private EntityCardPanel       _entityCard       = null!;   // v0.6.2 — wildlife inspector card
@@ -115,6 +116,7 @@ public partial class GameController : Node
 			_designations.SetMap(preloadedMap);
 			_itemOverlay.SetMap(preloadedMap);
 			_stockpileOverlay.SetMap(preloadedMap);   // v0.5.0
+			_growZoneOverlay.SetMap(preloadedMap);    // v0.8.0
 			_structureOverlay.SetMap(preloadedMap);   // v0.5.19
 			_colony.UpdateMapSize(preloadedMap);
 			// Phase 3: bind the LocalMap to the sim thread so BehaviorSystem
@@ -146,6 +148,7 @@ public partial class GameController : Node
 			_designations.SetMap(map);
 			_itemOverlay.SetMap(map);
 			_stockpileOverlay.SetMap(map);   // v0.5.0
+			_growZoneOverlay.SetMap(map);    // v0.8.0
 			_structureOverlay.SetMap(map);   // v0.5.19
 			// Re-centre the camera on the actual generated map. BuildGameWorld() used
 			// DefaultWidth/DefaultHeight to initialise camera position, which can be
@@ -195,6 +198,12 @@ public partial class GameController : Node
 		// selection brackets, which is the original design intent.
 		_stockpileOverlay = new StockpileOverlay { Name = "StockpileOverlay" };
 		AddChild(_stockpileOverlay);
+
+		// v0.8.0 (Phase 8) — farm grow-zone tint. Same z=0 as the stockpile
+		// overlay, added right after it so the crop tint sits on the floor but
+		// beneath structures / designation glyphs / item icons / shroomps.
+		_growZoneOverlay = new GrowZoneOverlay { Name = "GrowZoneOverlay" };
+		AddChild(_growZoneOverlay);
 
 		// v0.5.19 (Phase 5B) — structure overlay (walls, floors, blueprints).
 		// Sits between stockpile (z=0, tree-order earlier) and designations
@@ -788,7 +797,8 @@ public partial class GameController : Node
 					// FungalWood / DeadWood / LivingWood). For non-build
 					// tools the parameter is ignored.
 					_sim.DesignateRect(_dragPreview.Tool, x0, y0, x1, y1,
-						buildMaterial: _toolbar.ActiveBuildMaterial);
+						buildMaterial: _toolbar.ActiveBuildMaterial,
+						cropType: _toolbar.ActiveCrop);   // v0.8.0 — Farm crop
 				}
 				// v0.4.27 — force the overlay to ingest the new tiles
 				// inside the same input frame. `DesignateRect` writes
@@ -851,7 +861,11 @@ public partial class GameController : Node
 					bool hasVeg   = lmap.GetVegetation(tile.Value.x, tile.Value.y).IsPresent;
 					bool hasStructure = lmap.GetStructure(tile.Value.x, tile.Value.y).Type
 						!= Sporeholm.World.StructureType.None;
-					if (hasItems || hasVeg || hasStructure)
+					// v0.8.0 — also open on a farm grow-zone tile (bare plot) so
+					// the player can inspect its crop / stage / yield.
+					bool hasCrop = lmap.GetCrop(tile.Value.x, tile.Value.y).Crop
+						!= Sporeholm.World.CropType.None;
+					if (hasItems || hasVeg || hasStructure || hasCrop)
 					{
 						_card.Visible = false;        // mutually exclusive with the shroomp card
 						// v0.6.2v — also close the entity card so the
@@ -1224,7 +1238,8 @@ public partial class GameController : Node
 		if (tool != Sporeholm.UI.DesignationTool.None)
 		{
 			_sim.DesignateRect(tool, x0, y0, x1, y1,
-				buildMaterial: _toolbar.ActiveBuildMaterial);   // v0.5.32
+				buildMaterial: _toolbar.ActiveBuildMaterial,
+				cropType: _toolbar.ActiveCrop);   // v0.5.32 / v0.8.0 Farm crop
 			_designations.RebuildIfDirty();   // v0.4.27 — instant visual
 			_orderFeedback.FlashDesignationRect(tool, x0, y0, x1, y1);  // v0.3.24
 		}
@@ -1312,7 +1327,8 @@ public partial class GameController : Node
 		// full label of every stack on the tile (RimWorld convention).
 		_tileInfo.ShowTile(map.Get(tx, ty), map.GetVegetation(tx, ty), biome,
 			map.GetTileStone(tx, ty),
-			map.GetItemsOnTile(tx, ty));
+			map.GetItemsOnTile(tx, ty),
+			map.GetCrop(tx, ty));   // v0.8.0 — show farm crop + stage on hover
 	}
 
 	// ── Input ─────────────────────────────────────────────────────────────────

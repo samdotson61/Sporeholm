@@ -768,6 +768,10 @@ namespace Sporeholm.Simulation
 
 			long tBehaviorStart = System.Diagnostics.Stopwatch.GetTimestamp();
 			BehaviorSystem.Tick(working, entForBehavior, Map, Resources, queue, _rng, dt, GlobalTick, _date.Hour);
+
+			// v0.8.0 (Phase 8) — advance sown crops one tick (time-based growth;
+			// paused with the sim since TickBody doesn't run while paused).
+			Map?.TickCrops(1);
 			PerfBehaviorMicros += (System.Diagnostics.Stopwatch.GetTimestamp() - tBehaviorStart)
 				* 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
 

@@ -105,6 +105,21 @@ namespace Sporeholm.Simulation.Items
             new() { Kind = ItemKind.Material, SubType = "Pebblestone",       DisplayName = "Pebblestone",         Icon = "🪨", BaseDurability = 150f, BaseValue = 1.5f, AllowedFamilies = new[]{"Stone"} },
             new() { Kind = ItemKind.Material, SubType = "BoneFragment",      DisplayName = "Bone Fragment",       Icon = "🦴", BaseDurability = 80f, BaseValue = 1.0f, AllowedFamilies = new[]{"Bone"} },
 
+            // ── v0.8.0 (Phase 8) — farm crop yields + animal products ──
+            // New farm-crop foods (Spring Greens / Sunberry / Pumpkin). The
+            // other crops reuse existing items (SmallMushroom / Capberry /
+            // HerbCluster / MagicBerry / WoodLog / Mosslet).
+            new() { Kind = ItemKind.Food, SubType = "SpringGreens", DisplayName = "Spring Greens", Icon = "🥬", BaseNutrition = 3f, BaseDurability = 25f, BaseFreshDays = 4f,  BaseValue = 0.9f, AllowedFamilies = new[]{"Plant"} },
+            new() { Kind = ItemKind.Food, SubType = "Sunberry",     DisplayName = "Sunberry",      Icon = "🟠", BaseNutrition = 5f, BaseDurability = 30f, BaseFreshDays = 5f,  BaseValue = 1.1f, AllowedFamilies = new[]{"Plant"} },
+            new() { Kind = ItemKind.Food, SubType = "Pumpkin",      DisplayName = "Pumpkin",       Icon = "🎃", BaseNutrition = 7f, BaseDurability = 50f, BaseFreshDays = 12f, BaseValue = 1.4f, AllowedFamilies = new[]{"Plant"} },
+            // Animal products — Phase 8 husbandry/hunting produce. The "Meat"
+            // family covers raw meat / eggs / milk so CookMeal (any-food-family)
+            // accepts them; Hide is a Material family used by Cloak/Boots apparel.
+            new() { Kind = ItemKind.Food,     SubType = "Meat", DisplayName = "Raw Meat",  Icon = "🥩", BaseNutrition = 8f, BaseDurability = 30f, BaseFreshDays = 3f, BaseValue = 1.6f, AllowedFamilies = new[]{"Meat"} },
+            new() { Kind = ItemKind.Food,     SubType = "Egg",  DisplayName = "Egg",       Icon = "🥚", BaseNutrition = 4f, BaseDurability = 35f, BaseFreshDays = 8f, BaseValue = 1.2f, AllowedFamilies = new[]{"Meat"} },
+            new() { Kind = ItemKind.Food,     SubType = "Milk", DisplayName = "Milk",      Icon = "🥛", BaseNutrition = 5f, BaseDurability = 25f, BaseFreshDays = 2f, BaseValue = 1.3f, AllowedFamilies = new[]{"Meat"} },
+            new() { Kind = ItemKind.Material, SubType = "Hide", DisplayName = "Hide",      Icon = "🟫", BaseDurability = 70f, BaseValue = 1.8f, AllowedFamilies = new[]{"Hide"} },
+
             // ── Material — Wood ────────────────────────────────────────
             // v0.4.2 — single WoodLog sub-type carrying the wood family on
             // the Material axis: DeadWood (from DeadLog terrain),

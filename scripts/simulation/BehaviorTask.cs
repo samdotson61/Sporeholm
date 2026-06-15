@@ -97,6 +97,10 @@ namespace Sporeholm.Simulation
         // collapse). Driven by BehaviorSystem's mental-break pass; the verb
         // surfaces "Breaking down" in the roster/card.
         MentalBreak,
+        // v0.8.0 (Phase 8) — farm work. PlantCrop = sow an empty grow-zone tile;
+        // HarvestCrop = harvest a ripe crop tile. Gated by the Grow work
+        // priority; mirror the GatherFood designation-work lifecycle.
+        PlantCrop, HarvestCrop,
     }
 
     // Roadmap §3.2 behavior task carried by each Shroomp. Target is in *pixel*

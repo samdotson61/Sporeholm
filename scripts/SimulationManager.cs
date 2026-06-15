@@ -581,7 +581,8 @@ namespace Sporeholm
 		// tiles in the box are silently skipped.
 		public void DesignateRect(Sporeholm.UI.DesignationTool tool,
 			int x0, int y0, int x1, int y1,
-			Sporeholm.World.StructureMat? buildMaterial = null)
+			Sporeholm.World.StructureMat? buildMaterial = null,
+			Sporeholm.World.CropType cropType = Sporeholm.World.CropType.None)
 		{
 			var map = _core.Map;
 			if (map == null) return;
@@ -589,6 +590,16 @@ namespace Sporeholm
 			int xMax = System.Math.Max(x0, x1);
 			int yMin = System.Math.Min(y0, y1);
 			int yMax = System.Math.Max(y0, y1);
+
+			// v0.8.0 (Phase 8) — Farm grow-zone painter. PaintGrowZone applies
+			// the whole rect in one locked pass (it runs its own per-cell
+			// fertility / roof / passability checks), so — like the Haul order
+			// below — it's handled before the generic per-cell designation loop.
+			if (tool == Sporeholm.UI.DesignationTool.Farm)
+			{
+				map.PaintGrowZone(x0, y0, x1, y1, cropType);
+				return;
+			}
 
 			// v0.4.12 — Haul order is item-keyed, not tile-keyed. Walk
 			// every dropped item with TilePos inside the rect and mark
@@ -657,6 +668,7 @@ namespace Sporeholm
 						// v0.5.0 — Remove brush also clears stockpile membership.
 						map.ClearDesignationsAt(x, y);
 						map.ClearStockpileCell(x, y);
+							map.ClearGrowZone(x, y, x, y);   // v0.8.0 — Remove also clears grow-zone cells
 						break;
 					case Sporeholm.UI.DesignationTool.Stockpile:
 						extendId = map.SetStockpileCell(x, y, extendId);

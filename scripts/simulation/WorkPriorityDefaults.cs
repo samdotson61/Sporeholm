@@ -44,7 +44,7 @@ namespace Sporeholm.Simulation
             ["Forager"]    = new()
             {
                 ["Patient"] = 1, ["BedRest"] = 1,
-                ["Forage"] = 1, ["PlantCut"] = 2, ["Chop"] = 3,
+                ["Forage"] = 1, ["Grow"] = 1, ["PlantCut"] = 2, ["Chop"] = 3,   // v0.8.0 — Foragers farm
                 ["Haul"] = 3, ["Clean"] = 4,
             },
             ["Crafter"]    = new()
@@ -70,6 +70,7 @@ namespace Sporeholm.Simulation
             {
                 ["Patient"] = 1, ["BedRest"] = 1,
                 ["Healer"] = 1, ["Cook"] = 2, ["Craft"] = 2,   // v0.5.84s — Caretaker brews medicine
+                ["Grow"] = 3,                                   // v0.8.0 — farm fallback
                 ["Haul"] = 3, ["Clean"] = 3,
             },
             ["Guardian"]   = new()
@@ -81,12 +82,13 @@ namespace Sporeholm.Simulation
             ["Elder"]      = new()
             {
                 ["Patient"] = 1, ["BedRest"] = 1,
-                ["Cook"] = 1, ["Healer"] = 2,
+                ["Cook"] = 1, ["Healer"] = 2, ["Grow"] = 2,   // v0.8.0 — gardening is gentle work
                 ["Haul"] = 4, ["Clean"] = 4, ["Study"] = 2,
             },
             ["Unassigned"] = new()
             {
                 ["Patient"] = 1, ["BedRest"] = 1,
+                ["Grow"] = 3,                                  // v0.8.0 — anyone can pitch in farming
                 ["Haul"] = 3, ["Clean"] = 4,
             },
         };
@@ -162,6 +164,8 @@ namespace Sporeholm.Simulation
             TaskType.Haul           => "Haul",        // v0.4.36
             TaskType.Cook           => "Cook",
             TaskType.DoBill         => "Craft",       // v0.5.84s — Phase 5.5
+            TaskType.PlantCrop      => "Grow",        // v0.8.0 — Phase 8 farming
+            TaskType.HarvestCrop    => "Grow",        // v0.8.0 — Phase 8 farming
             _ => null,
         };
 

@@ -273,6 +273,18 @@ public partial class WorldState : Node
                         });
                 CurrentLocalMap.ApplyWorkbenchBills(wb.X, wb.Y, bills);
             }
+
+        // v0.8.0 (Phase 8) — restore farm grow-zone crops. ApplyCrop re-adds
+        // each CropSlot to LocalMap._crops; autonomous growth resumes via
+        // SimulationCore.TickCrops on the next tick. Unknown crop names (a
+        // removed CropType in a future build) are skipped, not crashed.
+        if (save.CropTiles != null)
+            foreach (var c in save.CropTiles)
+            {
+                if (!System.Enum.TryParse<Sporeholm.World.CropType>(c.Crop, out var crop))
+                    continue;
+                CurrentLocalMap.ApplyCrop(c.X, c.Y, crop, c.Stage, c.Growth);
+            }
     }
 
     // Ensures a valid local map exists even for saves without world data.

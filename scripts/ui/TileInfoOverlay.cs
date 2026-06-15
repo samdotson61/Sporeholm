@@ -107,9 +107,10 @@ public partial class TileInfoOverlay : Control
     // of the tooltip for no visual change.
     public void ShowTile(LocalTile tile, VegetationSlot veg, BiomeType worldBiome,
         MaterialKey? stone = null,
-        System.Collections.Generic.IReadOnlyList<Item>? droppedItems = null)
+        System.Collections.Generic.IReadOnlyList<Item>? droppedItems = null,
+        CropSlot crop = default)   // v0.8.0 (Phase 8) — farm grow-zone crop on this tile
     {
-        string txt = Format(tile, veg, worldBiome, stone, droppedItems);
+        string txt = Format(tile, veg, worldBiome, stone, droppedItems, crop);
         if (_label.Text != txt) _label.Text = txt;
         if (!Visible) Visible = true;
     }
@@ -123,7 +124,8 @@ public partial class TileInfoOverlay : Control
 
     private static string Format(LocalTile tile, VegetationSlot veg, BiomeType worldBiome,
         MaterialKey? stone,
-        System.Collections.Generic.IReadOnlyList<Item>? droppedItems)
+        System.Collections.Generic.IReadOnlyList<Item>? droppedItems,
+        CropSlot crop = default)
     {
         string terrain = TerrainName(tile.Terrain, stone);
         string detail  = TerrainDetail(tile, stone);
@@ -175,7 +177,18 @@ public partial class TileInfoOverlay : Control
             itemsBlock = sb.ToString();
         }
 
-        if (!veg.IsPresent) return $"{line1}\n{line2}{itemsBlock}";
+        // v0.8.0 (Phase 8) — farm grow-zone crop line. A tile is farmland iff
+        // it carries a CropSlot (Crop != None); show the crop + its stage so
+        // the player can read "Spring Greens — ripe" on hover.
+        string cropBlock = "";
+        if (crop.Crop != CropType.None)
+        {
+            var cdef = CropRegistry.Get(crop.Crop);
+            string cname = cdef?.DisplayName ?? crop.Crop.ToString();
+            cropBlock = $"\n🌱 {cname} — {CropStageName(crop.Stage)}";
+        }
+
+        if (!veg.IsPresent) return $"{line1}\n{line2}{cropBlock}{itemsBlock}";
 
         string vegName = VegetationName(veg.Type);
         string yieldHint = VegetationYield(veg.Type);
@@ -184,8 +197,21 @@ public partial class TileInfoOverlay : Control
             ? $"{vegName} ({yieldHint}){depleted}"
             : vegName;
 
-        return $"{line1}\n{line2}\n{line3}{itemsBlock}";
+        return $"{line1}\n{line2}\n{line3}{cropBlock}{itemsBlock}";
     }
+
+    // v0.8.0 — friendly crop-stage label for the hover readout.
+    private static string CropStageName(CropStage stage) => stage switch
+    {
+        CropStage.Empty     => "awaiting sowing",
+        CropStage.Sown      => "sown",
+        CropStage.Sprouting => "sprouting",
+        CropStage.Growing   => "growing",
+        CropStage.Ripening  => "ripening",
+        CropStage.Ripe      => "ripe — ready to harvest",
+        CropStage.Wilted    => "wilted",
+        _                   => "—",
+    };
 
     // v0.4.33 — RimWorld-style corpse obituary line. Format:
     //   "{Name} — {age-stage} {sex} {role}, died of {cause}; body {state}"

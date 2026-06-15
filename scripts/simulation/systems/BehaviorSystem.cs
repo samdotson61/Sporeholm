@@ -2763,9 +2763,11 @@ namespace Sporeholm.Simulation.Systems
                     // re-pick it. 300 ticks ≈ 5 sec at 1×, enough for the
                     // shroomp to wander far enough that a different target
                     // becomes closer.
+                    // v0.8.0 — use IsDesignationTaskType (now includes PlantCrop/
+                    // HarvestCrop) so a Grower that gives up on a jammed plot
+                    // blacklists it, matching the other two abandon paths.
                     if (s.CurrentTask is BehaviorTask gtask
-                        && (gtask.Type == TaskType.GatherFood || gtask.Type == TaskType.GatherMaterial
-                            || gtask.Type == TaskType.ChopWood || gtask.Type == TaskType.CutVegetation)
+                        && IsDesignationTaskType(gtask.Type)
                         && gtask.TargetTileX >= 0 && gtask.TargetTileY >= 0)
                     {
                         // v0.3.40 — push this tile into the FIFO blacklist.
@@ -3044,7 +3046,8 @@ namespace Sporeholm.Simulation.Systems
             t == TaskType.GatherFood || t == TaskType.GatherMaterial
             || t == TaskType.ChopWood || t == TaskType.CutVegetation
             || t == TaskType.Build                         // v0.5.19 Phase 5B
-            || t == TaskType.BuildHaul;                    // v0.5.60
+            || t == TaskType.BuildHaul                      // v0.5.60
+            || t == TaskType.PlantCrop || t == TaskType.HarvestCrop;  // v0.8.0 Phase 8
 
         // v0.5.19 (Phase 5B) — consume materials for a Build task. Returns
         // true if the full cost was taken from the colony Inventory; false
@@ -3415,6 +3418,27 @@ namespace Sporeholm.Simulation.Systems
                     if (cut.HasValue)
                         return ClaimAndMakeDesignationTask(s, map, TaskType.CutVegetation,
                             cut.Value, 40f + pCut + jobTilt("PlantCut"));
+                }
+
+                // v0.8.0 (Phase 8) — farm work (Grow priority). A grow-zone tile
+                // is any tile carrying a CropSlot (LocalMap._crops). Harvest ripe
+                // crops first (don't let yield rot), then sow empty plots. Mirrors
+                // the GatherFood designation-work lifecycle: claim the tile, walk,
+                // ApplyTaskEffect on arrival. Time-based growth (TickCrops) runs in
+                // SimulationCore regardless of who tends.
+                if (designationsOk && jobOk("Grow") && map.HasAnyCrop())
+                {
+                    // Finders skip tiles reserved by another shroomp + recently-
+                    // abandoned (avoid) tiles and return the nearest REACHABLE plot,
+                    // so Growers spread across the field instead of converging.
+                    var ripe = FindDesignatedHarvest(s, map);
+                    if (ripe.HasValue)
+                        return ClaimAndMakeDesignationTask(s, map, TaskType.HarvestCrop,
+                            ripe.Value, 55f + jobTilt("Grow"));
+                    var sow = FindDesignatedSow(s, map);
+                    if (sow.HasValue)
+                        return ClaimAndMakeDesignationTask(s, map, TaskType.PlantCrop,
+                            sow.Value, 45f + jobTilt("Grow"));
                 }
 
                 // v0.4.2 — Haul task. After Gather / Excavate / Chop /
@@ -4785,6 +4809,77 @@ namespace Sporeholm.Simulation.Systems
                     }
                     s.CurrentTask = null;  // re-evaluate next tick
                     break;
+                case TaskType.PlantCrop:
+                    // v0.8.0 (Phase 8) — sow an empty grow-zone tile. The crop is
+                    // fixed by the grow-zone (the player paints the crop when
+                    // designating); sowing is instant-on-arrival since growth is
+                    // autonomous (LocalMap.TickCrops). Botany gates which crops the
+                    // shroomp can plant and grants planting XP.
+                    if (map != null && t.TargetTileX >= 0 && t.TargetTileY >= 0)
+                    {
+                        var cs = map.GetCrop(t.TargetTileX, t.TargetTileY);
+                        if (cs.IsEmpty && cs.Crop != CropType.None
+                            && CropRegistry.CanPlant(cs.Crop, SkillLevel(s, "Botany")))
+                        {
+                            cs.Stage = CropStage.Sown;
+                            cs.GrowthTicks = 0;
+                            map.SetCrop(t.TargetTileX, t.TargetTileY, cs);
+                            var pdef = CropRegistry.Get(cs.Crop);
+                            EmitWorkThought(s, TaskType.PlantCrop, pdef?.DisplayName ?? "crop");
+                            s.TaskDidWork = true;   // v0.4.19
+                            SkillRegistry.GainXp(s, "Botany", 12f);   // sowing < harvest XP
+                        }
+                        map.ReleaseClaim(t.TargetTileX, t.TargetTileY, s.Id);
+                    }
+                    s.CurrentTask = null;  // re-evaluate next tick
+                    break;
+                case TaskType.HarvestCrop:
+                    // v0.8.0 (Phase 8) — harvest a ripe crop. Drops the crop's yield
+                    // item (rolled YieldMin..Max × Botany factor × biome multiplier),
+                    // then resets the slot to Empty so the grow-zone re-sows the same
+                    // crop. Mirrors the GatherFood drop/XP lifecycle.
+                    if (map != null && t.TargetTileX >= 0 && t.TargetTileY >= 0)
+                    {
+                        var cs = map.GetCrop(t.TargetTileX, t.TargetTileY);
+                        var hdef = CropRegistry.Get(cs.Crop);
+                        if (cs.IsRipe && hdef != null && !string.IsNullOrEmpty(hdef.YieldItemSubType))
+                        {
+                            int botany = SkillLevel(s, "Botany");
+                            int baseYield = hdef.YieldMin + rng.Next(hdef.YieldMax - hdef.YieldMin + 1);
+                            // Biome emphasis: fungal crops favour roofed (cave) tiles.
+                            float biomeMul = map.IsRoofedTile(t.TargetTileX, t.TargetTileY)
+                                ? hdef.UndergroundYieldMul : hdef.AboveGroundYieldMul;
+                            float harvestToolBonus = GetToolBonusFor(s, TaskType.HarvestCrop);
+                            int yield = SkillCurve.ApplyYieldMul(
+                                baseYield,
+                                SkillCurve.PlantYieldFactor(botany) * biomeMul * harvestToolBonus,
+                                rng);
+                            if (yield > 0 && SkillCurve.HarvestBotch(botany, rng))
+                                yield = Mathf.Max(1, yield / 2);
+                            var dropPos = new Vector2(
+                                t.TargetTileX * LocalMap.TileSize + LocalMap.TileSize * 0.5f,
+                                t.TargetTileY * LocalMap.TileSize + LocalMap.TileSize * 0.5f);
+                            if (yield > 0)
+                            {
+                                var item = ItemFactory.Create(
+                                    hdef.YieldItemKind, hdef.YieldItemSubType,
+                                    null, rng, globalTick,
+                                    skillLevel: botany, quantity: yield);
+                                item.TilePos = dropPos;
+                                map.DropItem(item);
+                            }
+                            EmitWorkThought(s, TaskType.HarvestCrop, hdef.DisplayName);
+                            s.TaskDidWork = true;   // v0.4.19
+                            SkillRegistry.GainXp(s, "Botany", 40f);
+                            // Reset to Empty (keep Crop) so the plot re-sows itself.
+                            cs.Stage = CropStage.Empty;
+                            cs.GrowthTicks = 0;
+                            map.SetCrop(t.TargetTileX, t.TargetTileY, cs);
+                        }
+                        map.ReleaseClaim(t.TargetTileX, t.TargetTileY, s.Id);
+                    }
+                    s.CurrentTask = null;  // re-evaluate next tick
+                    break;
                 case TaskType.GatherMaterial:
                     if (map != null && t.TargetTileX >= 0 && t.TargetTileY >= 0)
                     {
@@ -5952,6 +6047,22 @@ namespace Sporeholm.Simulation.Systems
             return pos.HasValue ? (pos.Value.X, pos.Value.Y) : null;
         }
 
+        // v0.8.0 (Phase 8) — farm-work finders. Mirror FindDesignatedGather but pass
+        // NO approach-occupancy callback: crops sit on passable tiles the shroomp
+        // stands on, so the per-tile reservation (not a blocked impassable perimeter)
+        // is the anti-convergence guard. Sow is additionally Botany-gated.
+        private static (int x, int y)? FindDesignatedHarvest(Shroomp s, LocalMap map)
+        {
+            var pos = map.FindNearestRipeCrop(s.SimPos, s.Id, s.AvoidTiles);
+            return pos.HasValue ? (pos.Value.X, pos.Value.Y) : null;
+        }
+
+        private static (int x, int y)? FindDesignatedSow(Shroomp s, LocalMap map)
+        {
+            var pos = map.FindNearestSowable(s.SimPos, s.Id, SkillLevel(s, "Botany"), s.AvoidTiles);
+            return pos.HasValue ? (pos.Value.X, pos.Value.Y) : null;
+        }
+
         // v0.5.20 (Phase 5C — rimport.md N6) — allowed-area check.
         // Returns true when (a) shroomp has no allowed-area set (default —
         // can work anywhere) OR (b) the tile coord is within the painted
@@ -6198,7 +6309,8 @@ namespace Sporeholm.Simulation.Systems
                 return;
             }
             if (t.Type != TaskType.GatherFood && t.Type != TaskType.GatherMaterial
-                && t.Type != TaskType.ChopWood && t.Type != TaskType.CutVegetation) return;
+                && t.Type != TaskType.ChopWood && t.Type != TaskType.CutVegetation
+                && t.Type != TaskType.PlantCrop && t.Type != TaskType.HarvestCrop) return;  // v0.8.0 Phase 8
             if (t.TargetTileX < 0 || t.TargetTileY < 0) return;
             map.ReleaseClaim(t.TargetTileX, t.TargetTileY, s.Id);
         }

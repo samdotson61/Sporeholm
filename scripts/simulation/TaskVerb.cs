@@ -49,6 +49,8 @@ namespace Sporeholm.Simulation
             TaskType.PlayerOrder    => "On orders",
             TaskType.Patrol         => "Patrolling",   // v0.7.3 (N20)
             TaskType.MentalBreak    => "Breaking down",   // v0.7.3 (N8)
+            TaskType.PlantCrop      => "Planting",         // v0.8.0 (Phase 8)
+            TaskType.HarvestCrop    => "Harvesting crops", // v0.8.0 (Phase 8)
             TaskType.None           => "Idle",
             _                       => "—",
         };

@@ -7,6 +7,29 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.0] — 2026-06-15 — Phase 8: Farming core (crops, grow-zones, sow + harvest)
+
+The first Phase 8 (Agricultural) slice: plant and harvest your own food. Paint a grow-zone, pick a crop, and Growers sow it, tend it through five growth stages, and harvest the yield on a continuous loop — then the plot re-sows itself.
+
+### Farming
+- **Farm tool + crop picker** — a new **🌱 Farm** painter in the Zones tab. Pick one of **nine crops** from the chip row, then drag a rectangle over fertile ground (or roofed cave tiles for cave crops) to lay out a grow-zone. Each crop chip shows its Botany requirement (e.g. "(B6)") so you know which need a skilled grower.
+- **Nine crops across three tiers** — Simple (Small Mushroom, Cave Moss, Spring Greens — Botany 0), Medium (Capberry, Sunberry, Pumpkin — Botany 3-5), and Hard (Magic Herb, Large Mushroom, Magic Flower — Botany 6-9). Fungal crops (mushrooms, moss) yield more underground; everything else favours the surface.
+- **Sow → grow → harvest loop** — crops grow autonomously through Sown → Sprouting → Growing → Ripening → Ripe. A colonist's **Botany** skill gates which crops they can plant and scales the harvest yield; harvested plots reset and re-sow themselves, so a tended field is a standing food supply.
+- **Grow work priority** — the **Grow** job is now live. Foragers farm by default; Elders, Caretakers, and any unassigned colonist pitch in as a fallback. Set it in the Jobs tab.
+- **Husbandry skill** — added as the 13th skill, the foundation for the animal-tending half of Phase 8 (taming + produce) coming in later slices.
+
+### Reading the field
+- A translucent **grow-zone tint** marks every farmland tile, shading from tilled brown through green to gold when a crop is ripe and ready to harvest.
+- **Hover** a plot for its crop + stage ("Spring Greens — ripe — ready to harvest"); **click** it for a full Grow Zone inspector card (crop, stage, Botany requirement, harvest yield). The **Remove** brush clears grow-zone cells like stockpiles.
+
+### Under the hood
+- Grow-zones + crop growth persist through save/load; pre-Phase-8 saves load cleanly with no farms.
+- Growers spread across a field instead of converging on one plot (crop work respects per-tile reservations + reachability, matching the gather/excavate finders), and a grower that gives up on a blocked plot won't immediately re-pick it.
+
+Build clean, 0 warnings / 0 errors; farming loop reviewed across sim / UI / save layers with each finding independently verified.
+
+---
+
 ## [0.7.4] — 2026-06-15 — Audit pass: save robustness, render + UX fixes, hardening
 
 A correctness + robustness pass closing 24 issues found by a full-codebase audit (each fix independently verified against the code). No new features — saves are sturdier, combat / patrol read better, and several latent races and silent data-loss gaps are closed.

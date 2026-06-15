@@ -190,6 +190,16 @@ public partial class TilePropertiesPanel : Control
             BuildVegetationSection(veg);
             _content.AddChild(MakeRule());
         }
+        // v0.8.0 (Phase 8) — Farm grow-zone section. Any tile carrying a
+        // CropSlot (Crop != None) is farmland the player painted with the Farm
+        // tool; show the crop + stage + yield. Lands after Vegetation since a
+        // sown plot reads as "this tile is a field with a crop on it".
+        var crop = map.GetCrop(tx, ty);
+        if (crop.Crop != CropType.None)
+        {
+            BuildGrowZoneSection(crop);
+            _content.AddChild(MakeRule());
+        }
         // v0.5.25 — Structure section (walls / floors / doors / shelves /
         // workbenches / bonfires / blueprints). Lands above the Tile
         // section because structures sit on top of the underlying terrain
@@ -600,6 +610,44 @@ public partial class TilePropertiesPanel : Control
         }
         box.AddChild(MakeLabel($"  Handedness: {c.Handedness}", 9, TextDim));
     }
+
+    // v0.8.0 (Phase 8) — Farm grow-zone section. Lists the plot's crop, growth
+    // stage, Botany requirement, and harvest yield so the player can audit a
+    // field tile the same way they inspect vegetation.
+    private void BuildGrowZoneSection(CropSlot crop)
+    {
+        _content.AddChild(MakeHeader("Grow Zone"));
+        var def = CropRegistry.Get(crop.Crop);
+        string cropName = def?.DisplayName ?? crop.Crop.ToString();
+        _content.AddChild(MakeLabel($"  Crop: {cropName}", 10, DarkWood));
+        _content.AddChild(MakeLabel($"  Stage: {CropStageLabel(crop.Stage)}", 10,
+            crop.Stage == CropStage.Ripe ? PosCol : DarkWood));
+        if (def != null)
+        {
+            if (def.BotanyMin > 0)
+                _content.AddChild(MakeLabel($"  Requires Botany {def.BotanyMin}+", 9, TextDim));
+            // Resolve the real harvest item (CaveMoss→Mosslet, LargeMushroom→Wood
+            // Log, etc.) — the crop's own DisplayName is NOT always what it drops.
+            var yieldDef = ItemRegistry.Get(def.YieldItemKind, def.YieldItemSubType);
+            string yieldName = yieldDef?.DisplayName ?? def.DisplayName;
+            _content.AddChild(MakeLabel(
+                $"  Yields {def.YieldMin}–{def.YieldMax} {yieldName} (scaled by Botany)", 9, TextDim));
+            if (def.UndergroundOnly)
+                _content.AddChild(MakeLabel("  Cave crop — roofed tiles only", 9, TextDim));
+        }
+    }
+
+    private static string CropStageLabel(CropStage stage) => stage switch
+    {
+        CropStage.Empty     => "Awaiting sowing",
+        CropStage.Sown      => "Sown",
+        CropStage.Sprouting => "Sprouting",
+        CropStage.Growing   => "Growing",
+        CropStage.Ripening  => "Ripening",
+        CropStage.Ripe      => "Ripe — ready to harvest",
+        CropStage.Wilted    => "Wilted",
+        _                   => "—",
+    };
 
     private void BuildVegetationSection(VegetationSlot veg)
     {

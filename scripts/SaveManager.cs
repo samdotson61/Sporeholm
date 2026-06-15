@@ -183,6 +183,11 @@ public partial class SaveManager : Node
 		// with no bills (auto-cook fallback remains active).
 		public List<WorkbenchBillsSave>? WorkbenchBills { get; init; } = null;
 
+		// v0.8.0 (Phase 8) — farm grow-zone crops. One entry per farmland tile
+		// (a CropSlot on LocalMap). Null for pre-Phase-8 saves (no farms exist),
+		// so old saves load with no crops and the player paints fresh fields.
+		public List<CropTileSave>? CropTiles { get; init; } = null;
+
 		// v0.6.0 (Phase 6) — live wildlife snapshot. One entry per
 		// alive entity at save time. Null for pre-Phase-6 saves; load
 		// path treats null as "no entities exist, run EntitySpawnSystem
@@ -269,6 +274,11 @@ public partial class SaveManager : Node
 		string        Priority,             // StoragePriority enum name
 		List<string>  AcceptedKinds,        // ItemKind enum names; empty = accept all
 		List<TileXY>  Cells);
+
+	// v0.8.0 (Phase 8) — one farm grow-zone tile. Crop serialised as its enum
+	// name so reordering CropType doesn't corrupt old saves; Stage is the
+	// CropStage byte; Growth is accumulated grow-ticks toward the next stage.
+	public record CropTileSave(int X, int Y, string Crop, byte Stage, int Growth);
 
 	// v0.5.73 — one named area + its painted cells. Cells-list (not raw
 	// bitmap) keeps the JSON compact — typical area is a handful of cells,
@@ -513,6 +523,11 @@ public partial class SaveManager : Node
 					b.RepeatsRemaining)).ToList()))
 			.ToList();
 
+		// v0.8.0 (Phase 8) — farm grow-zone crops.
+		var cropTiles = localMap?.SnapshotCrops()
+			.Select(c => new CropTileSave(c.X, c.Y, c.Crop.ToString(), c.Stage, c.Growth))
+			.ToList();
+
 		var save = new ColonySave(
 			snapshot.Date.Year,
 			snapshot.Date.Season.ToString(),
@@ -543,6 +558,7 @@ public partial class SaveManager : Node
 			StockpileZones    = (stockpileZones?.Count  ?? 0) > 0 ? stockpileZones  : null,
 			NamedAreas        = (namedAreas?.Count      ?? 0) > 0 ? namedAreas      : null,
 			WorkbenchBills    = (workbenchBills?.Count  ?? 0) > 0 ? workbenchBills  : null,
+			CropTiles         = (cropTiles?.Count       ?? 0) > 0 ? cropTiles       : null,
 			// v0.6.0 (Phase 6) — wildlife snapshot from the live sim.
 			Entities          = BuildEntityList(snapshot),
 		};
