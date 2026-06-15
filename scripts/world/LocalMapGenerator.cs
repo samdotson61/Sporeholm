@@ -341,7 +341,11 @@ namespace Sporeholm.World
 
 			// Stage 2: iterative neighbour fill (closes sub-threshold gaps and
 			// absorbs any remaining boulders at mask edges)
-			for (int iter = 0; iter < 4; iter++)
+			// v0.7.4 (#21) — 4 → 8 iterations. The fill propagates ~1 tile/pass,
+			// so 4 could leave a passable crack inside a wide (>8-tile) wood blob
+			// if a future biome's noise widens gaps. 8 is still cheap (early-outs
+			// on the first no-change pass) and safely covers wider gaps.
+			for (int iter = 0; iter < 8; iter++)
 			{
 				bool changed = false;
 				for (int y = 0; y < map.Height; y++)

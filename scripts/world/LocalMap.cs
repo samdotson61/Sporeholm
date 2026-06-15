@@ -704,14 +704,18 @@ namespace Sporeholm.World
                     if (affectedTiles.Count == 0 || affectedTiles[^1] != (x, y))
                         affectedTiles.Add((x, y));
                 }
-                // Reap zero-quantity stacks + empty tile buckets.
-                var emptyKeys = new List<(int X, int Y)>();
-                foreach (var kv in _droppedItems)
+                // Reap zero-quantity stacks + empty buckets — only on the tiles
+                // we actually drained. v0.7.4 (#5): was two full passes over the
+                // entire _droppedItems dict (all tiles with any item) every call,
+                // even though at most a handful of tiles changed.
+                foreach (var t in affectedTiles)
                 {
-                    kv.Value.RemoveAll(it => it.Quantity <= 0);
-                    if (kv.Value.Count == 0) emptyKeys.Add(kv.Key);
+                    if (_droppedItems.TryGetValue(t, out var list))
+                    {
+                        list.RemoveAll(it => it.Quantity <= 0);
+                        if (list.Count == 0) _droppedItems.Remove(t);
+                    }
                 }
-                foreach (var k in emptyKeys) _droppedItems.Remove(k);
             }
             // Notify outside the lock — listeners may re-enter map state.
             foreach (var (x, y) in affectedTiles)

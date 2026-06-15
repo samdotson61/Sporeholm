@@ -981,13 +981,13 @@ namespace Sporeholm.Simulation.Systems
                     if (!(s.CurrentTask is { Type: TaskType.Patrol }))
                     {
                         if (s.CurrentTask != null) ReleaseTaskClaim(s, map);
-                        AssignPatrolHop(s, map, s.PatrolWaypoints[s.PatrolIndex]);
+                        AssignReachablePatrolHop(s, map);
                     }
                     bool patrolArrived = MoveOneTick(s, map, effectiveDt, rng, tickInterval);
                     if (patrolArrived)
                     {
                         s.PatrolIndex = (s.PatrolIndex + 1) % s.PatrolWaypoints.Count;
-                        AssignPatrolHop(s, map, s.PatrolWaypoints[s.PatrolIndex]);
+                        AssignReachablePatrolHop(s, map);
                     }
                     continue;
                 }
@@ -1755,7 +1755,10 @@ namespace Sporeholm.Simulation.Systems
         // v0.7.3 (N20) — point the shroomp at a specific patrol waypoint: assign
         // a Patrol task and compute the A* route to it. Mirrors the chain-order
         // pop so the movement pipeline follows a real path across walls.
-        private static void AssignPatrolHop(Shroomp s, LocalMap? map, Godot.Vector2 target)
+        // v0.7.4 (#16) — returns false when the waypoint is unreachable (walled
+        // off / different region) so the caller can skip ahead instead of letting
+        // the shroomp thrash against a wall until stuck-detection bails.
+        private static bool AssignPatrolHop(Shroomp s, LocalMap? map, Godot.Vector2 target)
         {
             int tx = (int)(target.X / LocalMap.TileSize);
             int ty = (int)(target.Y / LocalMap.TileSize);
@@ -1765,9 +1768,26 @@ namespace Sporeholm.Simulation.Systems
             s.PathWaypoints.Clear();
             s.StuckTicks = 0;
             s.RePathTried = false;
-            if (map != null)
-                Pathfinder.FindPath(map, s.SimPos, (tx, ty),
-                    s.PathWaypoints, _shroompPerTile, OccTileIdx(s));
+            if (map == null) return true;
+            return Pathfinder.FindPath(map, s.SimPos, (tx, ty),
+                s.PathWaypoints, _shroompPerTile, OccTileIdx(s));
+        }
+
+        // v0.7.4 (#16) — point at the current patrol waypoint, skipping ahead to
+        // the next REACHABLE one if the current is walled off. Returns false when
+        // no waypoint is reachable from here (the last hop is still assigned, so
+        // MoveOneTick + stuck-detection handle it gracefully and a later tick or
+        // map change can open a route). Each waypoint is tried at most once, so
+        // this never loops forever even if the whole route is unreachable.
+        private static bool AssignReachablePatrolHop(Shroomp s, LocalMap? map)
+        {
+            int n = s.PatrolWaypoints.Count;
+            for (int tries = 0; tries < n; tries++)
+            {
+                if (AssignPatrolHop(s, map, s.PatrolWaypoints[s.PatrolIndex])) return true;
+                s.PatrolIndex = (s.PatrolIndex + 1) % n;
+            }
+            return false;
         }
 
         // v0.7.3 (N8) — mental-break tuning.
@@ -1815,10 +1835,21 @@ namespace Sporeholm.Simulation.Systems
             if (s.BreakRetargetTicks <= 0 || s.BreakWanderTarget == Godot.Vector2.Zero)
             {
                 float radiusTiles = s.MentalBreak == MentalBreakType.Tantrum ? 5f : 3f;
-                double ang = rng.NextDouble() * System.Math.PI * 2.0;
-                float dist = (float)rng.NextDouble() * radiusTiles * LocalMap.TileSize;
-                s.BreakWanderTarget = s.SimPos
-                    + new Godot.Vector2((float)System.Math.Cos(ang), (float)System.Math.Sin(ang)) * dist;
+                // v0.7.4 (#23) — pick a PASSABLE nearby point so the break-wander
+                // doesn't lock the shroomp against a wall. Try a few candidates;
+                // if none are passable, stand put for this retarget window.
+                Godot.Vector2 cand = s.SimPos;
+                for (int attempt = 0; attempt < 4; attempt++)
+                {
+                    double ang = rng.NextDouble() * System.Math.PI * 2.0;
+                    float dist = (float)rng.NextDouble() * radiusTiles * LocalMap.TileSize;
+                    var c = s.SimPos + new Godot.Vector2(
+                        (float)System.Math.Cos(ang), (float)System.Math.Sin(ang)) * dist;
+                    if (map == null
+                        || map.IsPassable((int)(c.X / LocalMap.TileSize), (int)(c.Y / LocalMap.TileSize)))
+                    { cand = c; break; }
+                }
+                s.BreakWanderTarget = cand;
                 s.BreakRetargetTicks = s.MentalBreak == MentalBreakType.Tantrum ? 45 : 90;
             }
             CombatStepToward(s, s.BreakWanderTarget, map, dt);
@@ -5296,9 +5327,18 @@ namespace Sporeholm.Simulation.Systems
                     // tile NewTrainTask walked us to) so one task type serves
                     // both buildings. No real damage; slow, steady XP plus a
                     // small purposeful-activity Joy nudge.
-                    bool ranged = map != null
-                        && map.GetStructure(t.TargetTileX, t.TargetTileY).Type
-                           == StructureType.TrainingDummy;
+                    var trainType = map?.GetStructure(t.TargetTileX, t.TargetTileY).Type;
+                    // v0.7.4 (#24) — guard the single-tick race where the building
+                    // is demolished between IsTaskStillValid and here: only train
+                    // at a real yard/dummy, else drop the task (no free Melee XP
+                    // granted at an empty tile).
+                    if (trainType != StructureType.SparringYard
+                        && trainType != StructureType.TrainingDummy)
+                    {
+                        s.CurrentTask = null;
+                        break;
+                    }
+                    bool ranged = trainType == StructureType.TrainingDummy;
                     SkillRegistry.GainXp(s, ranged ? "Ranged" : "Melee", TrainXpPerSecond * dt);
                     ThoughtRegistry.Add(s, "Trained");
                     s.Joy = MathF.Min(100f, s.Joy + JoyRate * dt * 0.4f);

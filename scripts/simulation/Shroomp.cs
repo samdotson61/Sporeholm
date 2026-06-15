@@ -25,7 +25,11 @@ namespace Sporeholm.Simulation
 	// The main thread only reads from ShroompSnapshot, never from this class directly.
 	public class Shroomp : Combat.ICombatant
 	{
-		public Guid Id { get; } = Guid.NewGuid();
+		public Guid Id { get; private set; } = Guid.NewGuid();
+		// v0.7.4 — restore the saved Guid on load so cross-references by id
+		// (rescue carry-links, entity hunt targets) resolve to the right
+		// colonist after a save/load round-trip. Only the load path calls this.
+		public void RestoreId(Guid id) => Id = id;
 		public string Name { get; set; } = string.Empty;
 		public int AgeInYears { get; set; }
 		public Sex Sex { get; set; } = Sex.Male;

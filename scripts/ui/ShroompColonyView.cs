@@ -642,7 +642,11 @@ public partial class ShroompColonyView : Node2D
             var pos = new Vector2(
                 s.Pos.X + anchorAdjX + combatOffset.X,
                 s.Pos.Y + (s.IsYielding ? YieldAnchorAdjY : anchorAdjY) + bob + combatOffset.Y);
-            if (!rect.HasPoint(s.Pos)) continue;
+            // v0.7.4 (#3) — cull on the ADJUSTED render position (pos), not the
+            // raw s.Pos. pos includes the anchor / bob / combat-lunge offsets, so
+            // testing s.Pos could cull a shroomp that's actually on-screen near
+            // the viewport edge (or keep one that's off-screen).
+            if (!rect.HasPoint(pos)) continue;
 
             int moodIdx = (int)s.Mood;
             if (moodIdx < 0 || moodIdx >= _moodCount) moodIdx = (int)MoodState.Content;
@@ -681,12 +685,13 @@ public partial class ShroompColonyView : Node2D
                 ? new Color(0.55f, 0.55f, 0.55f, 1f)
                 : Colors.White;
             // v0.7.0 — red-white flash when a blow lands.
+            // v0.7.4 (#12) — lerp from the CURRENT tint toward a fixed bright
+            // flash colour instead of adding to tint.R. The old additive form
+            // washed out on a Downed sprite (base 0.55 → clamped to a grey-white
+            // instead of red); lerping guarantees the same clear red hit on both
+            // standing and downed shroomps.
             if (s.FlashT > 0f)
-                tint = new Color(
-                    Mathf.Min(2f, tint.R + 0.9f * s.FlashT),
-                    tint.G * (1f - 0.4f * s.FlashT),
-                    tint.B * (1f - 0.4f * s.FlashT),
-                    tint.A);
+                tint = tint.Lerp(new Color(1f, 0.5f, 0.5f, tint.A), s.FlashT);
 
             if (s.Sex == Sex.Female)
             {

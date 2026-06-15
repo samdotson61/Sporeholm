@@ -65,7 +65,16 @@ namespace Sporeholm.Simulation
 		// camera position, which is invisible (LOD bands are 320+ px wide).
 		// Default of Zero means "no camera yet" — until the first write
 		// every shroomp stays Hot, which matches initial-load behaviour.
-		public Godot.Vector2 CameraFollow;
+		// v0.7.4 (#17) — lock-guarded so the two-float struct can't tear (a mixed
+		// X-new / Y-old read would misclassify a shroomp's LOD band). One
+		// uncontended lock per frame-write + per ~16-tick reassign-read.
+		private Godot.Vector2 _cameraFollow;
+		private readonly object _cameraLock = new();
+		public Godot.Vector2 CameraFollow
+		{
+			get { lock (_cameraLock) return _cameraFollow; }
+			set { lock (_cameraLock) _cameraFollow = value; }
+		}
 
 		// Global tick counter for LOD phase modulo. Increments inside Tick().
 		// Sim thread is the sole writer; BehaviorSystem reads.
@@ -387,7 +396,24 @@ namespace Sporeholm.Simulation
 		private const int SimSystemInterval = 60;
 		private int _ticksSinceSimUpdate;
 
+		// v0.7.4 — tick lock. Held for the entire mutation phase of every tick so
+		// the save path (GetShroompSaveExtras, on the main thread) can take the
+		// SAME lock and read each Shroomp's live collections (Inventory / Equipment
+		// / Hediffs / Patrol / Thoughts) without racing a mid-tick Add/Remove
+		// ("Collection was modified during enumeration"). Uncontended in normal
+		// play (~20 ns/tick); only a save — which also pauses the sim first — ever
+		// waits on it, and only for the one in-flight tick that began before the
+		// pause landed. AllShroomps() (UI/dev lookups) does NOT take this lock, so
+		// it gains no new per-frame contention.
+		private readonly object _tickLock = new();
+		public object TickLock => _tickLock;
+
 		private void Tick(bool pushSnapshot = true)
+		{
+			lock (_tickLock) TickBody(pushSnapshot);
+		}
+
+		private void TickBody(bool pushSnapshot = true)
 		{
 			// v0.5.84 — wall-clock measurement for the dev-panel perf section.
 			// Stopwatch.GetTimestamp is allocation-free and ns-resolution. Two

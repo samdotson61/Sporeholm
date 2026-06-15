@@ -77,6 +77,25 @@ public partial class SaveManager : Node
 		// move orders, which are intentionally transient).
 		public List<float>?                    Patrol         { get; init; } = null;
 		public int                             PatrolIndex    { get; init; } = 0;
+		// v0.7.4 — round-trip the remaining live state surfaced by the audit
+		// (#6-11). All nullable / defaulted so pre-v0.7.4 saves load cleanly.
+		public string?                         Guid           { get; init; } = null;   // stable id → carry-links resolve
+		public float                           Joy            { get; init; } = 100f;
+		public string?                         CapShape       { get; init; } = null;
+		public string?                         CapTexture     { get; init; } = null;
+		public string?                         StemBuild      { get; init; } = null;
+		public List<float>?                    IdentityColors { get; init; } = null;   // cap RGB, stem RGB, pore RGB
+		public string?                         Childhood      { get; init; } = null;
+		public string?                         Adulthood      { get; init; } = null;
+		public bool                            IsDrafted      { get; init; } = false;
+		public string?                         CarriedShroompId { get; init; } = null;
+		public bool                            IsBeingCarried { get; init; } = false;
+		// v0.7.4 (#22) — active mental break (transient combat-like state, but
+		// now persisted so a save mid-break reloads mid-break rather than snapping
+		// the colonist back to normal). 0 ticks = not breaking on older saves.
+		public int                             MentalBreakTicks    { get; init; } = 0;
+		public string?                         MentalBreak         { get; init; } = null;
+		public int                             MentalBreakCooldown { get; init; } = 0;
 	}
 
 	// v0.7.1 (Phase 7) — per-part wound (Hediff) save record. Type is the
@@ -198,6 +217,10 @@ public partial class SaveManager : Node
 		// see hungry wildlife on an old-save load.
 		public float Nutrition { get; init; } = 70f;
 		public float Rest      { get; init; } = 70f;
+		// v0.7.4 (#9) — Guid-as-string of the shroomp this entity is hunting /
+		// fleeing (State Hunt/Flee). Null when not targeting. Shroomp Guids are
+		// now restored on load, so this resolves to the right colonist.
+		public string? TargetShroompId { get; init; } = null;
 	}
 
 	// v0.5.73 — one tile's structure snapshot. RoomId is NOT saved (the
@@ -737,6 +760,7 @@ public partial class SaveManager : Node
 			{
 				Nutrition = e.Nutrition,
 				Rest      = e.Rest,
+					TargetShroompId = e.TargetShroompId?.ToString(),   // v0.7.4 (#9)
 			});
 		}
 		return list;
@@ -782,6 +806,20 @@ public partial class SaveManager : Node
 				Venom       = ex?.Venom ?? 0f,         // v0.7.1 — active venom load
 				Patrol      = ex?.Patrol,              // v0.7.3 — patrol route
 				PatrolIndex = ex?.PatrolIndex ?? 0,    // v0.7.3
+					Guid             = ex?.Guid,                  // v0.7.4 (audit #6-11)
+					Joy              = ex?.Joy ?? 100f,
+					CapShape         = ex?.CapShape,
+					CapTexture       = ex?.CapTexture,
+					StemBuild        = ex?.StemBuild,
+					IdentityColors   = ex?.IdentityColors,
+					Childhood        = ex?.Childhood,
+					Adulthood        = ex?.Adulthood,
+					IsDrafted        = ex?.IsDrafted ?? false,
+					CarriedShroompId = ex?.CarriedShroompId,
+					IsBeingCarried   = ex?.IsBeingCarried ?? false,
+					MentalBreakTicks    = ex?.MentalBreakTicks ?? 0,
+					MentalBreak         = ex?.MentalBreak,
+					MentalBreakCooldown = ex?.MentalBreakCooldown ?? 0,
 			});
 		}
 		return shroomps;

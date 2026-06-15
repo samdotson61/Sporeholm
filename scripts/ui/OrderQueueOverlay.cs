@@ -22,6 +22,17 @@ namespace Sporeholm.UI
         // SetSnapshot. Both are required for any drawing to happen.
         private HashSet<string>?      _selected;
         private SimulationSnapshot?   _snapshot;
+        // v0.7.4 (#14) — live patrol route being built with the Patrol tool
+        // (GameController._patrolRoute). Drawn in amber so it reads distinct from
+        // the cyan chain-order queue. Null when not building a patrol.
+        private List<Vector2>?        _patrolPreview;
+
+        public void SetPatrolPreview(IReadOnlyList<Vector2>? route)
+        {
+            _patrolPreview = (route == null || route.Count == 0)
+                ? null : new List<Vector2>(route);
+            QueueRedraw();
+        }
 
         public override void _Ready()
         {
@@ -45,6 +56,7 @@ namespace Sporeholm.UI
 
         public override void _Draw()
         {
+            DrawPatrolPreview();   // v0.7.4 (#14) — independent of selection/snapshot
             if (_selected == null || _selected.Count == 0) return;
             if (_snapshot == null) return;
 
@@ -77,6 +89,27 @@ namespace Sporeholm.UI
                     DrawArc(wp, r, 0f, Mathf.Tau, 16,
                         new Color(0f, 0f, 0f, 0.4f), 1f, antialiased: true);
                 }
+            }
+        }
+
+        // v0.7.4 (#14) — preview of the patrol route the player is currently
+        // placing (amber loop + dots), so they can see the route before the
+        // second click commits it. Closes the loop back to the first point.
+        private void DrawPatrolPreview()
+        {
+            var r = _patrolPreview;
+            if (r == null || r.Count == 0) return;
+            var line = new Color(1.00f, 0.80f, 0.30f, 0.70f);   // amber
+            var dot  = new Color(1.00f, 0.85f, 0.40f, 0.95f);
+            for (int i = 0; i < r.Count - 1; i++)
+                DrawLine(r[i], r[i + 1], line, 1.5f, antialiased: true);
+            if (r.Count >= 2)
+                DrawLine(r[r.Count - 1], r[0], line, 1.5f, antialiased: true);   // loop close
+            for (int i = 0; i < r.Count; i++)
+            {
+                DrawCircle(r[i], 4.0f, dot);
+                DrawArc(r[i], 4.0f, 0f, Mathf.Tau, 16,
+                    new Color(0f, 0f, 0f, 0.4f), 1f, antialiased: true);
             }
         }
     }

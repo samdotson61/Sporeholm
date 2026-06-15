@@ -7,6 +7,28 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.7.4] — 2026-06-15 — Audit pass: save robustness, render + UX fixes, hardening
+
+A correctness + robustness pass closing 24 issues found by a full-codebase audit (each fix independently verified against the code). No new features — saves are sturdier, combat / patrol read better, and several latent races and silent data-loss gaps are closed.
+
+### Save / load
+- **Crash-safe saving** — saving no longer reads a colonist's live inventory / equipment / wounds while the simulation might be mutating them mid-tick (a "collection modified" crash window). The save now snapshots under a tick lock, with zero cost during normal play.
+- **No more lost state on reload** — Joy, a colonist's appearance (cap / stem shape + colours), their backstory, drafted status, an in-progress rescue carry, an active mental break, and a creature's current hunt / flee target all persist now. Colonists also keep a stable identity across save / load, so carry-links and hunt targets resolve to the right individual. Pre-v0.7.4 saves load unchanged.
+
+### Combat + UI
+- Colonists near the screen edge (or mid-lunge) no longer pop in and out — they're culled by their true drawn position.
+- A blow landing on a *downed* colonist now flashes a clear red instead of washing out to grey.
+- **Patrol**: the route you're placing draws live (an amber loop) as you click; a half-built route is dropped when you leave the Patrol tool; and a patrol point walled off on an island is skipped instead of making the colonist thrash against the wall.
+
+### Simulation hardening
+- A lover bond can no longer be left dangling when the opinion ledger trims to size.
+- A mental break no longer freezes a colonist against a wall (its wander now targets passable ground), and a training drill at a just-demolished building no longer grants phantom XP.
+- Haul-overflow cleanup now touches only the affected tiles; plus a wound-severity clamp, a camera-follow data-race guard, a dead write in room detection, and a wood-fill robustness bump.
+
+Build clean, 0 warnings / 0 errors; all 24 fixes verified.
+
+---
+
 ## [0.7.3] — 2026-06-14 — Patrol orders, mental breaks, relationships + backlog fixes
 
 A gameplay-depth pass: a player-issued patrol order, mood-collapse mental breaks, a social opinion/relationship ledger, a larger max world size, and several long-standing backlog fixes.

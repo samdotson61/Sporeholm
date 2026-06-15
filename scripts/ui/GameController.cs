@@ -756,6 +756,7 @@ public partial class GameController : Node
 			_orderFeedback.RingMove(click);
 			if (_patrolRoute.Count >= 2)
 				_sim.RequestPatrolOrderGroup(_selectedShroomps, _patrolRoute);
+			_orderQueueOverlay?.SetPatrolPreview(_patrolRoute);   // v0.7.4 (#14) — live route preview
 			return true;
 		}
 
@@ -1172,6 +1173,15 @@ public partial class GameController : Node
 		// _wasPausedBeforeMenu on close, so this re-assertion doesn't
 		// stick after the player resumes.
 		if (_pauseMenu.Visible) _sim.Paused = true;
+
+		// v0.7.4 (#13) — drop a half-built patrol route the moment the player
+		// leaves the Patrol tool (right-click toggle-off, switching tools, or a
+		// hotkey), so stale waypoints don't silently carry into the next patrol.
+		if (_toolbar.ActiveTool != DesignationToolbar.Tool.Patrol && _patrolRoute.Count > 0)
+		{
+			_patrolRoute.Clear();
+			_orderQueueOverlay?.SetPatrolPreview(null);
+		}
 
 		_colony.SpeedMultiplier = _sim.SpeedMultiplier;
 		_colony.Paused          = _sim.Paused;

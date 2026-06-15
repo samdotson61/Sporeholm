@@ -44,12 +44,11 @@ namespace Sporeholm.World
             for (int y = 0; y < H; y++)
             for (int x = 0; x < W; x++)
             {
-                var s = map.GetStructure(x, y);
-                if (s.RoomId != 0)
-                {
-                    s.RoomId = 0;
+                // v0.7.4 (#20) — StructureSlot is a struct, so the old
+                // `s.RoomId = 0` mutated a discarded copy (dead write). The real
+                // state change is SetStructureRoomId; read the live value directly.
+                if (map.GetStructure(x, y).RoomId != 0)
                     map.SetStructureRoomId(x, y, 0);
-                }
             }
 
             map.ClearRoomRegistry();

@@ -31,7 +31,10 @@ namespace Sporeholm.Simulation.Entities
         // time (no further data needed by the card).
         float         Nutrition,
         float         Rest,
-        string        MoodLabel
+        string        MoodLabel,
+        // v0.7.4 (#9) — hunt/flee target so SaveManager can persist it from the
+        // snapshot. Null when the entity isn't targeting a colonist.
+        Guid?         TargetShroompId
     )
     {
         public EntitySnapshot(Entity e) : this(
@@ -39,7 +42,7 @@ namespace Sporeholm.Simulation.Entities
             e.Health, e.MaxHealth,
             e.Speed, e.AttackPower,
             e.IsTamed, e.TamedByName, e.WanderHome, e.RandomSeed, e.AttackCooldownTicks,
-            e.Nutrition, e.Rest, e.MoodLabel)
+            e.Nutrition, e.Rest, e.MoodLabel, e.TargetShroompId)
         {
         }
     }

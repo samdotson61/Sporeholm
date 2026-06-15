@@ -113,6 +113,7 @@ namespace Sporeholm.Simulation
                 Opinions.Remove(weakest);
                 LikedShroomps.Remove(weakest);
                 DislikedShroomps.Remove(weakest);
+                Lovers.Remove(weakest);   // v0.7.4 (#15) — don't leave a dangling lover bond with no opinion
             }
         }
 

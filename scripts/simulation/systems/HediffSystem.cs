@@ -28,7 +28,7 @@ namespace Sporeholm.Simulation.Systems
                         var w = s.Hediffs[h];
                         float heal = w.NaturalHealPerSec();
                         if (w.Tended) heal *= TendHealMultiplier;
-                        w.Severity -= heal;
+                        w.Severity = System.Math.Max(0f, w.Severity - heal);   // v0.7.4 (#18) — never go negative
                         // Restore the underlying part condition as the wound closes
                         // (this is what ultimately ends the bleed for that part).
                         // Guard cond > 0: a destroyed / severed part does NOT

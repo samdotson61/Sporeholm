@@ -1089,6 +1089,11 @@ namespace Sporeholm
 		{
 			var result = new System.Collections.Generic.Dictionary<string, ShroompSaveExtras>();
 			if (_core == null) return result;
+			// v0.7.4 — hold the sim tick lock so no tick mutates a shroomp's live
+			// collections (Inventory / Equipment / Hediffs / Patrol / Thoughts)
+			// while we snapshot them. The sim is paused before a save; this also
+			// covers any in-flight tick that began before the pause landed.
+			lock (_core.TickLock)
 			foreach (var s in _core.AllShroomps())
 			{
 				if (!s.IsAlive) continue;
@@ -1115,6 +1120,26 @@ namespace Sporeholm
 					Venom       = s.Venom,                      // v0.7.1
 					Patrol      = SnapshotPatrol(s.PatrolWaypoints),   // v0.7.3 (N20)
 					PatrolIndex = s.PatrolIndex,                       // v0.7.3 (N20)
+					// v0.7.4 — audit fixes #6-11.
+					Guid        = s.Id.ToString(),
+					Joy         = s.Joy,
+					CapShape    = s.CapShape.ToString(),
+					CapTexture  = s.CapTexture.ToString(),
+					StemBuild   = s.StemBuild.ToString(),
+					IdentityColors = new System.Collections.Generic.List<float>(9)
+					{
+						s.CapColour.R,     s.CapColour.G,     s.CapColour.B,
+						s.StemColour.R,    s.StemColour.G,    s.StemColour.B,
+						s.PorePadColour.R, s.PorePadColour.G, s.PorePadColour.B,
+					},
+					Childhood   = s.Childhood,
+					Adulthood   = s.Adulthood,
+					IsDrafted   = s.IsDrafted,
+					CarriedShroompId = s.CarriedShroompId?.ToString(),
+					IsBeingCarried   = s.IsBeingCarried,
+					MentalBreakTicks    = s.MentalBreakTicks,
+					MentalBreak         = s.MentalBreak.ToString(),
+					MentalBreakCooldown = s.MentalBreakCooldown,
 				};
 			}
 			return result;
@@ -1134,6 +1159,21 @@ namespace Sporeholm
 				// v0.7.3 (N20) — patrol route (interleaved x,y px) + current leg.
 				public System.Collections.Generic.List<float>? Patrol = null;
 				public int PatrolIndex = 0;
+				// v0.7.4 — audit fixes #6-11: stable id + previously-unsaved state.
+				public string? Guid = null;
+				public float Joy = 100f;
+				public string? CapShape = null;
+				public string? CapTexture = null;
+				public string? StemBuild = null;
+				public System.Collections.Generic.List<float>? IdentityColors = null;
+				public string? Childhood = null;
+				public string? Adulthood = null;
+				public bool IsDrafted = false;
+				public string? CarriedShroompId = null;
+				public bool IsBeingCarried = false;
+				public int MentalBreakTicks = 0;
+				public string? MentalBreak = null;
+				public int MentalBreakCooldown = 0;
 			// v0.5.73 — full Shroomp.Inventory snapshot. Pre-v0.5.73 only
 			// the topmost stack (CarriedItem getter) was saved; a hauler
 			// with multiple stacks lost the rest. Loaders read Inventory
@@ -1739,6 +1779,42 @@ namespace Sporeholm
 				}
 				s.Venom = sd.Venom;
 
+				// v0.7.4 — audit fixes #6-11. Restore the saved Guid FIRST so the
+				// carry-link below resolves to the right colonist; then Joy, visual
+				// identity, backstory, draft + rescue-carry state. All guarded so
+				// pre-v0.7.4 saves (null fields) keep their freshly-rolled values.
+				if (!string.IsNullOrEmpty(sd.Guid) && System.Guid.TryParse(sd.Guid, out var sgid))
+					s.RestoreId(sgid);
+				s.Joy = sd.Joy;
+				s.IsDrafted = sd.IsDrafted;
+				s.IsBeingCarried = sd.IsBeingCarried;
+				// v0.7.4 (#22) — resume an active mental break. WasMentalBreaking
+				// is set so the rising-edge alert doesn't re-fire on load.
+				s.MentalBreakTicks = sd.MentalBreakTicks;
+				s.MentalBreakCooldown = sd.MentalBreakCooldown;
+				s.WasMentalBreaking = sd.MentalBreakTicks > 0;
+				if (!string.IsNullOrEmpty(sd.MentalBreak)
+					&& System.Enum.TryParse<MentalBreakType>(sd.MentalBreak, out var mbType))
+					s.MentalBreak = mbType;
+				if (!string.IsNullOrEmpty(sd.CarriedShroompId)
+					&& System.Guid.TryParse(sd.CarriedShroompId, out var carryGid))
+					s.CarriedShroompId = carryGid;
+				if (!string.IsNullOrEmpty(sd.Childhood)) s.Childhood = sd.Childhood;
+				if (!string.IsNullOrEmpty(sd.Adulthood)) s.Adulthood = sd.Adulthood;
+				if (sd.CapShape != null)
+				{
+					if (System.Enum.TryParse<CapShape>(sd.CapShape, out var cshape)) s.CapShape = cshape;
+					if (System.Enum.TryParse<CapTexture>(sd.CapTexture, out var ctex)) s.CapTexture = ctex;
+					if (System.Enum.TryParse<StemBuild>(sd.StemBuild, out var sbuild)) s.StemBuild = sbuild;
+					var ic = sd.IdentityColors;
+					if (ic != null && ic.Count >= 9)
+					{
+						s.CapColour     = new Color(ic[0], ic[1], ic[2]);
+						s.StemColour    = new Color(ic[3], ic[4], ic[5]);
+						s.PorePadColour = new Color(ic[6], ic[7], ic[8]);
+					}
+				}
+
 				// v0.7.3 (N20) — restore a standing patrol route (null on older saves).
 				if (sd.Patrol != null && sd.Patrol.Count >= 4)
 				{
@@ -1952,6 +2028,10 @@ namespace Sporeholm
 						// a "fed + rested" wildlife state on first load.
 						Nutrition           = rec.Nutrition,
 						Rest                = rec.Rest,
+						// v0.7.4 (#9) — restore the hunt/flee target. Shroomp Guids
+						// are restored above, so this resolves to the right colonist.
+						TargetShroompId     = System.Guid.TryParse(rec.TargetShroompId, out var etsid)
+							? etsid : (System.Guid?)null,
 					};
 					fresh.Add(e);
 				}
