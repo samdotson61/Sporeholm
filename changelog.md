@@ -7,6 +7,18 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.4] — 2026-06-15 — Crop growth rebalanced to the calendar
+
+Crops now grow over **in-game days**, not minutes. Previously every crop ripened in under four in-game *hours* — wildly out of step with a world that runs on 30-day seasons and food that stays fresh for days, so a single plot out-produced its own shelf life many times over per hour.
+
+- Grow times now match each crop's design tier, in **in-game days**: Small Mushroom / Cave Moss / Spring Greens **2 days**; Capberry **5**, Sunberry **6**, Pumpkin **7**, Magic Herb **8**; Large Mushroom + Magic Flower **12**.
+- With 30-day seasons, fast crops give roughly a dozen-plus harvests a season and the slowest two or three — a sensible spread that lines up with food freshness. (You'll want to run time at a faster speed while a field matures, as with any longer task.)
+- Tuning only — no behaviour change; growth is still autonomous, and **Botany** still gates which crops you can plant and scales the harvest yield.
+
+Build clean, 0 warnings / 0 errors.
+
+---
+
 ## [0.8.3] — 2026-06-15 — Phase 8: Livestock breeding
 
 Tamed livestock now **breed**, turning a handful of tamed animals into a self-sustaining herd — the payoff that closes the Phase 8 agricultural loop (farm → hunt → tame → produce → **breed**).

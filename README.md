@@ -2,7 +2,7 @@
 
 A colony simulation game about a tribe of mushroom-people (**Shroomps**) trying to survive in a strange, fungal world. Designed and developed by **Sam Dotson** in **Godot 4.6** (C#).
 
-Current version: **v0.8.3** (active development — Phase 8 (Agricultural) gameplay loop complete: **farming** (v0.8.0, nine crops), the **roster doubled to 30 species** (v0.8.0a), **hunting + butchery** (v0.8.1), **taming + livestock produce** (v0.8.2 — milk, wool, eggs), and **breeding** (v0.8.3 — tamed pairs raise young into a self-sustaining, pop-capped herd). Built on the complete Phase 7 combat system — body-part wounds, pain + venom, healer / medicine, material-aware armor, draft, rescue, training, apparel, attack + patrol orders, mental breaks, and a social relationship ledger. *(Pen/pasture containment zones are a deferred polish item.)*).
+Current version: **v0.8.4** (active development — Phase 8 (Agricultural) gameplay loop complete: **farming** (v0.8.0, nine crops), the **roster doubled to 30 species** (v0.8.0a), **hunting + butchery** (v0.8.1), **taming + livestock produce** (v0.8.2 — milk, wool, eggs), and **breeding** (v0.8.3 — tamed pairs raise young into a self-sustaining, pop-capped herd). Built on the complete Phase 7 combat system — body-part wounds, pain + venom, healer / medicine, material-aware armor, draft, rescue, training, apparel, attack + patrol orders, mental breaks, and a social relationship ledger. *(Pen/pasture containment zones are a deferred polish item.)*).
 
 ---
 
@@ -93,7 +93,7 @@ A full body-part combat system layered on the wildlife AI. Shroomps and creature
 
 - **Farm tool** in the Zones tab: pick a crop, then drag a rectangle over fertile ground (or roofed cave tiles for cave crops) to lay out a grow-zone. The **Grow** work priority drives it (Foragers farm by default; Elders / Caretakers / unassigned colonists fill in).
 - **Nine crops, three Botany tiers**: Simple (Small Mushroom, Cave Moss, Spring Greens — Botany 0), Medium (Capberry, Sunberry, Pumpkin — Botany 3–5), Hard (Magic Herb, Large Mushroom, Magic Flower — Botany 6–9). Each crop chip shows its Botany requirement. Fungal crops yield more underground; the rest favour the surface.
-- **Sow → grow → harvest loop**: crops grow autonomously through five stages (Sown → Sprouting → Growing → Ripening → Ripe). **Botany** gates which crops a colonist can plant and scales the harvest yield. Harvested plots reset and re-sow themselves, so a tended field is a standing food supply.
+- **Sow → grow → harvest loop**: crops grow autonomously through five stages (Sown → Sprouting → Growing → Ripening → Ripe) over **2–12 in-game days** depending on tier (v0.8.4 tuned grow times to the day/season calendar). **Botany** gates which crops a colonist can plant and scales the harvest yield. Harvested plots reset and re-sow themselves, so a tended field is a standing food supply.
 - A translucent **grow-zone tint** shades each plot from tilled brown through green to gold when ripe; **hover** for the crop + stage, **click** for a Grow Zone inspector (crop / stage / Botany requirement / yield). The **Remove** brush clears grow-zone cells. Crops persist through save/load.
 
 ### Hunting + butchery (Phase 8 — v0.8.1)
