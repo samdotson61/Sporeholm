@@ -5649,7 +5649,8 @@ namespace Sporeholm.Simulation.Systems
                     // at a fraction of the dedicated Attune task rate so the
                     // need can keep up without making Attune redundant.
                     // v0.5.60 — joy gain scaled by JoyTolerance for boredom.
-                    s.MagicResonance = MathF.Min(100f, s.MagicResonance + AttuneRate * dt * 0.5f);
+                    float meditateToolBonus = GetToolBonusFor(s, TaskType.Meditate);   // v0.8.6 — the Sage Staff's advertised Meditate bonus now actually applies
+                    s.MagicResonance = MathF.Min(100f, s.MagicResonance + AttuneRate * dt * 0.5f * meditateToolBonus);
                     ThoughtRegistry.Add(s, "Pondered");
                     s.Joy = MathF.Min(100f, s.Joy + JoyRate * dt * 0.7f * JoyFurnitureMul(s, map)
                         * JoyToleranceMul(s, TaskType.Meditate));

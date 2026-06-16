@@ -180,7 +180,7 @@ namespace Sporeholm.Simulation.Items
                 BaseDamage = 11f, BaseAccuracy = 0.65f },   // v0.7.0 — a Sage's staff doubles as a magical weapon (Phase 7)
             new() { Kind = ItemKind.Tool, SubType = "Sickle", DisplayName = "Sickle",        Icon = "🪚", BaseDurability = 100f, BaseValue = 2.5f, AllowedFamilies = new[]{"Wood","Stone","Bone"},
                 BodyClass = EquipSlotMeta.BodyClass.Hand,
-                PreferredForTasks = new[]{ TaskType.ChopWood, TaskType.CutVegetation },
+                PreferredForTasks = new[]{ TaskType.ChopWood, TaskType.CutVegetation, TaskType.HarvestCrop },   // v0.8.6 — the sickle is also the canonical crop-harvest tool
                 BaseDamage = 4f, BaseAccuracy = 0.70f },
             new() { Kind = ItemKind.Tool, SubType = "Hammer", DisplayName = "Smith's Hammer",Icon = "🔨", BaseDurability = 130f, BaseValue = 3.5f, AllowedFamilies = new[]{"Wood","Stone","Bone"},
                 BodyClass = EquipSlotMeta.BodyClass.Hand,
@@ -227,11 +227,11 @@ namespace Sporeholm.Simulation.Items
             // Cloaks/robes are Torso, Hats are Head, Boots are Foot (one
             // boot per foot slot; equipping a "Boots" item slots one
             // foot — paired-item logic lands with Phase 7 combat).
-            new() { Kind = ItemKind.Apparel, SubType = "Cloak", DisplayName = "Cloak",        Icon = "🧥", BaseDurability = 80f, BaseValue = 2.0f, AllowedFamilies = new[]{"Cloth","Hide"},
+            new() { Kind = ItemKind.Apparel, SubType = "Cloak", DisplayName = "Cloak",        Icon = "🧥", BaseDurability = 80f, BaseValue = 2.0f, AllowedFamilies = new[]{"Cloth","Hide","Bone"},
                 BodyClass = EquipSlotMeta.BodyClass.Torso },
-            new() { Kind = ItemKind.Apparel, SubType = "Hat",   DisplayName = "Shroomp Hat",    Icon = "👒", BaseDurability = 60f, BaseValue = 1.2f, AllowedFamilies = new[]{"Cloth"},
+            new() { Kind = ItemKind.Apparel, SubType = "Hat",   DisplayName = "Shroomp Hat",    Icon = "👒", BaseDurability = 60f, BaseValue = 1.2f, AllowedFamilies = new[]{"Cloth","Hide","Bone"},
                 BodyClass = EquipSlotMeta.BodyClass.Head },
-            new() { Kind = ItemKind.Apparel, SubType = "Boots", DisplayName = "Boots",        Icon = "🥾", BaseDurability = 90f, BaseValue = 1.8f, AllowedFamilies = new[]{"Hide","Cloth"},
+            new() { Kind = ItemKind.Apparel, SubType = "Boots", DisplayName = "Boots",        Icon = "🥾", BaseDurability = 90f, BaseValue = 1.8f, AllowedFamilies = new[]{"Cloth","Hide","Bone"},
                 BodyClass = EquipSlotMeta.BodyClass.Foot },
             // v0.5.84t — Shield. Off-hand defensive equipment for Phase 7
             // combat. BodyClass.Hand so the existing dual-wield slotting

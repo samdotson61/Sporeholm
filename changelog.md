@@ -7,6 +7,25 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.6] — 2026-06-16 — Gear consistency + craftable armor
+
+A consistency-and-playability pass on weapons, tools, and armor.
+
+### All armor is now craftable — fabric and non-fabric
+- Every wearable armor piece — **Hat, Cloak, Boots** — can now be crafted at a Workbench, in a **fabric** tier (woven cloth) and two **non-fabric** tiers (hide and bone). Previously these existed only as scenario starting gear or loot.
+- The three tiers form a real protection ladder: cloth is light, hide is solid, bone is heavy. Cloth uses any woven cloth (moss cloth, grass linen, or spore wool); hide and bone come from hunting and butchery — materials you already produce.
+- Nine new recipes in all; together with the existing Shield, the full defensive set is now craftable.
+
+### Gear consistency fixes
+- **Quality now sways equipment choice in proportion to its real effect.** Colonists were ranking gear on a steep trade-value scale (up to 6×) while the item only delivered a much flatter in-use benefit (up to 1.5×), so they over-valued fancy gear. Selection now uses the same scale that combat and work actually apply.
+- **The spear is correctly treated as a melee weapon when colonists decide which weapon to grab** — it was mis-classified as ranged, biasing the wrong skill into the choice.
+- **A held sickle now speeds up crop harvesting**, the way it already speeds chopping and cutting; the harvest tool-bonus previously had no tool wired to it.
+- **The Sage Staff's meditation bonus now actually applies** — it was advertised on the staff but never took effect during meditation.
+
+Build clean, 0 warnings / 0 errors; all four fixes and the armor recipes were adversarially reviewed end-to-end (no bugs found).
+
+---
+
 ## [0.8.5] — 2026-06-16 — Phase 8 complete: pastures (livestock containment)
 
 The last piece of the Phase 8 farming-and-animals chapter: a place to keep your livestock.

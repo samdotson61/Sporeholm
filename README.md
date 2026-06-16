@@ -2,7 +2,7 @@
 
 **Sporeholm** is a colony-survival game about a little tribe of mushroom-folk — the **Shroomps** — making a home in a strange fungal world. Designed and developed by **Sam Dotson**.
 
-Current version: **v0.8.5** — in active development.
+Current version: **v0.8.6** — in active development.
 
 ---
 
@@ -41,7 +41,7 @@ Sporeholm is mid-development, but the **core game is playable end-to-end**: you 
 | Designation orders (Cut / Chop / Gather / Mine / Haul) | Shipped |
 | Stockpile zones + Haul system | Shipped |
 | Construction (walls / floors / doors / furniture) | Shipped |
-| Crafting bills at workbenches (50 recipes) | Shipped |
+| Crafting bills at workbenches (59 recipes) | Shipped |
 | Room detection + room types (Bedroom / Kitchen / Workshop / Storage) | Shipped |
 | Natural cavern roofs | Shipped |
 | Per-tick mining scaled by skill + tools | Shipped |
@@ -148,7 +148,7 @@ A full body-part combat system layered on the wildlife AI. Shroomps and creature
 
 A workbench holds a queue of bills. Crafters pick them up, consume ingredients from colony inventory, work for N ticks (skill-scaled), and produce items dropped on the workbench tile.
 
-50 recipes across:
+59 recipes across:
 
 - **Cooking** (Cooking Table; Bonfire fallback at half speed): Cook Meal (4 of any food → 1 Prepared Meal), Juice Berries. The Cooking Table is the dedicated full-speed cook station; a Bonfire can cook the same recipes at × 2.0 work-ticks so a bare colony can still feed itself before a Cooking Table is built.
 - **Crafting** (Workbench): Weave Moss Cloth, Weave Grass Linen.
@@ -156,6 +156,7 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 - **Materials** (Workbench): Saw Plank (3× input), Refine Pebblestone (4× input, per stone subtype).
 - **Weapons** (Workbench): Spear / Club / Sling / Bow / Crossbow / Atlatl / Sword / Axe — calibrated damage + accuracy (12 dmg / 0.70 acc Spear; 20 dmg / 0.70 acc Crossbow; 6 dmg / 0.55 acc Sling).
 - **Defense** (Workbench): Shield (3 material variants, 0.25 base block chance).
+- **Armor** (Workbench): Hat, Cloak, and Boots — each in a fabric tier (woven cloth) and two non-fabric tiers (hide, bone), giving a light → solid → heavy protection ladder.
 - **Medicine** (Workbench): Magic Herb Poultice.
 
 ### Rooms

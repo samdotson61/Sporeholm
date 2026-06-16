@@ -874,6 +874,156 @@ namespace Sporeholm.Simulation.Crafting
                 SkillMinimum: 4,
                 XpReward:     180
             ),
+
+            // ── Armor apparel (v0.8.6) ─────────────────────────────────
+            // Every wearable armour piece (Hat / Cloak / Boots) is now
+            // craftable, in a FABRIC tier (Cloth) plus two NON-FABRIC tiers
+            // (Hide, Bone). Armour value scales by material family in
+            // Shroomp.ArmorFractionAt: Cloth 0.10 < Hide 0.18 < Bone 0.28
+            // (× quality × condition, capped 0.55). Cloth ingredient is any
+            // woven cloth (Moss Cloth / Grass Linen / Spore Wool); Hide comes
+            // from butchery, Bone from butchery/foraging.
+            // Shroomp Hat (head)
+            new RecipeDef(
+                Id:           "CraftHat_Cloth",
+                DisplayName:  "Stitch Hat (Cloth)",
+                Description:  "Stitch woven cloth into a soft Shroomp Hat — light head protection.",
+                Ingredients:  new[] {
+                    new RecipeIngredient(ItemKind.Material, "Cloth", 2),
+                },
+                Outputs:      new[] {
+                    new RecipeOutput(ItemKind.Apparel, "Hat", "Cloth", "Mossleaf", 1, RollQuality: true),
+                },
+                WorkTicks:    240,
+                PrimarySkill: "Crafting",
+                SkillMinimum: 1,
+                XpReward:     110
+            ),
+            new RecipeDef(
+                Id:           "CraftHat_Hide",
+                DisplayName:  "Cut Hat (Hide)",
+                Description:  "Cut and shape tanned Hide into a sturdy leather cap.",
+                Ingredients:  new[] {
+                    new RecipeIngredient(ItemKind.Material, "Hide", 2),
+                },
+                Outputs:      new[] {
+                    new RecipeOutput(ItemKind.Apparel, "Hat", "Hide", "Hide", 1, RollQuality: true),
+                },
+                WorkTicks:    300,
+                PrimarySkill: "Crafting",
+                SkillMinimum: 2,
+                XpReward:     130
+            ),
+            new RecipeDef(
+                Id:           "CraftHat_Bone",
+                DisplayName:  "Lash Hat (Bone)",
+                Description:  "Lash Bone plates over a cloth liner for a hard helm.",
+                Ingredients:  new[] {
+                    new RecipeIngredient(ItemKind.Material, "Bone", 2),
+                    new RecipeIngredient(ItemKind.Material, "Cloth", 1),
+                },
+                Outputs:      new[] {
+                    new RecipeOutput(ItemKind.Apparel, "Hat", "Bone", "Bone", 1, RollQuality: true),
+                },
+                WorkTicks:    380,
+                PrimarySkill: "Crafting",
+                SkillMinimum: 3,
+                XpReward:     150
+            ),
+            // Cloak (torso)
+            new RecipeDef(
+                Id:           "CraftCloak_Cloth",
+                DisplayName:  "Weave Cloak (Cloth)",
+                Description:  "Drape woven cloth into a light Cloak over the stalk.",
+                Ingredients:  new[] {
+                    new RecipeIngredient(ItemKind.Material, "Cloth", 3),
+                },
+                Outputs:      new[] {
+                    new RecipeOutput(ItemKind.Apparel, "Cloak", "Cloth", "Mossleaf", 1, RollQuality: true),
+                },
+                WorkTicks:    360,
+                PrimarySkill: "Crafting",
+                SkillMinimum: 2,
+                XpReward:     150
+            ),
+            new RecipeDef(
+                Id:           "CraftCloak_Hide",
+                DisplayName:  "Stitch Cloak (Hide)",
+                Description:  "Stitch tanned Hide into a tough leather Cloak — solid torso armour.",
+                Ingredients:  new[] {
+                    new RecipeIngredient(ItemKind.Material, "Hide", 3),
+                },
+                Outputs:      new[] {
+                    new RecipeOutput(ItemKind.Apparel, "Cloak", "Hide", "Hide", 1, RollQuality: true),
+                },
+                WorkTicks:    440,
+                PrimarySkill: "Crafting",
+                SkillMinimum: 3,
+                XpReward:     180
+            ),
+            new RecipeDef(
+                Id:           "CraftCloak_Bone",
+                DisplayName:  "Plate Cloak (Bone)",
+                Description:  "Bind Bone plates onto a cloth backing for heavy torso armour.",
+                Ingredients:  new[] {
+                    new RecipeIngredient(ItemKind.Material, "Bone", 3),
+                    new RecipeIngredient(ItemKind.Material, "Cloth", 1),
+                },
+                Outputs:      new[] {
+                    new RecipeOutput(ItemKind.Apparel, "Cloak", "Bone", "Bone", 1, RollQuality: true),
+                },
+                WorkTicks:    560,
+                PrimarySkill: "Crafting",
+                SkillMinimum: 4,
+                XpReward:     210
+            ),
+            // Boots (feet)
+            new RecipeDef(
+                Id:           "CraftBoots_Cloth",
+                DisplayName:  "Stitch Boots (Cloth)",
+                Description:  "Stitch padded cloth into light Boots.",
+                Ingredients:  new[] {
+                    new RecipeIngredient(ItemKind.Material, "Cloth", 2),
+                },
+                Outputs:      new[] {
+                    new RecipeOutput(ItemKind.Apparel, "Boots", "Cloth", "Mossleaf", 1, RollQuality: true),
+                },
+                WorkTicks:    280,
+                PrimarySkill: "Crafting",
+                SkillMinimum: 1,
+                XpReward:     120
+            ),
+            new RecipeDef(
+                Id:           "CraftBoots_Hide",
+                DisplayName:  "Cut Boots (Hide)",
+                Description:  "Cut tanned Hide into sturdy leather Boots.",
+                Ingredients:  new[] {
+                    new RecipeIngredient(ItemKind.Material, "Hide", 2),
+                },
+                Outputs:      new[] {
+                    new RecipeOutput(ItemKind.Apparel, "Boots", "Hide", "Hide", 1, RollQuality: true),
+                },
+                WorkTicks:    340,
+                PrimarySkill: "Crafting",
+                SkillMinimum: 2,
+                XpReward:     140
+            ),
+            new RecipeDef(
+                Id:           "CraftBoots_Bone",
+                DisplayName:  "Reinforce Boots (Bone)",
+                Description:  "Reinforce leather Boots with Bone studs for heavy foot armour.",
+                Ingredients:  new[] {
+                    new RecipeIngredient(ItemKind.Material, "Bone", 2),
+                    new RecipeIngredient(ItemKind.Material, "Hide", 1),
+                },
+                Outputs:      new[] {
+                    new RecipeOutput(ItemKind.Apparel, "Boots", "Bone", "Bone", 1, RollQuality: true),
+                },
+                WorkTicks:    420,
+                PrimarySkill: "Crafting",
+                SkillMinimum: 3,
+                XpReward:     160
+            ),
         };
 
         private static readonly Dictionary<string, RecipeDef> _byId;

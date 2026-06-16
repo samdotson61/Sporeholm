@@ -93,7 +93,7 @@ namespace Sporeholm.Simulation.Systems
                     }
                 }
                 if (!isPreferred) continue;
-                float score = (float)QualityMeta.ValueMul(it.Quality)
+                float score = SkillCurve.ToolQualityFactor(it.Quality)   // v0.8.6 — score on the real effectiveness scale (0.90–1.50), not the steep trade-value table
                             * (it.AvgCondition / System.Math.Max(it.DurabilityCap, 1f));
                 if (score > bestScore) { bestScore = score; bestItem = it; }
             }
@@ -225,13 +225,17 @@ namespace Sporeholm.Simulation.Systems
             float dmg = def.BaseDamage;
             float acc = def.BaseAccuracy;
             if (dmg <= 0f && acc <= 0f) return 0f;
-            float quality = (float)QualityMeta.ValueMul(it.Quality);
+            float quality = SkillCurve.ToolQualityFactor(it.Quality);   // v0.8.6 — effectiveness scale, consistent with how combat actually uses quality
             float cond    = it.AvgCondition / System.Math.Max(it.DurabilityCap, 1f);
             // Skill bias: lookup melee/ranged levels. Default 0 if absent.
             int melee  = s.Skills.TryGetValue("Melee",  out var m) ? m : 0;
             int ranged = s.Skills.TryGetValue("Ranged", out var r) ? r : 0;
-            // Ranged weapons (Sling/Bow/Crossbow/Atlatl) have accuracy < 0.75.
-            bool isRanged = acc > 0f && acc < 0.75f;
+            // v0.8.6 — classify ranged the SAME way combat resolution does
+            // (by weapon TYPE), not by an accuracy heuristic. The old
+            // acc < 0.75 test mis-tagged the Spear (0.70, a Piercing *melee*
+            // weapon) as ranged, biasing its skill term to Ranged not Melee.
+            bool isRanged = Sporeholm.Simulation.Combat.CombatProfiles.IsRanged(
+                Sporeholm.Simulation.Combat.CombatProfiles.TypeForSubType(it.SubType));
             float skillMul = isRanged
                 ? 1.0f + 0.05f * ranged
                 : 1.0f + 0.05f * melee;
