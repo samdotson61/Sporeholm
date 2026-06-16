@@ -14,14 +14,14 @@ If you've ever played a "manage your own little settlement and try to keep every
 
 **A typical playthrough, in everyday terms:**
 
-- 🪓 **Clear some land** — dig out stone, chop big mushrooms for wood.
-- 🏠 **Build a shelter** — walls, a door, floors, beds, a campfire, a kitchen.
-- 🌱 **Grow food** — mark a field, pick a crop, and your farmers plant, tend, and harvest it over the in-game days.
-- 🐑 **Raise animals** — tame wild creatures, keep them in a pasture, and they'll give you milk, wool, and eggs — and breed into a herd.
-- 🏹 **Hunt** — send a hunter after wild game and butcher it for meat, hide, and bone.
-- 🍳 **Cook + craft** — turn raw food into meals; make tools, clothes, and weapons at workbenches.
-- ⚔️ **Survive** — fend off hostile wildlife; your Shroomps take real wounds, bleed, and need a healer to patch them up.
-- 😊 **Keep everyone happy** — feed them, give them beds and nice rooms, and manage moods, friendships, and the occasional meltdown.
+- **Clear some land** — dig out stone, chop big mushrooms for wood.
+- **Build a shelter** — walls, a door, floors, beds, a campfire, a kitchen.
+- **Grow food** — mark a field, pick a crop, and your farmers plant, tend, and harvest it over the in-game days.
+- **Raise animals** — tame wild creatures, keep them in a pasture, and they'll give you milk, wool, and eggs — and breed into a herd.
+- **Hunt** — send a hunter after wild game and butcher it for meat, hide, and bone.
+- **Cook + craft** — turn raw food into meals; make tools, clothes, and weapons at workbenches.
+- **Survive** — fend off hostile wildlife; your Shroomps take real wounds, bleed, and need a healer to patch them up.
+- **Keep everyone happy** — feed them, give them beds and nice rooms, and manage moods, friendships, and the occasional meltdown.
 
 Everything saves and loads, so you can put a colony down and pick it back up later.
 
@@ -103,7 +103,7 @@ A full body-part combat system layered on the wildlife AI. Shroomps and creature
 - **Rescue** — a Doctor or Caretaker carries a *downed* colonist to the nearest free bed to recover and be treated.
 - **Training buildings** — a **Sparring Yard** (trains Melee) or **Training Dummy** (trains Ranged); idle Guardians and off-duty colonists drill there for combat XP in peacetime, with no real damage.
 - **Draft** — a drafted colonist holds its post, auto-engages threats at a wider range, and will fight even unarmed.
-- **Patrol** — select colonist(s), pick the **🚩 Patrol** order, and click two points (hold **Shift** for more) to set a looping route they walk as a standing order (yielding to needs + combat, resuming after). A plain right-click move cancels it.
+- **Patrol** — select colonist(s), pick the **Patrol** order, and click two points (hold **Shift** for more) to set a looping route they walk as a standing order (yielding to needs + combat, resuming after). A plain right-click move cancels it.
 - **Feedback + controls** — floating damage numbers, species-coloured blood decals, a combat message log, and sprite animations (attacker lunge, defender recoil + red flash). **Right-click a hostile creature to order an attack.**
 
 ### Work + designations
@@ -123,17 +123,17 @@ A full body-part combat system layered on the wildlife AI. Shroomps and creature
 
 ### Hunting + butchery (Phase 8 — v0.8.1)
 
-- **🏹 Hunt order**: drag a box over wild creatures to mark them. A colonist with the **Hunt** job (Guardians by default, Foragers as backup) pursues and kills each one through the combat engine — only armed, non-pacifist colonists give chase, and a hunter that can't catch fast fleeing prey gives up and moves on. The **Remove** tool cancels a hunt mark.
-- **Carcasses**: a butcherable creature's body stays on the ground (a greyed corpse) instead of vanishing. A colonist butchers it in place into **Meat, Hide, and Bone** (drops vary by species); the **Cooking** skill drives the yield. A built **🔪 Butcher Slab** nearby boosts it. Un-butchered carcasses decay away over time.
+- **Hunt order**: drag a box over wild creatures to mark them. A colonist with the **Hunt** job (Guardians by default, Foragers as backup) pursues and kills each one through the combat engine — only armed, non-pacifist colonists give chase, and a hunter that can't catch fast fleeing prey gives up and moves on. The **Remove** tool cancels a hunt mark.
+- **Carcasses**: a butcherable creature's body stays on the ground (a greyed corpse) instead of vanishing. A colonist butchers it in place into **Meat, Hide, and Bone** (drops vary by species); the **Cooking** skill drives the yield. A built **Butcher Slab** nearby boosts it. Un-butchered carcasses decay away over time.
 - Raw meat is food — it feeds straight into the existing **Cook Meal** recipe. Hunt marks and carcasses persist through save/load.
 
 ### Taming + livestock (Phase 8 — v0.8.2)
 
-- **🤝 Tame order**: drag a box over tameable wild creatures to mark them. A colonist with the new **Husbandry** job (Caretakers by default; Foragers + Elders help) visits each and tames it over repeated trips — the **Husbandry skill** sets how fast. A marked creature holds still so the handler can walk up; even a marked predator can't lash out mid-tame. The **Remove** tool calls off a taming. Hunt and Tame are mutually exclusive.
+- **Tame order**: drag a box over tameable wild creatures to mark them. A colonist with the new **Husbandry** job (Caretakers by default; Foragers + Elders help) visits each and tames it over repeated trips — the **Husbandry skill** sets how fast. A marked creature holds still so the handler can walk up; even a marked predator can't lash out mid-tame. The **Remove** tool calls off a taming. Hunt and Tame are mutually exclusive.
 - **Tamed livestock** join the colony: they never turn on you, graze peacefully near home, and are kept fed so they don't starve.
 - **Produce on a cycle**: tamed milkable / shearable / egg-laying animals drop **milk / spore wool / eggs** about twice a day, hauled to your stockpiles (a Shroomgoat gives both milk and wool). Milk + eggs cook into meals; wool is a cloth material.
 - **Breeding** (v0.8.3): two tamed, well-fed animals of the same breeding species, kept near each other, raise young — one of the pair gestates (~1.5 in-game days) and births a tamed offspring. A per-species **population cap** (8) lets a herd grow to a ceiling and hold, refilling after losses. Pregnant animals read "Expecting".
-- **Pastures** (v0.8.5): paint a **🐑 Pasture** in the Zones tab to give your livestock a home — tamed animals gather and graze within the nearest pasture instead of wandering off. Soft containment (no fences needed); the Remove tool clears it, and pastures persist through save/load. This completes the Phase 8 farming-and-animals chapter.
+- **Pastures** (v0.8.5): paint a **Pasture** in the Zones tab to give your livestock a home — tamed animals gather and graze within the nearest pasture instead of wandering off. Soft containment (no fences needed); the Remove tool clears it, and pastures persist through save/load. This completes the Phase 8 farming-and-animals chapter.
 
 ### Construction
 
