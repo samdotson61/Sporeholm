@@ -601,6 +601,15 @@ namespace Sporeholm
 				return;
 			}
 
+			// v0.8.5 (Phase 8) — Pasture painter. Like Farm, it applies the whole
+			// rect at once (any in-bounds passable tile becomes pasture); tamed
+			// livestock then gather + graze within it.
+			if (tool == Sporeholm.UI.DesignationTool.Pasture)
+			{
+				map.PaintPasture(x0, y0, x1, y1);
+				return;
+			}
+
 			// v0.4.12 — Haul order is item-keyed, not tile-keyed. Walk
 			// every dropped item with TilePos inside the rect and mark
 			// it for priority haul; HaulSystem.SelectHaulTarget will
@@ -741,6 +750,7 @@ namespace Sporeholm
 						map.ClearDesignationsAt(x, y);
 						map.ClearStockpileCell(x, y);
 							map.ClearGrowZone(x, y, x, y);   // v0.8.0 — Remove also clears grow-zone cells
+							map.ClearPasture(x, y, x, y);    // v0.8.5 — …and pasture cells
 						break;
 					case Sporeholm.UI.DesignationTool.Stockpile:
 						extendId = map.SetStockpileCell(x, y, extendId);

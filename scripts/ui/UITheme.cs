@@ -124,6 +124,10 @@ namespace Sporeholm.UI
         // to mark them; a Husbandry-priority colonist visits + tames each over
         // repeated trips. Tamed creatures join the colony + produce milk/wool/eggs.
         Tame,
+        // v0.8.5 (Phase 8) — Pasture zone painter. Paint an open holding area;
+        // tamed livestock gather + graze within the nearest pasture instead of
+        // roaming free. Soft containment (no fences). Remove clears pasture cells.
+        Pasture,
     }
 
     // Roadmap §3.x.7 — single source of truth for floating-panel theme constants.

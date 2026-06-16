@@ -285,6 +285,11 @@ public partial class WorldState : Node
                     continue;
                 CurrentLocalMap.ApplyCrop(c.X, c.Y, crop, c.Stage, c.Growth);
             }
+
+        // v0.8.5 (Phase 8) — restore pasture cells (tamed-livestock holding areas).
+        if (save.PastureCells != null)
+            foreach (var c in save.PastureCells)
+                CurrentLocalMap.ApplyPasture(c.X, c.Y);
     }
 
     // Ensures a valid local map exists even for saves without world data.

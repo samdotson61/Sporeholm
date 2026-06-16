@@ -1,14 +1,37 @@
 # Sporeholm
 
-A colony simulation game about a tribe of mushroom-people (**Shroomps**) trying to survive in a strange, fungal world. Designed and developed by **Sam Dotson** in **Godot 4.6** (C#).
+**Sporeholm** is a colony-survival game about a little tribe of mushroom-folk — the **Shroomps** — making a home in a strange fungal world. Designed and developed by **Sam Dotson**.
 
-Current version: **v0.8.4** (active development — Phase 8 (Agricultural) gameplay loop complete: **farming** (v0.8.0, nine crops), the **roster doubled to 30 species** (v0.8.0a), **hunting + butchery** (v0.8.1), **taming + livestock produce** (v0.8.2 — milk, wool, eggs), and **breeding** (v0.8.3 — tamed pairs raise young into a self-sustaining, pop-capped herd). Built on the complete Phase 7 combat system — body-part wounds, pain + venom, healer / medicine, material-aware armor, draft, rescue, training, apparel, attack + patrol orders, mental breaks, and a social relationship ledger. *(Pen/pasture containment zones are a deferred polish item.)*).
+Current version: **v0.8.5** — in active development.
+
+---
+
+## What is this game? (the plain-English version)
+
+You look after a small group of mushroom creatures who've settled in the wilderness. You **don't** control them directly like pieces on a board. Instead, you set the priorities — *what to build, what to grow, who does which jobs* — and the Shroomps go about their lives on their own: working, eating, sleeping, making friends, getting hurt, recovering, and (with luck) growing the colony.
+
+If you've ever played a "manage your own little settlement and try to keep everyone alive" game, that's the idea. Your job is to turn an empty patch of wilderness into a thriving home before hunger, the cold, or a wolf pack gets the better of you.
+
+**A typical playthrough, in everyday terms:**
+
+- 🪓 **Clear some land** — dig out stone, chop big mushrooms for wood.
+- 🏠 **Build a shelter** — walls, a door, floors, beds, a campfire, a kitchen.
+- 🌱 **Grow food** — mark a field, pick a crop, and your farmers plant, tend, and harvest it over the in-game days.
+- 🐑 **Raise animals** — tame wild creatures, keep them in a pasture, and they'll give you milk, wool, and eggs — and breed into a herd.
+- 🏹 **Hunt** — send a hunter after wild game and butcher it for meat, hide, and bone.
+- 🍳 **Cook + craft** — turn raw food into meals; make tools, clothes, and weapons at workbenches.
+- ⚔️ **Survive** — fend off hostile wildlife; your Shroomps take real wounds, bleed, and need a healer to patch them up.
+- 😊 **Keep everyone happy** — feed them, give them beds and nice rooms, and manage moods, friendships, and the occasional meltdown.
+
+Everything saves and loads, so you can put a colony down and pick it back up later.
+
+> **Heads-up:** it's still being built. The full play loop above works today, but you currently launch it through the game engine (see **How to run** below). An easy one-click installer that updates and launches the game for you — and opens the door to player-made mods — is planned next (see **Roadmap**).
 
 ---
 
 ## Project status at a glance
 
-Sporeholm is mid-development. The core simulation loop — colony of pawns, needs, work, construction, crafting, mood, wildlife, save/load — is shipped and stable. Combat (Phase 7) is complete. **Phase 8 (Agricultural) is now underway** — the farming core (crops + grow-zones + sow/harvest) ships in v0.8.0; animal husbandry (taming, produce, breeding) and hunting follow in later v0.8.x slices. Weather, events, and disease are future phases.
+Sporeholm is mid-development, but the **core game is playable end-to-end**: you can found a colony, build, farm, hunt, tame and breed animals, fight, cook, and keep your Shroomps alive — and save your progress. The current chapter (Phase 8 — *farming and animals*) is **complete**. What's left is more flavour and depth: weather, random events, research, and disease.
 
 | Layer | State |
 |---|---|
@@ -27,13 +50,15 @@ Sporeholm is mid-development. The core simulation loop — colony of pawns, need
 | **Combat** | **Shipped — v0.7.x** (body-part combat, wounds, pain/venom, healer + rescue, layered armor, draft, training, weapons) |
 | **Farming (crops + grow-zones + sow/harvest)** | **Shipped — v0.8.0** (9 crops, 3 Botany tiers, Grow priority, Husbandry skill) |
 | **Hunting + butchery** | **Shipped — v0.8.1** (Hunt order, carcasses, Butcher Slab, meat/hide/bone) |
-| **Animal husbandry (taming + produce + breeding)** | **Shipped — v0.8.2–0.8.3** (Tame order, Husbandry job, milk/wool/eggs, breeding); pen/pasture zones deferred |
+| **Animal husbandry (taming + produce + breeding + pastures)** | **Shipped — v0.8.2–0.8.5** (Tame order, Husbandry job, milk/wool/eggs, breeding, pasture containment) |
 | **Weather & temperature** | Insulation half — Phase 10 |
 | **Disease, research, eras** | Future phases |
 
 ---
 
-## What's in the game right now
+## Everything in the game right now (the detailed list)
+
+*The sections below are the full feature breakdown for the curious — feel free to skim. If you just want to play, jump to **How to run** and **How to play**.*
 
 ### World
 
@@ -108,7 +133,7 @@ A full body-part combat system layered on the wildlife AI. Shroomps and creature
 - **Tamed livestock** join the colony: they never turn on you, graze peacefully near home, and are kept fed so they don't starve.
 - **Produce on a cycle**: tamed milkable / shearable / egg-laying animals drop **milk / spore wool / eggs** about twice a day, hauled to your stockpiles (a Shroomgoat gives both milk and wool). Milk + eggs cook into meals; wool is a cloth material.
 - **Breeding** (v0.8.3): two tamed, well-fed animals of the same breeding species, kept near each other, raise young — one of the pair gestates (~1.5 in-game days) and births a tamed offspring. A per-species **population cap** (8) lets a herd grow to a ceiling and hold, refilling after losses. Pregnant animals read "Expecting".
-- *(Pen / pasture containment zones — fencing animals into an area — are a deferred polish item; taming, produce, and breeding all work without them, with tamed animals roaming near where they were tamed.)*
+- **Pastures** (v0.8.5): paint a **🐑 Pasture** in the Zones tab to give your livestock a home — tamed animals gather and graze within the nearest pasture instead of wandering off. Soft containment (no fences needed); the Remove tool clears it, and pastures persist through save/load. This completes the Phase 8 farming-and-animals chapter.
 
 ### Construction
 
@@ -186,7 +211,8 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 | 5.5 | Crafting bills | Complete |
 | 6 | Entity system (animals + creatures) | Shipped (v0.6.0 — 15 species; expanded to 30 in v0.8.0a) |
 | 7 | Combat (Healer + Rescue + Training + Weapons/Apparel) | Shipped (v0.7.2 — full body-part combat) |
-| **8** | **Agricultural systems** (farming, animal husbandry, hunting) | **Gameplay complete** (v0.8.0 farming · v0.8.0a roster→30 · v0.8.1 hunting + butchery · v0.8.2 taming + produce · v0.8.3 breeding; pen/pasture zones deferred) |
+| **8** | **Agricultural systems** (farming, animal husbandry, hunting) | **Complete** (v0.8.0 farming · v0.8.0a roster→30 · v0.8.1 hunting + butchery · v0.8.2 taming + produce · v0.8.3 breeding · v0.8.4 grow-time balance · v0.8.5 pastures) |
+| **8.5** | **Launcher** — one-click install / auto-update / play, mod-ready | **Planned next** (before Phase 9) |
 | 9 | Events + Storyteller (Peaceful / Random / Adventure — extensible) | Stub |
 | 10 | Weather + Environment (Insulation half done) | — |
 | 11 | Technology + Culture (research + power) | — |
@@ -201,14 +227,16 @@ Full per-version detail in [`changelog.md`](changelog.md).
 
 ## How to run
 
-You'll need **Godot 4.6+** with **.NET / C# support** (the Mono build).
+> **Coming soon:** a simple **one-click launcher** that downloads the latest version, keeps it updated, and starts the game for you — no engine or setup required (see the **Roadmap**). Until that lands, the game runs from the Godot engine, as below.
+
+**Today (developer setup):** you'll need **Godot 4.6+** with **.NET / C# support** (the Mono build).
 
 1. Clone the repo.
 2. Open Godot, import the project (`project.godot`).
 3. Wait for the editor to finish importing assets + compiling C# scripts.
 4. Press **F5** (or click Run) to launch.
 
-The OpenGL Compatibility renderer is locked in for wider hardware compatibility, so the project should run on most modern integrated GPUs.
+It uses the OpenGL Compatibility renderer for wide hardware support, so it should run on most modern computers, including ones with built-in (integrated) graphics.
 
 ---
 

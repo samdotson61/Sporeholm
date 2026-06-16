@@ -188,6 +188,10 @@ public partial class SaveManager : Node
 		// so old saves load with no crops and the player paints fresh fields.
 		public List<CropTileSave>? CropTiles { get; init; } = null;
 
+		// v0.8.5 (Phase 8) — pasture cells (tamed-livestock holding areas).
+		// A flat tile list; null for pre-v0.8.5 saves (no pastures).
+		public List<TileXY>? PastureCells { get; init; } = null;
+
 		// v0.6.0 (Phase 6) — live wildlife snapshot. One entry per
 		// alive entity at save time. Null for pre-Phase-6 saves; load
 		// path treats null as "no entities exist, run EntitySpawnSystem
@@ -539,6 +543,11 @@ public partial class SaveManager : Node
 			.Select(c => new CropTileSave(c.X, c.Y, c.Crop.ToString(), c.Stage, c.Growth))
 			.ToList();
 
+		// v0.8.5 (Phase 8) — pasture cells.
+		var pastureCells = localMap?.SnapshotPasture()
+			.Select(c => new TileXY(c.X, c.Y))
+			.ToList();
+
 		var save = new ColonySave(
 			snapshot.Date.Year,
 			snapshot.Date.Season.ToString(),
@@ -570,6 +579,7 @@ public partial class SaveManager : Node
 			NamedAreas        = (namedAreas?.Count      ?? 0) > 0 ? namedAreas      : null,
 			WorkbenchBills    = (workbenchBills?.Count  ?? 0) > 0 ? workbenchBills  : null,
 			CropTiles         = (cropTiles?.Count       ?? 0) > 0 ? cropTiles       : null,
+			PastureCells      = (pastureCells?.Count    ?? 0) > 0 ? pastureCells    : null,
 			// v0.6.0 (Phase 6) — wildlife snapshot from the live sim.
 			Entities          = BuildEntityList(snapshot),
 		};

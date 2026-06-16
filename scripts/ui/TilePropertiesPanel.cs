@@ -200,6 +200,13 @@ public partial class TilePropertiesPanel : Control
             BuildGrowZoneSection(crop);
             _content.AddChild(MakeRule());
         }
+        // v0.8.5 (Phase 8) — pasture membership (tamed-livestock holding area).
+        if (map.IsPasture(tx, ty))
+        {
+            _content.AddChild(MakeHeader("Pasture"));
+            _content.AddChild(MakeLabel("  Tamed livestock gather + graze here.", 10, DarkWood));
+            _content.AddChild(MakeRule());
+        }
         // v0.5.25 — Structure section (walls / floors / doors / shelves /
         // workbenches / bonfires / blueprints). Lands above the Tile
         // section because structures sit on top of the underlying terrain

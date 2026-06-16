@@ -7,6 +7,24 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.5] — 2026-06-16 — Phase 8 complete: pastures (livestock containment)
+
+The last piece of the Phase 8 farming-and-animals chapter: a place to keep your livestock.
+
+### Pastures
+- **🐑 Pasture tool** in the Zones tab: drag out an open holding area, and tamed animals gather and graze within the nearest pasture instead of wandering off across the map. Soft containment — no fences to build; the **Remove** tool clears pasture cells, and pastures persist through save/load.
+- Stray or far-flung tamed animals head back toward the nearest pasture; if a pasture is walled off and unreachable, animals simply roam near home instead of getting stuck against a wall.
+- A meadow-green tint marks the pasture; click a pasture tile to confirm it in the inspector. Pastures, grow-zones, and stockpiles are independent layers, so a tile can be more than one.
+
+This **completes Phase 8** — the full farming → hunting → taming → produce → breeding → containment loop is in. (The husbandry produce stations from early planning — nesting boxes, troughs — are intentionally folded into the automatic produce system rather than shipped as separate buildings.)
+
+### Also planned next
+The roadmap now records the intent for a **one-click launcher** (install / auto-update / play, built to support mods later) as the milestone before Phase 9.
+
+Build clean, 0 warnings / 0 errors; the pasture + containment system was adversarially reviewed (no issues found across containment AI, threading, save, and overlay).
+
+---
+
 ## [0.8.4] — 2026-06-15 — Crop growth rebalanced to the calendar
 
 Crops now grow over **in-game days**, not minutes. Previously every crop ripened in under four in-game *hours* — wildly out of step with a world that runs on 30-day seasons and food that stays fresh for days, so a single plot out-produced its own shelf life many times over per hour.

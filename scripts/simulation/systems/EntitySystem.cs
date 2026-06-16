@@ -32,6 +32,9 @@ namespace Sporeholm.Simulation.Systems
         // settling back to Wander (reuses AttackCooldownTicks as the flee timer,
         // matching the existing Flee→Wander gate).
         private const int FleeDurationTicks = 180;   // ~3s @ 60Hz
+        // v0.8.5 — a tamed animal in a pasture grazes within this many tiles of
+        // its current spot; beyond that it heads back toward the nearest pasture cell.
+        private const int PastureGrazeRadiusTiles = 6;
 
         public static void Tick(
             IReadOnlyList<Entity> entities,
@@ -182,9 +185,27 @@ namespace Sporeholm.Simulation.Systems
             {
                 case EntityState.Wander:
                 case EntityState.Graze:
-                case EntityState.Tamed:   // v0.8.2 — tamed livestock graze near home
                     if (e.WanderHopsRemaining <= 0 || (e.SimPos - e.SimTarget).LengthSquared() <= ArrivalPx * ArrivalPx)
                         e.SimTarget = PickWanderTarget(e, map, rng);
+                    break;
+                case EntityState.Tamed:
+                    // v0.8.5 (Phase 8) — tamed livestock graze within the nearest
+                    // PASTURE if one is painted (soft containment); otherwise roam
+                    // near where they were tamed (WanderHome).
+                    if (e.WanderHopsRemaining <= 0 || (e.SimPos - e.SimTarget).LengthSquared() <= ArrivalPx * ArrivalPx)
+                    {
+                        var pasture = map.HasAnyPasture()
+                            ? map.PastureWanderTarget(e.SimPos.X, e.SimPos.Y, PastureGrazeRadiusTiles, rng)
+                            : null;
+                        if (pasture.HasValue)
+                        {
+                            e.SimTarget = new Vector2(
+                                pasture.Value.X * LocalMap.TileSize + LocalMap.TileSize / 2,
+                                pasture.Value.Y * LocalMap.TileSize + LocalMap.TileSize / 2);
+                            e.WanderHopsRemaining = 1;
+                        }
+                        else e.SimTarget = PickWanderTarget(e, map, rng);
+                    }
                     break;
                 case EntityState.Hunt:
                 {

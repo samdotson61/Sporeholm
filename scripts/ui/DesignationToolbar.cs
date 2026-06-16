@@ -66,6 +66,8 @@ public partial class DesignationToolbar : Control
         Hunt             = DesignationTool.Hunt,
         // v0.8.2 (Phase 8) — Tame order.
         Tame             = DesignationTool.Tame,
+        // v0.8.5 (Phase 8) — Pasture zone painter (Zones tab).
+        Pasture          = DesignationTool.Pasture,
         // v0.5.25 (Phase 5C polish) — Allowed-area painter (per-shroomp).
         AllowedArea    = DesignationTool.AllowedArea,
         Patrol         = DesignationTool.Patrol,   // v0.7.3 (N20)
@@ -139,6 +141,7 @@ public partial class DesignationToolbar : Control
         Tool.BuildButcherSlab => DesignationTool.BuildButcherSlab,     // v0.8.1
         Tool.Hunt             => DesignationTool.Hunt,                 // v0.8.1
         Tool.Tame             => DesignationTool.Tame,                 // v0.8.2
+        Tool.Pasture          => DesignationTool.Pasture,             // v0.8.5
         Tool.AllowedArea    => DesignationTool.AllowedArea,      // v0.5.25
         Tool.Patrol         => DesignationTool.Patrol,           // v0.7.3 (N20)
         Tool.Demolish   => DesignationTool.Demolish,    // v0.5.19

@@ -28,6 +28,7 @@ namespace Sporeholm.UI
         private Button              _stockpileBtn   = null!;
         private Button              _allowedAreaBtn = null!;   // v0.5.25
         private Button              _farmBtn        = null!;   // v0.8.0 (Phase 8)
+        private Button              _pastureBtn     = null!;   // v0.8.5 (Phase 8)
         private readonly Dictionary<CropType, Button> _cropChips = new();   // v0.8.0
 
         public override void _Ready()
@@ -145,6 +146,14 @@ namespace Sporeholm.UI
             _farmBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.Farm);
             row.AddChild(_farmBtn);
 
+            // v0.8.5 (Phase 8) — Pasture painter. Paint an open holding area;
+            // tamed livestock gather + graze within the nearest pasture.
+            _pastureBtn = MakeButton(
+                "🐑 Pasture",
+                tips ? "Paint an open pasture. Tamed livestock gather + graze within the nearest pasture instead of roaming free. Remove clears pasture cells." : "");
+            _pastureBtn.Pressed += () => _toolbar?.SetActiveTool(DesignationToolbar.Tool.Pasture);
+            row.AddChild(_pastureBtn);
+
             // ── Crop picker row ──────────────────────────────────────────────
             // One chip per registered crop. Clicking a chip selects that crop
             // AND switches to the Farm tool, so picking a crop is the one-click
@@ -239,6 +248,7 @@ namespace Sporeholm.UI
             // both "am I farming?" and "which crop?" from the pressed-states.
             bool farming = _toolbar.ActiveTool == DesignationToolbar.Tool.Farm;
             _farmBtn.SetPressedNoSignal(farming);
+            _pastureBtn.SetPressedNoSignal(_toolbar.ActiveTool == DesignationToolbar.Tool.Pasture);   // v0.8.5
             foreach (var (crop, chip) in _cropChips)
                 chip.SetPressedNoSignal(farming && _toolbar.ActiveCrop == crop);
         }

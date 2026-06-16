@@ -39,6 +39,7 @@ public partial class GameController : Node
 	private ItemDropOverlay       _itemOverlay     = null!;
 	private StockpileOverlay      _stockpileOverlay = null!;   // v0.5.0 Phase 5A
 	private GrowZoneOverlay       _growZoneOverlay  = null!;   // v0.8.0 Phase 8
+	private PastureOverlay        _pastureOverlay   = null!;   // v0.8.5 Phase 8
 	private StructureOverlay      _structureOverlay = null!;   // v0.5.19 Phase 5B
 	private EntityColonyView      _entityColonyView = null!;   // v0.6.0 Phase 6 — wildlife renderer
 	private EntityCardPanel       _entityCard       = null!;   // v0.6.2 — wildlife inspector card
@@ -117,6 +118,7 @@ public partial class GameController : Node
 			_itemOverlay.SetMap(preloadedMap);
 			_stockpileOverlay.SetMap(preloadedMap);   // v0.5.0
 			_growZoneOverlay.SetMap(preloadedMap);    // v0.8.0
+			_pastureOverlay.SetMap(preloadedMap);     // v0.8.5
 			_structureOverlay.SetMap(preloadedMap);   // v0.5.19
 			_colony.UpdateMapSize(preloadedMap);
 			// Phase 3: bind the LocalMap to the sim thread so BehaviorSystem
@@ -149,6 +151,7 @@ public partial class GameController : Node
 			_itemOverlay.SetMap(map);
 			_stockpileOverlay.SetMap(map);   // v0.5.0
 			_growZoneOverlay.SetMap(map);    // v0.8.0
+			_pastureOverlay.SetMap(map);     // v0.8.5
 			_structureOverlay.SetMap(map);   // v0.5.19
 			// Re-centre the camera on the actual generated map. BuildGameWorld() used
 			// DefaultWidth/DefaultHeight to initialise camera position, which can be
@@ -204,6 +207,11 @@ public partial class GameController : Node
 		// beneath structures / designation glyphs / item icons / shroomps.
 		_growZoneOverlay = new GrowZoneOverlay { Name = "GrowZoneOverlay" };
 		AddChild(_growZoneOverlay);
+
+		// v0.8.5 (Phase 8) — pasture tint (tamed-livestock holding areas). Same
+		// z=0 floor band as the stockpile / grow-zone tints.
+		_pastureOverlay = new PastureOverlay { Name = "PastureOverlay" };
+		AddChild(_pastureOverlay);
 
 		// v0.5.19 (Phase 5B) — structure overlay (walls, floors, blueprints).
 		// Sits between stockpile (z=0, tree-order earlier) and designations
@@ -865,7 +873,8 @@ public partial class GameController : Node
 					// the player can inspect its crop / stage / yield.
 					bool hasCrop = lmap.GetCrop(tile.Value.x, tile.Value.y).Crop
 						!= Sporeholm.World.CropType.None;
-					if (hasItems || hasVeg || hasStructure || hasCrop)
+					bool hasPasture = lmap.IsPasture(tile.Value.x, tile.Value.y);   // v0.8.5
+					if (hasItems || hasVeg || hasStructure || hasCrop || hasPasture)
 					{
 						_card.Visible = false;        // mutually exclusive with the shroomp card
 						// v0.6.2v — also close the entity card so the

@@ -135,6 +135,13 @@ namespace Sporeholm.World
 		// CropSlot in this sparse dict (Crop = what to grow, Stage = lifecycle).
 		// The Farm tool adds Empty slots; Remove deletes them. Under _designationsLock.
 		private readonly Dictionary<(int X, int Y), CropSlot> _crops = new();
+		// v0.8.5 (Phase 8) — pasture cells: a painted holding area for tamed
+		// livestock. Tamed animals gather + graze within the nearest pasture
+		// instead of roaming near where they were tamed (soft containment, no
+		// fences). Membership-only sparse set, guarded by _designationsLock,
+		// mirroring the grow-zone pattern; PastureChanged drives the overlay.
+		private readonly HashSet<(int X, int Y)>        _pastureCells = new();
+		public event Action?                            PastureChanged;
 		public event Action?                            CropsChanged;
         public event Action<int, int>?                  StockpileChanged;
 
@@ -1721,6 +1728,81 @@ namespace Sporeholm.World
                     if (_crops.Remove((x, y))) any = true;
             }
             if (any) CropsChanged?.Invoke();
+        }
+
+        // ── v0.8.5 (Phase 8) — pasture (tamed-livestock holding area) ──────────
+        public bool HasAnyPasture() { lock (_designationsLock) return _pastureCells.Count > 0; }
+        public bool IsPasture(int x, int y) { lock (_designationsLock) return _pastureCells.Contains((x, y)); }
+
+        // Paint a rectangle as pasture — any in-bounds passable tile qualifies
+        // (open grazing ground). Returns the count of newly-added cells.
+        public int PaintPasture(int x0, int y0, int x1, int y1)
+        {
+            int count = 0;
+            lock (_designationsLock)
+            {
+                int yLo = System.Math.Min(y0, y1), yHi = System.Math.Max(y0, y1);
+                int xLo = System.Math.Min(x0, x1), xHi = System.Math.Max(x0, x1);
+                for (int y = yLo; y <= yHi; y++)
+                for (int x = xLo; x <= xHi; x++)
+                {
+                    if (!InBounds(x, y) || !IsPassable(x, y)) continue;
+                    if (_pastureCells.Add((x, y))) count++;
+                }
+            }
+            if (count > 0) PastureChanged?.Invoke();
+            return count;
+        }
+
+        public void ClearPasture(int x0, int y0, int x1, int y1)
+        {
+            bool any = false;
+            lock (_designationsLock)
+            {
+                int yLo = System.Math.Min(y0, y1), yHi = System.Math.Max(y0, y1);
+                int xLo = System.Math.Min(x0, x1), xHi = System.Math.Max(x0, x1);
+                for (int y = yLo; y <= yHi; y++)
+                for (int x = xLo; x <= xHi; x++)
+                    if (_pastureCells.Remove((x, y))) any = true;
+            }
+            if (any) PastureChanged?.Invoke();
+        }
+
+        // Save/load: snapshot every pasture cell; ApplyPasture restores one.
+        public List<(int X, int Y)> SnapshotPasture()
+        {
+            lock (_designationsLock) return new List<(int X, int Y)>(_pastureCells);
+        }
+        public void ApplyPasture(int x, int y)
+        {
+            lock (_designationsLock) _pastureCells.Add((x, y));
+        }
+
+        // v0.8.5 — wander target for a tamed animal: a random pasture cell within
+        // `preferRadiusTiles` of (px,py) if any (so it grazes locally), else the
+        // NEAREST pasture cell (pulls a stray back toward the pen). Null if no
+        // pasture exists at all. Sim-thread caller passes the sim rng.
+        public (int X, int Y)? PastureWanderTarget(float px, float py, int preferRadiusTiles, Random rng)
+        {
+            int cx = (int)(px / TileSize), cy = (int)(py / TileSize);
+            long pr2 = (long)preferRadiusTiles * preferRadiusTiles;
+            lock (_designationsLock)
+            {
+                if (_pastureCells.Count == 0) return null;
+                EnsureRegions();
+                (int X, int Y)? near = null; int nearCount = 0;
+                (int X, int Y)? best = null; long bestD = long.MaxValue;
+                foreach (var c in _pastureCells)
+                {
+                    // Skip pasture across a wall — else the animal jitters against
+                    // it. Null result → caller falls back to free roaming near home.
+                    if (!AreReachable(cx, cy, c.X, c.Y)) continue;
+                    long dx = c.X - cx, dy = c.Y - cy, d = dx * dx + dy * dy;
+                    if (d < bestD) { bestD = d; best = c; }
+                    if (d <= pr2 && rng.Next(++nearCount) == 0) near = c;   // reservoir-sample nearby cells
+                }
+                return near ?? best;
+            }
         }
 
         // Advance sown crops by dtTicks (called each sim tick). Time-based growth;
