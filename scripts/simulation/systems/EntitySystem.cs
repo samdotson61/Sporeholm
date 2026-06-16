@@ -300,18 +300,20 @@ namespace Sporeholm.Simulation.Systems
         {
             bool any = false;
             var pos = e.SimPos;
-            void Drop(string sub)
+            void Drop(string sub, Sporeholm.Simulation.Items.MaterialKey? mat = null)
             {
                 var kind = ItemRegistry.KindForSubType(sub);
                 if (kind == null) return;
-                var item = ItemFactory.Create(kind.Value, sub, null, rng, currentTick, quantity: 1);
+                var item = ItemFactory.Create(kind.Value, sub, mat, rng, currentTick, quantity: 1);
                 item.TilePos = pos;
                 map.DropItem(item);
                 any = true;
             }
             if (AgriculturalTags.Has(e.Kind, AgriculturalTag.Milkable))  Drop("Milk");
             if (AgriculturalTags.Has(e.Kind, AgriculturalTag.EggLayer))  Drop("Egg");
-            if (AgriculturalTags.Has(e.Kind, AgriculturalTag.Shearable)) Drop("Wool");
+            // v0.8.7 — sheared wool is explicitly Spore Wool (Cloth/Wool) so it
+            // resolves a real material instead of rolling a random cloth subtype.
+            if (AgriculturalTags.Has(e.Kind, AgriculturalTag.Shearable)) Drop("Wool", new Sporeholm.Simulation.Items.MaterialKey("Cloth","Wool"));
             return any;
         }
 

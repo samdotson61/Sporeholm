@@ -225,7 +225,16 @@ namespace Sporeholm.Simulation.Systems
             foreach (var ing in recipe.Ingredients)
             {
                 int have;
-                if (ing.RequiredSubType != null)
+                // v0.8.7 — material-aware availability that mirrors the consume
+                // side (ConsumeByMaterial) exactly: when an ingredient names a
+                // family + a required subtype, match by MATERIAL (family +
+                // subtype), NOT by item SubType. Otherwise every Wood/Stone/Cloth
+                // recipe — whose gathered inputs are "WoodLog"/"StoneBlock"/
+                // "MossCloth" items carrying the material subtype — reports zero
+                // available and is never selectable to craft.
+                if (ing.RequiredSubType != null && ing.MaterialFamily != null)
+                    have = r.Inventory.TotalByMaterial(ing.Kind, ing.MaterialFamily, ing.RequiredSubType);
+                else if (ing.RequiredSubType != null)
                     have = r.Inventory.TotalBySubType(ing.Kind, ing.RequiredSubType);
                 else if (ing.MaterialFamily != null)
                     have = r.Inventory.TotalByFamily(ing.Kind, ing.MaterialFamily);

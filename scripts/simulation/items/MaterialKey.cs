@@ -135,12 +135,27 @@ namespace Sporeholm.Simulation.Items
             // alongside Cuttings as a distinct biomass kind so the future
             // system can branch on it without grepping every Cuttings call site.
             new() { Key = new("Plant","Mosslet"),        DisplayName = "Mosslet",        Icon = "🟢", DurabilityMul = 0.30f, DecayRateMul = 3.50f, ValueMul = 0.25f },
+            // v0.8.7 — Cooked: the material carried by a Prepared Meal (the
+            // CookMeal bill output). Cooked food keeps longer than raw biomass
+            // but still spoils. Resolves the previously-unregistered Plant/Cooked.
+            new() { Key = new("Plant","Cooked"),         DisplayName = "Cooked Meal",    Icon = "🍲", DurabilityMul = 0.50f, DecayRateMul = 2.50f, ValueMul = 1.40f },
 
             // ── Cloth (Phase 5+ — registered now for procedural rolls) ──
             new() { Key = new("Cloth","Linen"),       DisplayName = "Linen",      Icon = "🧵", DurabilityMul = 0.65f, DecayRateMul = 1.20f, ValueMul = 0.85f },
             new() { Key = new("Cloth","Shroompwool"),   DisplayName = "Shroompwool",  Icon = "🧶", DurabilityMul = 0.75f, DecayRateMul = 1.10f, ValueMul = 1.00f },
             new() { Key = new("Cloth","SpiderSilk"),  DisplayName = "Spider Silk",Icon = "🕸",  DurabilityMul = 0.85f, DecayRateMul = 0.90f, ValueMul = 1.80f },
             new() { Key = new("Cloth","Magicweave"),  DisplayName = "Magicweave", Icon = "✨", DurabilityMul = 1.10f, DecayRateMul = 0.50f, ValueMul = 3.00f },
+
+            // v0.8.7 — the cloths the game actually weaves + shears today (the
+            // four above are reserved aspirational tiers, kept for save-compat
+            // and future use). Moss Cloth + Grass Linen come from the weaving
+            // bills, Spore Wool from shearing. These carry the exact (family,
+            // subtype) keys the recipes + produce emit, so crafted cloth gear
+            // resolves a real material — proper name + durability — instead of
+            // falling back to the 1.0 default.
+            new() { Key = new("Cloth","Mossleaf"),    DisplayName = "Moss Cloth",   Icon = "🧵", DurabilityMul = 0.60f, DecayRateMul = 1.25f, ValueMul = 0.75f },
+            new() { Key = new("Cloth","Grass"),       DisplayName = "Grass Linen",  Icon = "🧵", DurabilityMul = 0.65f, DecayRateMul = 1.20f, ValueMul = 0.85f },
+            new() { Key = new("Cloth","Wool"),        DisplayName = "Spore Wool",   Icon = "🧶", DurabilityMul = 0.70f, DecayRateMul = 1.10f, ValueMul = 1.00f },
 
             // ── Magic ───────────────────────────────────────────────────
             new() { Key = new("Magic","RawEssence"),   DisplayName = "Raw Essence",   Icon = "✨", DurabilityMul = 0.50f, DecayRateMul = 1.50f, ValueMul = 1.50f },

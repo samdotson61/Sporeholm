@@ -107,6 +107,31 @@ namespace Sporeholm.Simulation.Items
             return sum;
         }
 
+        // v0.8.7 — total by MATERIAL (family + optional material subtype),
+        // mirroring ConsumeByMaterial's matching. The bill availability gate
+        // needs this: recipes constrain ingredients by material subtype (e.g.
+        // Wood/DeadWood, Stone/Granite, Cloth/Mossleaf), but a gathered item's
+        // ITEM SubType is "WoodLog"/"StoneBlock"/"MossCloth" — so the old
+        // TotalBySubType (which matches item SubType) reported zero for every
+        // material-subtype recipe, making them un-selectable even with a full
+        // stockpile. This matches Material.Family + Material.SubType instead.
+        public int TotalByMaterial(ItemKind kind, string materialFamily, string? subType)
+        {
+            int sum = 0;
+            lock (_lock)
+            {
+                for (int i = 0; i < _items.Count; i++)
+                {
+                    var it = _items[i];
+                    if (it.Kind != kind) continue;
+                    if (it.Material.Family != materialFamily) continue;
+                    if (subType != null && it.Material.SubType != subType) continue;
+                    sum += it.Quantity;
+                }
+            }
+            return sum;
+        }
+
         // Main-thread snapshot of the entire inventory. Returns a flat list
         // of InventoryRow value structs that the UI can walk without
         // worrying about concurrent sim-thread writes. Allocates one

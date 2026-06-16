@@ -101,7 +101,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Bone", 2),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Tool, "Knife", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Tool, "Knife", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    540,
                 PrimarySkill: "Crafting",
@@ -167,7 +167,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Food,  "Plant", 1, RequiredSubType: "HerbCluster"),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Magic, "MagicHerbPoultice", "Magic", "Essence", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Magic, "MagicHerbPoultice", "Magic", "RawEssence", 1, RollQuality: true),
                 },
                 WorkTicks:    480,
                 PrimarySkill:   "Crafting",
@@ -360,7 +360,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Wood", 1, RequiredSubType: "DeadWood"),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Tool, "Pick", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Tool, "Pick", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    480,
                 PrimarySkill: "Crafting",
@@ -409,7 +409,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Wood", 1, RequiredSubType: "DeadWood"),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Tool, "Hammer", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Tool, "Hammer", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    380,
                 PrimarySkill: "Crafting",
@@ -443,7 +443,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Wood", 1, RequiredSubType: "DeadWood"),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Tool, "Sickle", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Tool, "Sickle", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    420,
                 PrimarySkill: "Crafting",
@@ -479,7 +479,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Stone", 1),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Tool, "Focus", "Magic", "Crystal", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Tool, "Focus", "Magic", "CrystalShard", 1, RollQuality: true),
                 },
                 WorkTicks:    660,
                 PrimarySkill: "Crafting",
@@ -562,7 +562,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Wood", 1, RequiredSubType: "DeadWood"),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Weapon, "Spear", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Weapon, "Spear", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    480,
                 PrimarySkill: "Crafting",
@@ -610,7 +610,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Bone", 2),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Weapon, "Club", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Weapon, "Club", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    380,
                 PrimarySkill: "Crafting",
@@ -684,7 +684,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Plant", 2, RequiredSubType: "Cuttings"),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Weapon, "Bow", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Weapon, "Bow", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    720,
                 PrimarySkill: "Crafting",
@@ -735,7 +735,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Bone", 1),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Weapon, "Atlatl", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Weapon, "Atlatl", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    340,
                 PrimarySkill: "Crafting",
@@ -769,7 +769,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Wood", 1, RequiredSubType: "DeadWood"),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Weapon, "Sword", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Weapon, "Sword", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    600,
                 PrimarySkill: "Crafting",
@@ -803,7 +803,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Wood", 1, RequiredSubType: "DeadWood"),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Weapon, "Axe", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Weapon, "Axe", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    480,
                 PrimarySkill: "Crafting",
@@ -867,7 +867,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Wood", 1, RequiredSubType: "DeadWood"),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Apparel, "Shield", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Apparel, "Shield", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    540,
                 PrimarySkill: "Crafting",
@@ -907,7 +907,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Hide", 2),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Apparel, "Hat", "Hide", "Hide", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Apparel, "Hat", "Hide", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    300,
                 PrimarySkill: "Crafting",
@@ -923,7 +923,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Cloth", 1),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Apparel, "Hat", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Apparel, "Hat", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    380,
                 PrimarySkill: "Crafting",
@@ -954,7 +954,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Hide", 3),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Apparel, "Cloak", "Hide", "Hide", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Apparel, "Cloak", "Hide", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    440,
                 PrimarySkill: "Crafting",
@@ -970,7 +970,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Cloth", 1),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Apparel, "Cloak", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Apparel, "Cloak", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    560,
                 PrimarySkill: "Crafting",
@@ -1001,7 +1001,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Hide", 2),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Apparel, "Boots", "Hide", "Hide", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Apparel, "Boots", "Hide", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    340,
                 PrimarySkill: "Crafting",
@@ -1017,7 +1017,7 @@ namespace Sporeholm.Simulation.Crafting
                     new RecipeIngredient(ItemKind.Material, "Hide", 1),
                 },
                 Outputs:      new[] {
-                    new RecipeOutput(ItemKind.Apparel, "Boots", "Bone", "Bone", 1, RollQuality: true),
+                    new RecipeOutput(ItemKind.Apparel, "Boots", "Bone", "Generic", 1, RollQuality: true),
                 },
                 WorkTicks:    420,
                 PrimarySkill: "Crafting",

@@ -7,6 +7,22 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.7] — 2026-06-16 — Crafting materials made consistent
+
+A correctness pass on how crafted items carry their material — and a fix that lets the workbench actually offer the recipes it should.
+
+### Crafted gear now reflects its material
+- Every crafted weapon, tool, shield, and armor piece now resolves a real material instead of falling back to a flat default. A bone spear reads as Bone (and gets bone's toughness); a moss-cloth hat reads as Moss Cloth; a hide cloak as Hide. Names and durability now match the material you built it from.
+- The material registry was reconciled so the cloths the game actually produces — Moss Cloth, Grass Linen, Spore Wool — are real, named materials, and crafted bone/hide gear shares the same material identity as the bone and hide you get from butchery. Prepared meals and magic items resolve cleanly too.
+- Sheared wool is now consistently Spore Wool instead of a random fabric.
+
+### Crafting menu fix (important)
+- Recipes that call for a specific material — everything needing wood, plus the cloth sling and basket and the stone-refining recipes — were silently never offered at the workbench, even with a full stockpile, because the "do we have the ingredients?" check compared the wrong field. They are now correctly available to craft. (Recipes needing only a broad material family — most bone gear and all cooking — were unaffected and always worked.)
+
+Build clean, 0 warnings / 0 errors; both the material reconciliation and the availability fix were adversarially reviewed end-to-end (no bugs found).
+
+---
+
 ## [0.8.6] — 2026-06-16 — Gear consistency + craftable armor
 
 A consistency-and-playability pass on weapons, tools, and armor.
