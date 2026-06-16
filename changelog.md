@@ -7,6 +7,20 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.8] — 2026-06-16 — Item materials made consistent
+
+A correctness pass making sure every item carries a sensible material.
+
+### Every item now has an appropriate material
+- Animal products — raw meat, eggs, milk — were being tagged with a random material (a bottle of milk could come out "made of granite," which also left it nearly imperishable). They now carry proper, perishable meat/egg/milk materials, so they spoil at a believable rate.
+- Harvested crops (spring greens, sunberry, pumpkin, and the rest) now carry their own identity as their material instead of a random plant type, so freshness and value are consistent every harvest.
+- Prepared meals are now always tagged "cooked" regardless of the ingredient, matching both cooking paths (auto-cook and the workbench bill) — and a meal made from meat no longer ends up with an invalid material.
+- Under the hood, item creation now prefers an item's own material when it has one, so this whole class of "random material" slip can't recur.
+
+Build clean, 0 warnings / 0 errors; adversarially reviewed end-to-end (no bugs — every item family is now registered, so the random-material fallback is unreachable).
+
+---
+
 ## [0.8.7] — 2026-06-16 — Crafting materials made consistent
 
 A correctness pass on how crafted items carry their material — and a fix that lets the workbench actually offer the recipes it should.

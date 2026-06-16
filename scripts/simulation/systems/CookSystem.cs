@@ -106,7 +106,6 @@ namespace Sporeholm.Simulation.Systems
 			// Here: any Food that isn't a PreparedMeal — i.e. raw food.
 			var raw = r.Inventory.FindFirst(ItemKind.Food, "PreparedMeal");
 			if (raw == null) { s.CurrentTask = null; s.TaskProgressTicks = 0; return; }
-			string sourceMat = raw.Material.SubType;
 			// Consume 4 of any non-PreparedMeal Food.
 			int needed = 4;
 			while (needed > 0)
@@ -121,7 +120,11 @@ namespace Sporeholm.Simulation.Systems
 			var rng = new System.Random();
 			var meal = ItemFactory.Create(
 				ItemKind.Food, "PreparedMeal",
-				new MaterialKey("Plant", sourceMat),
+				// v0.8.8 — a Prepared Meal is "Cooked" regardless of which raw
+				// food fed it; this matches the CookMeal bill output (Plant/Cooked)
+				// so both cook paths produce an identically-tagged meal, and never
+				// an unregistered Plant/<meat> when a meat is the source.
+				new MaterialKey("Plant", "Cooked"),
 				rng,
 				0,
 				skillLevel: cookingSkill,

@@ -139,6 +139,12 @@ namespace Sporeholm.Simulation.Items
             // CookMeal bill output). Cooked food keeps longer than raw biomass
             // but still spoils. Resolves the previously-unregistered Plant/Cooked.
             new() { Key = new("Plant","Cooked"),         DisplayName = "Cooked Meal",    Icon = "🍲", DurabilityMul = 0.50f, DecayRateMul = 2.50f, ValueMul = 1.40f },
+            // v0.8.8 — the Phase 8 farm-crop foods, so a harvested Spring Greens /
+            // Sunberry / Pumpkin carries its OWN identity as its material (matched
+            // by ItemFactory.RollMaterial) instead of a random Plant subtype.
+            new() { Key = new("Plant","SpringGreens"),   DisplayName = "Spring Greens",  Icon = "🥬", DurabilityMul = 0.25f, DecayRateMul = 4.50f, ValueMul = 0.85f },
+            new() { Key = new("Plant","Sunberry"),       DisplayName = "Sunberry",       Icon = "🟠", DurabilityMul = 0.30f, DecayRateMul = 4.00f, ValueMul = 1.00f },
+            new() { Key = new("Plant","Pumpkin"),        DisplayName = "Pumpkin",        Icon = "🎃", DurabilityMul = 0.50f, DecayRateMul = 2.50f, ValueMul = 1.20f },
 
             // ── Cloth (Phase 5+ — registered now for procedural rolls) ──
             new() { Key = new("Cloth","Linen"),       DisplayName = "Linen",      Icon = "🧵", DurabilityMul = 0.65f, DecayRateMul = 1.20f, ValueMul = 0.85f },
@@ -172,6 +178,17 @@ namespace Sporeholm.Simulation.Items
             // Hide remains a Phase 8 placeholder — needs animal corpse +
             // butchery work-task before it can actually drop.
             new() { Key = new("Hide","Generic"),  DisplayName = "Hide",  Icon = "🟫", DurabilityMul = 0.70f, DecayRateMul = 1.30f, ValueMul = 0.90f },
+
+            // ── Meat / animal products (v0.8.8) ────────────────────────────
+            // The Food items Raw Meat / Egg / Milk declare AllowedFamilies
+            // {"Meat"}, but this family had no MaterialDef rows — so a butchered
+            // or produced Meat/Egg/Milk fell through RollMaterial to "any random
+            // registered material" (a Milk could come out tagged Granite). These
+            // give the Meat family real, perishable materials; ItemFactory.Roll-
+            // Material now matches each product to its own (Meat, <SubType>) key.
+            new() { Key = new("Meat","Meat"),  DisplayName = "Meat",  Icon = "🥩", DurabilityMul = 0.30f, DecayRateMul = 4.50f, ValueMul = 1.00f },
+            new() { Key = new("Meat","Egg"),   DisplayName = "Egg",   Icon = "🥚", DurabilityMul = 0.35f, DecayRateMul = 3.50f, ValueMul = 1.00f },
+            new() { Key = new("Meat","Milk"),  DisplayName = "Milk",  Icon = "🥛", DurabilityMul = 0.25f, DecayRateMul = 5.00f, ValueMul = 1.00f },
             // v0.5.16 — Iron + Bronze removed. Shroomps are small mushroom
             // creatures who mine ground-level rocks; refined metalworking
             // doesn't fit the lore. The "iron analog" role is filled by

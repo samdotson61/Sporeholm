@@ -92,6 +92,18 @@ namespace Sporeholm.Simulation.Items
 		// If AllowedFamilies is empty, picks from every registered material.
 		public static MaterialKey RollMaterial(ItemSubTypeDef def, Random rng)
 		{
+			// v0.8.8 — if the item's own SubType names a registered material
+			// within one of its allowed families, use that. A Capberry food is
+			// Plant/Capberry; an Egg is Meat/Egg — so a null-material create
+			// (crop harvest, butchery, produce, starting kits) gets the item's
+			// own identity as its material instead of a random roll. Items whose
+			// subtype isn't a material (Hammer, Pendant, WoodLog, Knife) fall
+			// through to the family roll, where a varied material is correct.
+			for (int i = 0; i < def.AllowedFamilies.Length; i++)
+			{
+				var selfKey = new MaterialKey(def.AllowedFamilies[i], def.SubType);
+				if (MaterialRegistry.Get(selfKey) != null) return selfKey;
+			}
 			if (def.AllowedFamilies.Length > 0)
 			{
 				string fam = def.AllowedFamilies[rng.Next(def.AllowedFamilies.Length)];
