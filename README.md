@@ -78,7 +78,7 @@ Sporeholm is mid-development, but the **core game is playable end-to-end**: you 
 - Sleep on the ground / in beds with mood thoughts (**WellRested**, **SleptInBedroom**, **SleptOnGround**).
 - Visible animations: walking bob, sleeping (lying horizontal), eating (chew animation), bleeding (red drip).
 
-### Wildlife (Phase 6 - v0.6.0)
+### Wildlife (v0.6.0)
 
 The map is populated with **30 species** (15 in v0.6.0, 15 more in v0.8.0a) across friendly, neutral, and hostile dispositions — including mounts (Sky Pony, Shore Frog, Royal Antelope…), shear/egg producers (Hamspore, Honey Bee Swarm), and huntable game (Grumper, Truffleboar, Pygmy Rabbit…). Each has its own sprite, stats, AI behaviour, butcher drops, and agricultural tags; per-individual stats jitter ±10 % at spawn so a pack of three wolves isn't three clones.
 
@@ -92,7 +92,7 @@ Event-only big creatures (Bear / Leopard Tortoise / Tasmanian Mauler / Dragon / 
 
 Click any creature to open the **Entity Card** — a compact inspector showing species, description, health, mood (derived from health % + needs + AI state), and the simplified Nutrition + Rest needs. Updates in real time while open.
 
-### Combat (Phase 7 - v0.7.0)
+### Combat (v0.7.0)
 
 A full body-part combat system layered on the wildlife AI. Shroomps and creatures share one combat engine: a strike resolves through range → accuracy → block → crit → hit-location → armor → damage → wound, and routes into the same body-part / bleeding / downed pipeline as the rest of the sim.
 
@@ -114,20 +114,20 @@ A full body-part combat system layered on the wildlife AI. Shroomps and creature
 - **Per-tick mining** — skill curve activates: a level-0 novice takes ~8 sec / boulder; a level-20 master with a Masterwork Pick clears it in ~0.1 sec.
 - **Tool bonuses**: equipping the right tool for the task (Pick for mining, Sickle for cutting, Sage Staff for Attune) gives a 1.30 × QualityMul speed multiplier.
 
-### Farming (Phase 8 — v0.8.0)
+### Farming (v0.8.0)
 
 - **Farm tool** in the Zones tab: pick a crop, then drag a rectangle over fertile ground (or roofed cave tiles for cave crops) to lay out a grow-zone. The **Grow** work priority drives it (Foragers farm by default; Elders / Caretakers / unassigned colonists fill in).
 - **Nine crops, three Botany tiers**: Simple (Small Mushroom, Cave Moss, Spring Greens — Botany 0), Medium (Capberry, Sunberry, Pumpkin — Botany 3–5), Hard (Magic Herb, Large Mushroom, Magic Flower — Botany 6–9). Each crop chip shows its Botany requirement. Fungal crops yield more underground; the rest favour the surface.
 - **Sow → grow → harvest loop**: crops grow autonomously through five stages (Sown → Sprouting → Growing → Ripening → Ripe) over **2–12 in-game days** depending on tier (v0.8.4 tuned grow times to the day/season calendar). **Botany** gates which crops a colonist can plant and scales the harvest yield. Harvested plots reset and re-sow themselves, so a tended field is a standing food supply.
 - A translucent **grow-zone tint** shades each plot from tilled brown through green to gold when ripe; **hover** for the crop + stage, **click** for a Grow Zone inspector (crop / stage / Botany requirement / yield). The **Remove** brush clears grow-zone cells. Crops persist through save/load.
 
-### Hunting + butchery (Phase 8 — v0.8.1)
+### Hunting + butchery (v0.8.1)
 
 - **Hunt order**: drag a box over wild creatures to mark them. A colonist with the **Hunt** job (Guardians by default, Foragers as backup) pursues and kills each one through the combat engine — only armed, non-pacifist colonists give chase, and a hunter that can't catch fast fleeing prey gives up and moves on. The **Remove** tool cancels a hunt mark.
 - **Carcasses**: a butcherable creature's body stays on the ground (a greyed corpse) instead of vanishing. A colonist butchers it in place into **Meat, Hide, and Bone** (drops vary by species); the **Cooking** skill drives the yield. A built **Butcher Slab** nearby boosts it. Un-butchered carcasses decay away over time.
 - Raw meat is food — it feeds straight into the existing **Cook Meal** recipe. Hunt marks and carcasses persist through save/load.
 
-### Taming + livestock (Phase 8 — v0.8.2)
+### Taming + livestock (v0.8.2)
 
 - **Tame order**: drag a box over tameable wild creatures to mark them. A colonist with the new **Husbandry** job (Caretakers by default; Foragers + Elders help) visits each and tames it over repeated trips — the **Husbandry skill** sets how fast. A marked creature holds still so the handler can walk up; even a marked predator can't lash out mid-tame. The **Remove** tool calls off a taming. Hunt and Tame are mutually exclusive.
 - **Tamed livestock** join the colony: they never turn on you, graze peacefully near home, and are kept fed so they don't starve.
