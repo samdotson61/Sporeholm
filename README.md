@@ -78,7 +78,7 @@ Sporeholm is mid-development, but the **core game is playable end-to-end**: you 
 - Sleep on the ground / in beds with mood thoughts (**WellRested**, **SleptInBedroom**, **SleptOnGround**).
 - Visible animations: walking bob, sleeping (lying horizontal), eating (chew animation), bleeding (red drip).
 
-### Wildlife (v0.6.0)
+### Wildlife (Phase 6 - v0.6.0)
 
 The map is populated with **30 species** (15 in v0.6.0, 15 more in v0.8.0a) across friendly, neutral, and hostile dispositions — including mounts (Sky Pony, Shore Frog, Royal Antelope…), shear/egg producers (Hamspore, Honey Bee Swarm), and huntable game (Grumper, Truffleboar, Pygmy Rabbit…). Each has its own sprite, stats, AI behaviour, butcher drops, and agricultural tags; per-individual stats jitter ±10 % at spawn so a pack of three wolves isn't three clones.
 
@@ -92,7 +92,7 @@ Event-only big creatures (Bear / Leopard Tortoise / Tasmanian Mauler / Dragon / 
 
 Click any creature to open the **Entity Card** — a compact inspector showing species, description, health, mood (derived from health % + needs + AI state), and the simplified Nutrition + Rest needs. Updates in real time while open.
 
-### Combat (Phase 7)
+### Combat (Phase 7 - v0.7.0)
 
 A full body-part combat system layered on the wildlife AI. Shroomps and creatures share one combat engine: a strike resolves through range → accuracy → block → crit → hit-location → armor → damage → wound, and routes into the same body-part / bleeding / downed pipeline as the rest of the sim.
 
