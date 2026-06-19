@@ -503,7 +503,8 @@ namespace Sporeholm.UI
                 t == DesignationToolbar.Tool.BuildTorch              ||
                 t == DesignationToolbar.Tool.BuildCookingTable      ||  // v0.6.2 (Phase 5.6)
                 t == DesignationToolbar.Tool.BuildSparringYard      ||  // v0.7.2
-                t == DesignationToolbar.Tool.BuildTrainingDummy;       // v0.7.2
+                t == DesignationToolbar.Tool.BuildTrainingDummy     ||  // v0.7.2
+                t == DesignationToolbar.Tool.BuildButcherSlab;       // v0.8.1
             _matRow.Visible = isBuildTool;
             if (!isBuildTool) return;
 
@@ -615,7 +616,9 @@ namespace Sporeholm.UI
                 _wallBtn, _floorBtn, _doorBtn, _shelfBtn, _workbenchBtn,
                 _bonfireBtn, _bedBtn, _shrineBtn, _boardBtn, _benchBtn,
                 _tableBtn, _torchBtn, _cookingTableBtn,                 // v0.6.2 (Phase 5.6)
-                _sparringYardBtn, _trainingDummyBtn, _demolishBtn,      // v0.7.2
+                _sparringYardBtn, _trainingDummyBtn,                    // v0.7.2
+                _butcherSlabBtn,                                        // v0.8.1
+                _demolishBtn,
             };
             foreach (var b in all)
             {
@@ -640,6 +643,7 @@ namespace Sporeholm.UI
                 DesignationToolbar.Tool.BuildCookingTable      => _cookingTableBtn, // v0.6.2 (Phase 5.6)
                 DesignationToolbar.Tool.BuildSparringYard      => _sparringYardBtn,  // v0.7.2
                 DesignationToolbar.Tool.BuildTrainingDummy     => _trainingDummyBtn, // v0.7.2
+                DesignationToolbar.Tool.BuildButcherSlab       => _butcherSlabBtn,   // v0.8.1
                 DesignationToolbar.Tool.Demolish               => _demolishBtn,
                 _                                              => null,
             };

@@ -2,7 +2,7 @@
 
 **Sporeholm** is a colony-survival game about a little tribe of mushroom-folk — the **Shroomps** — making a home in a strange fungal world. Designed and developed by **Sam Dotson**.
 
-Current version: **v0.8.8** — in active development.
+Current version: **v0.8.9** — in active development.
 
 ---
 

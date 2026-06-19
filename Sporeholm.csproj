@@ -5,4 +5,12 @@
     <Nullable>enable</Nullable>
     <RootNamespace>Sporeholm</RootNamespace>
   </PropertyGroup>
+
+  <!-- The launcher is a separate .NET solution living under launcher/ (it
+       installs/updates this game). Keep its sources out of the game's compile;
+       a .gdignore in that folder keeps the Godot editor out of it too. -->
+  <ItemGroup>
+    <Compile Remove="launcher\**\*.cs" />
+    <None Remove="launcher\**\*" />
+  </ItemGroup>
 </Project>

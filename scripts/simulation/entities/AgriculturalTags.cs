@@ -32,15 +32,27 @@ namespace Sporeholm.Simulation.Entities
     {
         // The 15 shipped species (v0.6.0). The next 15 (roster expansion to 30)
         // and later tiers add their rows here as they're registered.
+        //
+        // v0.8.9 — tag consumption status (agricultural-audit follow-up):
+        //   CONSUMED by a live system today —
+        //     Tameable, Butcherable, HuntAnimal (tame/hunt designation + corpse keep),
+        //     Milkable, EggLayer, Shearable (auto-produce), Breeds (breeding),
+        //     Grazer (wild graze-recovery).
+        //   RESERVED (assigned as per-species design metadata but read by NO code
+        //   yet — intentional, not bugs; a later phase consumes them) —
+        //     Pet (follow-owner), Pack (haul), Mount (ride), Carnivore / Omnivore
+        //     (pen feeding), War (combat training). Kept on purpose — the plan that
+        //     wires these into real behavior is roadmap "Phase 8.6 — Animal Husbandry
+        //     Depth". Do not treat their orphan status as dead code.
         private static readonly Dictionary<EntityKind, AgriculturalTag> _byKind = new()
         {
             // Friendly / livestock
             [EntityKind.Glowbunny]       = AgriculturalTag.Tameable | AgriculturalTag.Pet | AgriculturalTag.Grazer | AgriculturalTag.Butcherable | AgriculturalTag.Breeds,
             [EntityKind.Shroomgoat]      = AgriculturalTag.Tameable | AgriculturalTag.Grazer | AgriculturalTag.Milkable | AgriculturalTag.Shearable | AgriculturalTag.Butcherable | AgriculturalTag.Breeds,
             [EntityKind.Shroomalo]       = AgriculturalTag.Tameable | AgriculturalTag.Grazer | AgriculturalTag.Milkable | AgriculturalTag.Butcherable | AgriculturalTag.Breeds,
-            [EntityKind.Mouse]           = AgriculturalTag.Tameable | AgriculturalTag.Pet | AgriculturalTag.Omnivore,
+            [EntityKind.Mouse]           = AgriculturalTag.Tameable | AgriculturalTag.Pet | AgriculturalTag.Omnivore | AgriculturalTag.Butcherable,
             [EntityKind.Ladybug]         = AgriculturalTag.Pet,
-            [EntityKind.HermitCrab]      = AgriculturalTag.Tameable | AgriculturalTag.Omnivore,
+            [EntityKind.HermitCrab]      = AgriculturalTag.Tameable | AgriculturalTag.Omnivore | AgriculturalTag.Butcherable,
             // Neutral
             [EntityKind.Squirrel]        = AgriculturalTag.Tameable | AgriculturalTag.Omnivore | AgriculturalTag.Butcherable,
             [EntityKind.BonecrestBeetle] = AgriculturalTag.Butcherable,
@@ -57,19 +69,19 @@ namespace Sporeholm.Simulation.Entities
             // Friendly
             [EntityKind.ShoreFrog]       = AgriculturalTag.Tameable | AgriculturalTag.Mount | AgriculturalTag.Butcherable,
             [EntityKind.HoneyBeeSwarm]   = AgriculturalTag.Tameable | AgriculturalTag.EggLayer | AgriculturalTag.Breeds,
-            [EntityKind.SkyPony]         = AgriculturalTag.Tameable | AgriculturalTag.Mount | AgriculturalTag.Breeds,
-            [EntityKind.Hamspore]        = AgriculturalTag.Tameable | AgriculturalTag.Shearable | AgriculturalTag.Grazer,
-            [EntityKind.Mushroomoise]    = AgriculturalTag.Tameable | AgriculturalTag.Mount | AgriculturalTag.Grazer,
-            [EntityKind.Quokka]          = AgriculturalTag.Tameable | AgriculturalTag.Pet | AgriculturalTag.Grazer | AgriculturalTag.Breeds,
-            [EntityKind.PygmyMarmoset]   = AgriculturalTag.Tameable | AgriculturalTag.Pet,
+            [EntityKind.SkyPony]         = AgriculturalTag.Tameable | AgriculturalTag.Mount | AgriculturalTag.Breeds | AgriculturalTag.Butcherable,
+            [EntityKind.Hamspore]        = AgriculturalTag.Tameable | AgriculturalTag.Shearable | AgriculturalTag.Grazer | AgriculturalTag.Butcherable,
+            [EntityKind.Mushroomoise]    = AgriculturalTag.Tameable | AgriculturalTag.Mount | AgriculturalTag.Grazer | AgriculturalTag.Butcherable,
+            [EntityKind.Quokka]          = AgriculturalTag.Tameable | AgriculturalTag.Pet | AgriculturalTag.Grazer | AgriculturalTag.Breeds | AgriculturalTag.Butcherable,
+            [EntityKind.PygmyMarmoset]   = AgriculturalTag.Tameable | AgriculturalTag.Pet | AgriculturalTag.Butcherable,
             [EntityKind.Hamster]         = AgriculturalTag.Tameable | AgriculturalTag.Grazer | AgriculturalTag.Butcherable,
             // Neutral
             [EntityKind.Grumper]         = AgriculturalTag.HuntAnimal | AgriculturalTag.Butcherable,
             [EntityKind.PygmyRabbit]     = AgriculturalTag.Tameable | AgriculturalTag.Grazer | AgriculturalTag.Breeds | AgriculturalTag.Butcherable,
             [EntityKind.Truffleboar]     = AgriculturalTag.Tameable | AgriculturalTag.HuntAnimal | AgriculturalTag.War | AgriculturalTag.Omnivore | AgriculturalTag.Butcherable,
             [EntityKind.RoyalAntelope]   = AgriculturalTag.Tameable | AgriculturalTag.Mount | AgriculturalTag.Grazer | AgriculturalTag.Butcherable,
-            [EntityKind.PygmyTortoise]   = AgriculturalTag.Tameable | AgriculturalTag.Mount | AgriculturalTag.Pack,
-            [EntityKind.MeerkatSentry]   = AgriculturalTag.Tameable | AgriculturalTag.Pet | AgriculturalTag.Pack,
+            [EntityKind.PygmyTortoise]   = AgriculturalTag.Tameable | AgriculturalTag.Mount | AgriculturalTag.Pack | AgriculturalTag.Butcherable,
+            [EntityKind.MeerkatSentry]   = AgriculturalTag.Tameable | AgriculturalTag.Pet | AgriculturalTag.Pack | AgriculturalTag.Butcherable,
             // Hostile
             [EntityKind.FennecFox]       = AgriculturalTag.Tameable | AgriculturalTag.Carnivore | AgriculturalTag.HuntAnimal | AgriculturalTag.Butcherable,
         };

@@ -1,0 +1,13 @@
+{
+  "version": "v0.8.9",
+  "channel": "stable",
+  "notes": "Sample manifest — replace with a real release produced by scripts/package-release.ps1.",
+  "releasedUtc": "2026-06-16T00:00:00Z",
+  "files": {
+    "windows": {
+      "name": "Sporeholm-windows.zip",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 0
+    }
+  }
+}

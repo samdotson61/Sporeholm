@@ -1,0 +1,55 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="SporeholmLauncher.App.Views.SettingsWindow"
+        Title="Settings" Width="520" Height="600"
+        Background="#1b1d23" WindowStartupLocation="CenterOwner">
+
+  <Grid Margin="22" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+
+    <TextBlock Grid.Row="0" Text="Settings" FontSize="22" FontWeight="Bold" Foreground="#7fd17a" Margin="0,0,0,18"/>
+
+    <!-- Updates -->
+    <StackPanel Grid.Row="1" Spacing="10" Margin="0,0,0,18">
+      <CheckBox x:Name="AutoUpdateBox" Content="Automatically install updates" Foreground="#cdd2da" Click="OnAutoUpdate"
+                ToolTip.Tip="When on, a newer release is installed on open without asking. When off, the launcher asks first."/>
+      <CheckBox x:Name="OfflineBox" Content="Offline — never check for updates" Foreground="#cdd2da" Click="OnOffline"
+                ToolTip.Tip="Play the installed build without touching the network."/>
+    </StackPanel>
+
+    <!-- Release picker -->
+    <StackPanel Grid.Row="2" Spacing="6" Margin="0,0,0,18">
+      <TextBlock Text="Release" FontWeight="SemiBold" Foreground="#9aa0aa"/>
+      <ComboBox x:Name="ReleaseBox" HorizontalAlignment="Stretch" SelectionChanged="OnReleaseChanged"
+                ToolTip.Tip="Which uploaded release to install. 'Latest' always tracks the newest."/>
+      <TextBlock x:Name="ReleaseHint" FontSize="11" Foreground="#9aa0aa" TextWrapping="Wrap" Text=""/>
+    </StackPanel>
+
+    <!-- Rollback -->
+    <Button Grid.Row="3" x:Name="RollbackBtn" Content="Roll back to previous build" Margin="0,0,0,18"
+            Click="OnRollback" ToolTip.Tip="Revert to the build you had before the last update."/>
+
+    <!-- Mods -->
+    <Grid Grid.Row="4" RowDefinitions="Auto,*,Auto">
+      <TextBlock Grid.Row="0" Text="Mods" FontWeight="SemiBold" Foreground="#9aa0aa" Margin="0,0,0,6"/>
+      <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
+        <ListBox x:Name="ModsList" Grid.Column="0" SelectionMode="Single"
+                 ToolTip.Tip="Installed mods, in load order. ✓ = enabled."/>
+        <StackPanel Grid.Column="1" Spacing="6" Margin="10,0,0,0">
+          <Button Content="Enable"  Width="84" Click="OnModEnable"/>
+          <Button Content="Disable" Width="84" Click="OnModDisable"/>
+          <Button Content="Up"      Width="84" Click="OnModUp"/>
+          <Button Content="Down"    Width="84" Click="OnModDown"/>
+        </StackPanel>
+      </Grid>
+      <TextBlock Grid.Row="2" x:Name="ModsHint" FontSize="11" Foreground="#9aa0aa" TextWrapping="Wrap" Margin="0,6,0,0"/>
+    </Grid>
+
+    <!-- Footer -->
+    <Grid Grid.Row="5" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
+      <TextBlock Grid.Column="0" x:Name="SourceInfo" FontSize="11" Foreground="#6b7280"
+                 VerticalAlignment="Center" TextWrapping="Wrap"/>
+      <Button Grid.Column="1" Content="Close" MinWidth="84" Click="OnClose"/>
+    </Grid>
+
+  </Grid>
+</Window>

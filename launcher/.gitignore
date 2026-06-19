@@ -1,0 +1,12 @@
+# .NET build output
+bin/
+obj/
+
+# Publish + release output
+dist/
+release/
+
+# IDE
+.vs/
+.idea/
+*.user

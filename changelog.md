@@ -7,6 +7,23 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.9] — 2026-06-16 — Agricultural audit fixes
+
+Consistency fixes from a full audit of the farming-and-animals systems.
+
+### Butchering
+- Nine tameable/huntable creatures — Sky Pony, Hamspore, Mushroomoise, Quokka, Pygmy Tortoise, Mouse, Hermit Crab, Pygmy Marmoset, and Meerkat Sentry — were statted to drop meat, hide, and bone, but a missing flag meant their corpses were cleared before they could be butchered (and they couldn't be hunt-marked at all). They can now be hunted and butchered for the food and materials they were always meant to give. The few creatures that intentionally leave no usable corpse (Ladybug, Honey Bee Swarm, Magic Wisp) are unchanged.
+
+### Build menu
+- The Butcher Slab now correctly shows its material options and highlights as the selected tool in the Build panel — its button was present but not fully wired into the panel's material row and selection state.
+
+### Internal
+- Six forward-looking creature role tags (pet, pack, mount, carnivore, omnivore, war-trainable) that aren't wired to behaviour yet were documented as reserved, so they read as intentional rather than dead code.
+
+Build clean, 0 warnings / 0 errors; the butcher fix was independently re-derived and verified (exactly the nine intended species changed, no side effects, no save impact).
+
+---
+
 ## [0.8.8] — 2026-06-16 — Item materials made consistent
 
 A correctness pass making sure every item carries a sensible material.
