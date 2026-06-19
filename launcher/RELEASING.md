@@ -124,6 +124,25 @@ should read **Installed: vX.Y.Z** (from the stamped `version.txt`) and show **Up
 
 ---
 
+## Code signing (removes the OS "unknown developer" warnings)
+
+Builds run unsigned, but each OS warns on first launch until signed.
+
+- **macOS** — run [`scripts/sign-macos.sh`](scripts/sign-macos.sh) **on a Mac** with a *Developer ID
+  Application* cert (Apple Developer Program). It signs (hardened runtime + .NET entitlements),
+  notarizes, staples, re‑zips (keeping `version.txt`), updates the manifest checksum, and
+  re‑uploads — after which Gatekeeper accepts it silently. One‑time: `xcrun notarytool
+  store-credentials sporeholm-notary …` (see the script header).
+- **Windows** — needs a separate code‑signing certificate (Apple's program does **not** cover
+  Windows). Options: **Azure Trusted Signing** (~$10/mo, cloud, no token), an **OV** cert
+  (~$200–350/yr, now on a USB/HSM token), or **EV** (instant SmartScreen trust, ~$300–500/yr,
+  token). Self‑signing does **not** clear SmartScreen. Once you have one, sign with
+  `signtool sign /fd SHA256 /tr <rfc3161-url> /td SHA256 …` the launcher `.exe` + the game
+  `Sporeholm.exe`, then re‑package/re‑upload. Until then the `.exe` still runs — SmartScreen
+  shows "More info → Run anyway."
+
+---
+
 ## Players: how they get it
 
 1. Download `SporeholmLauncher.exe` (from the release assets, or wherever you host the launcher).
