@@ -31,6 +31,7 @@ param(
     [string] $LinuxBuild,
     [string] $MacBuild,
     [string] $OutDir = (Join-Path $PSScriptRoot '..\release'),
+    [string] $LauncherDist = (Join-Path $PSScriptRoot '..\dist'),   # build-launcher.ps1 + make-mac-app.ps1 output
     [string] $Channel = 'stable',
     [string] $Notes,
     [switch] $Publish,
@@ -63,6 +64,36 @@ function Resolve-Notes {
         $excerpt += $lines[$j]
     }
     return ($excerpt -join "`n").Trim()
+}
+
+# Build the manifest's "launcher" section: each OS's launcher binary (so the launcher can
+# update ITSELF), keyed by the asset name it's uploaded under. Returns $null if none are built.
+function Resolve-LauncherManifest {
+    $map = [ordered]@{
+        windows = @{ path = (Join-Path $LauncherDist 'win-x64\SporeholmLauncher.exe'); name = 'SporeholmLauncher.exe' }
+        linux   = @{ path = (Join-Path $LauncherDist 'linux-x64\SporeholmLauncher');   name = 'SporeholmLauncher-linux' }
+        macos   = @{ path = (Join-Path $LauncherDist 'SporeholmLauncher-macos.zip');   name = 'SporeholmLauncher-macos.zip' }
+    }
+    $lfiles = @{}
+    foreach ($os in $map.Keys) {
+        $p = $map[$os].path
+        if (Test-Path $p) {
+            $lfiles[$os] = [ordered]@{
+                name   = $map[$os].name
+                sha256 = (Get-FileHash -Algorithm SHA256 -Path $p).Hash.ToLower()
+                size   = (Get-Item $p).Length
+            }
+        }
+    }
+    if ($lfiles.Count -eq 0) { return $null }
+
+    $lver = '0.0.0'
+    $info = Join-Path $GameRepo 'launcher\src\SporeholmLauncher.Core\LauncherInfo.cs'
+    if (Test-Path $info) {
+        $m = Select-String -Path $info -Pattern 'Version\s*=\s*"([^"]+)"' | Select-Object -First 1
+        if ($m) { $lver = $m.Matches[0].Groups[1].Value }
+    }
+    return [ordered]@{ version = $lver; files = $lfiles }
 }
 
 # Drop a version.txt at the root of the zip (without touching the caller's export
@@ -112,6 +143,11 @@ $manifest = [ordered]@{
     notes       = $notes
     releasedUtc = (Get-Date).ToUniversalTime().ToString('o')
     files       = $files
+}
+$launcherManifest = Resolve-LauncherManifest
+if ($launcherManifest) {
+    $manifest['launcher'] = $launcherManifest
+    Write-Host "  launcher manifest: v$($launcherManifest.version) ($($launcherManifest.files.Count) OS) — enables launcher self-update"
 }
 $manifestName = if ($Channel -eq 'stable') { 'manifest.json' } else { "manifest-$Channel.json" }
 $manifestPath = Join-Path $OutDir $manifestName

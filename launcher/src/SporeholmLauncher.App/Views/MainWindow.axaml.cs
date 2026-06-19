@@ -13,6 +13,7 @@ public partial class MainWindow : Window
     private LauncherConfig _cfg = LauncherConfig.Load();
     private UpdateCheck? _latest;
     private bool _busy;
+    private bool _selfUpdateChecked;
 
     private enum Mode { None, Install, Play }
     private Mode _mode = Mode.None;
@@ -45,6 +46,14 @@ public partial class MainWindow : Window
         try
         {
             _latest = await new Updater(source, _cfg.Channel).CheckAsync();
+
+            // Keep the launcher itself current before it manages the game.
+            if (!_selfUpdateChecked)
+            {
+                _selfUpdateChecked = true;
+                if (await TrySelfUpdateAsync(source, _latest.Manifest)) return;   // updating → this instance exits
+            }
+
             var shownInstalled = _latest.IsInstalled ? InstalledLabel(_latest.InstalledVersion) : "(none)";
             VersionLine.Text = $"Installed: {shownInstalled}    •    {relLabel}: {_latest.LatestVersion}";
             await LoadNewsAsync(source);
@@ -152,6 +161,43 @@ public partial class MainWindow : Window
         {
             SetProgress(false);
             SetBusy(false);
+        }
+    }
+
+    // ---- launcher self-update --------------------------------------------
+
+    /// <summary>If the release advertises a newer launcher, update the launcher itself
+    /// (download → verify → swap → relaunch). Returns true if it restarted (this instance exits).</summary>
+    private async Task<bool> TrySelfUpdateAsync(IReleaseSource source, Manifest? manifest)
+    {
+        if (manifest == null) return false;
+        var su = new LauncherSelfUpdater(source);
+        if (!su.Available(manifest, out var latest, out var file)) return false;
+
+        if (!_cfg.AutoUpdate)
+        {
+            var go = await Confirm(
+                $"A new launcher ({latest}) is available — you have {LauncherInfo.Version}.\n\nUpdate the launcher now?",
+                "Update", "Later");
+            if (!go) return false;
+        }
+
+        SetBusy(true);
+        try
+        {
+            SetProgress(true, 0, "Updating launcher…");
+            var progress = new Progress<UpdateProgress>(p => Dispatcher.UIThread.Post(() =>
+            { StatusText.Text = p.Message; Progress.Value = p.Fraction; }));
+            await su.ApplyAsync(file!, progress);
+            Environment.Exit(0);   // the new launcher has started — quit this old instance
+            return true;
+        }
+        catch (Exception ex)
+        {
+            SetProgress(false);
+            SetBusy(false);
+            await Note($"Couldn't update the launcher automatically:\n{ex.Message}\n\nYou can grab the latest launcher from the releases page.");
+            return false;
         }
     }
 

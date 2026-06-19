@@ -22,6 +22,21 @@ public sealed class Manifest
         new(StringComparer.OrdinalIgnoreCase);
 
     public ManifestFile? FileFor(string os) => Files.TryGetValue(os, out var f) ? f : null;
+
+    /// <summary>Optional: the launcher's own latest version + per-OS download, so the launcher
+    /// can update itself the same way it updates the game. Absent on older releases.</summary>
+    public LauncherManifest? Launcher { get; set; }
+}
+
+/// <summary>The launcher's own published version + per-OS binary (windows: the .exe;
+/// linux: the bare binary; macos: the .app zip).</summary>
+public sealed class LauncherManifest
+{
+    public string Version { get; set; } = "";
+    public Dictionary<string, ManifestFile> Files { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public ManifestFile? FileFor(string os) => Files.TryGetValue(os, out var f) ? f : null;
 }
 
 public sealed class ManifestFile

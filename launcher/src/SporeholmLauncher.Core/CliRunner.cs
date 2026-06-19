@@ -17,6 +17,7 @@ public static class CliRunner
                 "status"   => await Status(cfg, @out, ct),
                 "check"    => await Check(cfg, @out, ct),
                 "update"   => await Update(cfg, @out, ct),
+                "self-update" => await SelfUpdate(cfg, @out, ct),
                 "play"     => await Play(cfg, @out, ct),
                 "news"     => await News(cfg, @out, ct),
                 "releases" => await Releases(cfg, @out, ct),
@@ -42,6 +43,7 @@ public static class CliRunner
         var installedLabel = (GameLauncher.InstalledVersion() ?? installed.Version)
                              ?? (detected ? "(detected build — no version record)" : "(none)");
         o.WriteLine($"Installed : {installedLabel}");
+        o.WriteLine($"Launcher  : v{LauncherInfo.Version}");
         o.WriteLine($"Game dir  : {LauncherPaths.InstallDir}{(detected ? "  [build present]" : "  [no build]")}");
         o.WriteLine($"Data dir  : {LauncherPaths.DataDir}{(LauncherPaths.IsPortable ? "  [portable]" : "")}");
         o.WriteLine($"OS        : {LauncherPaths.CurrentOs}");
@@ -52,6 +54,9 @@ public static class CliRunner
         {
             var check = await new Updater(ReleaseSourceFactory.Create(cfg), cfg.Channel).CheckAsync(ct);
             o.WriteLine($"Latest    : {check.LatestVersion}  ({check.State})");
+            if (check.Manifest?.Launcher is { } lm && !string.IsNullOrEmpty(lm.Version)
+                && SemVer.Parse(lm.Version) > SemVer.Parse(LauncherInfo.Version))
+                o.WriteLine($"Launcher  : update available → {lm.Version}  (run 'self-update')");
         }
         catch (Exception ex) { o.WriteLine($"Latest    : (could not reach source: {ex.Message})"); }
         return 0;
@@ -88,6 +93,27 @@ public static class CliRunner
         var progress = new Progress<UpdateProgress>(p => o.WriteLine($"  [{p.Phase}] {p.Message}"));
         await updater.ApplyAsync(check.Manifest!, check.File!, progress, ct);
         o.WriteLine($"Done. Installed {check.LatestVersion}.");
+        return 0;
+    }
+
+    private static async Task<int> SelfUpdate(LauncherConfig cfg, TextWriter o, CancellationToken ct)
+    {
+        if (cfg.Offline) { o.WriteLine("Offline mode — not checking for a launcher update."); return 0; }
+        var source = ReleaseSourceFactory.Create(cfg);
+        Manifest manifest;
+        try { manifest = await source.GetManifestAsync(cfg.Channel, ct); }
+        catch (Exception ex) { o.WriteLine($"Could not reach the source: {ex.Message}"); return 1; }
+
+        var su = new LauncherSelfUpdater(source);
+        if (!su.Available(manifest, out var latest, out var file))
+        {
+            o.WriteLine($"Launcher is up to date (v{LauncherInfo.Version}).");
+            return 0;
+        }
+        o.WriteLine($"Updating launcher v{LauncherInfo.Version} → {latest}…");
+        var progress = new Progress<UpdateProgress>(p => o.WriteLine($"  [{p.Phase}] {p.Message}"));
+        await su.ApplyAsync(file!, progress, ct);
+        o.WriteLine("Launcher updated — the new version has been started.");
         return 0;
     }
 
@@ -209,6 +235,7 @@ public static class CliRunner
   status              show installed + latest version and the update source
   check               check for an update (exit 10 if one is available)
   update              download + verify + install the latest build (keeps a rollback)
+  self-update         update the launcher itself to the latest published version
   play                update (if auto-update on) then launch the game
   news                show the changelog / news feed from the update source
   releases            list the GitHub releases you can install (* = selected)
