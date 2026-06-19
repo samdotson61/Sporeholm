@@ -1,26 +1,22 @@
 #!/usr/bin/env bash
 #
-# Sign + notarize + staple the macOS Sporeholm build, then refresh the release.
-# RUN THIS ON YOUR MAC (it uses Apple's codesign / notarytool / stapler, which only
-# exist on macOS). You need:
-#   • Xcode Command Line Tools          ->  xcode-select --install
-#   • A "Developer ID Application" cert  ->  developer.apple.com → Certificates (in your login keychain)
+# Sign + notarize + staple BOTH macOS artifacts — the game (Sporeholm.app) and the launcher
+# (SporeholmLauncher.app) — then refresh the release so Gatekeeper opens them without warnings.
+#
+# RUN THIS ON YOUR MAC (codesign / notarytool / stapler are macOS-only). You need:
+#   • Xcode Command Line Tools           ->  xcode-select --install
+#   • A "Developer ID Application" cert   ->  developer.apple.com → Certificates (in your login keychain)
 #   • A notarization credential profile, set up ONCE:
 #
 #       xcrun notarytool store-credentials sporeholm-notary \
-#           --apple-id "you@example.com" --team-id "YOURTEAMID" \
-#           --password "app-specific-password"
+#           --apple-id "you@example.com" --team-id "YOURTEAMID" --password "app-specific-password"
 #
 #     (app-specific password: appleid.apple.com → Sign-In and Security → App-Specific Passwords)
-#     (team id: developer.apple.com → Membership)
 #
-# Usage:
-#   ./sign-macos.sh                         # downloads Sporeholm-macos.zip from the latest release
-#   ./sign-macos.sh /path/Sporeholm-macos.zip
-#
-# What it does: extract → sign every Mach-O inside-out with hardened runtime +
-# .NET entitlements → notarize → staple → re-zip (keeping version.txt) → recompute
-# the SHA-256 → patch manifest.json → re-upload the signed zip + manifest to the release.
+# For each artifact it: download → sign every Mach-O inside-out with the hardened runtime +
+# .NET JIT entitlements → notarize → staple → re-zip (preserving version.txt / bundle perms) →
+# recompute the SHA-256. Finally it patches manifest.json (both the game and launcher macOS
+# checksums) and re-uploads the two signed zips + manifest.
 #
 set -euo pipefail
 
@@ -28,30 +24,14 @@ REPO="samdotson61/Sporeholm"
 TAG="v0.8.9"
 PROFILE="${NOTARY_PROFILE:-sporeholm-notary}"
 WORK="$(mktemp -d)"
-OUT="$PWD/Sporeholm-macos.zip"          # signed result (same asset name → ready to re-upload)
 trap 'rm -rf "$WORK"' EXIT
-
 say() { printf '\n\033[1;32m==>\033[0m %s\n' "$*"; }
 
-# 1. Get the unsigned build -----------------------------------------------------
-SRC="${1:-}"
-if [ -z "$SRC" ]; then
-  say "Downloading Sporeholm-macos.zip from the latest release…"
-  curl -fL "https://github.com/$REPO/releases/latest/download/Sporeholm-macos.zip" -o "$WORK/in.zip"
-  SRC="$WORK/in.zip"
-fi
-mkdir -p "$WORK/build"
-ditto -x -k "$SRC" "$WORK/build"
-APP="$(find "$WORK/build" -maxdepth 2 -name '*.app' -type d | head -1)"
-[ -n "$APP" ] || { echo "ERROR: no .app found inside $SRC"; exit 1; }
-say "App bundle: $APP"
-
-# 2. Find the Developer ID Application identity ---------------------------------
+# ---- identity + entitlements -------------------------------------------------
 IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)".*/\1/')}"
-[ -n "$IDENTITY" ] || { echo "ERROR: no 'Developer ID Application' certificate in your keychain. Create one at developer.apple.com → Certificates."; exit 1; }
+[ -n "$IDENTITY" ] || { echo "ERROR: no 'Developer ID Application' certificate in your keychain."; exit 1; }
 say "Signing identity: $IDENTITY"
 
-# 3. Entitlements — a .NET/Mono app JITs under the hardened runtime -------------
 ENT="$WORK/entitlements.plist"
 cat > "$ENT" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -64,62 +44,89 @@ cat > "$ENT" <<'EOF'
 </dict></plist>
 EOF
 
-# 4. Sign inside-out: every nested Mach-O first, then the main exe + bundle ------
-say "Signing nested binaries (this takes a moment — there are many .NET dylibs)…"
-while IFS= read -r f; do
-  if file "$f" | grep -q 'Mach-O'; then
-    codesign --force --timestamp --options runtime -s "$IDENTITY" "$f" >/dev/null
-  fi
-done < <(find "$APP" -type f)
+# Sign a .app inside-out: every nested Mach-O, then the .NET executables in MacOS/ with
+# entitlements (they JIT), then the bundle. Works for the game (Mach-O main) and the
+# launcher (script trampoline main + arm64/x64 Mach-O binaries beside it).
+sign_app() {
+  local app="$1"
+  while IFS= read -r f; do
+    if file "$f" | grep -q 'Mach-O'; then
+      codesign --force --timestamp --options runtime -s "$IDENTITY" "$f" >/dev/null
+    fi
+  done < <(find "$app/Contents" -type f)
+  for f in "$app/Contents/MacOS/"*; do
+    if [ -f "$f" ] && file "$f" | grep -q 'Mach-O'; then
+      codesign --force --timestamp --options runtime --entitlements "$ENT" -s "$IDENTITY" "$f" >/dev/null
+    fi
+  done
+  codesign --force --timestamp --options runtime --entitlements "$ENT" -s "$IDENTITY" "$app"
+  codesign --verify --deep --strict --verbose=2 "$app"
+}
 
-MAIN="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")"
-codesign --force --timestamp --options runtime --entitlements "$ENT" -s "$IDENTITY" "$MAIN" >/dev/null
-codesign --force --timestamp --options runtime --entitlements "$ENT" -s "$IDENTITY" "$APP"
-say "Verifying signature…"
-codesign --verify --deep --strict --verbose=2 "$APP"
+# Download an asset, sign + notarize + staple its .app, re-zip; sets OUT_SHA / OUT_SIZE / OUT_ZIP.
+process() {
+  local asset="$1" sub="$2"
+  local dir="$WORK/$sub"; mkdir -p "$dir/x"
+  say "Artifact: $asset"
+  curl -fL "https://github.com/$REPO/releases/latest/download/$asset" -o "$dir/in.zip"
+  ditto -x -k "$dir/in.zip" "$dir/x"
+  local app; app="$(find "$dir/x" -maxdepth 2 -name '*.app' -type d | head -1)"
+  [ -n "$app" ] || { echo "ERROR: no .app inside $asset"; exit 1; }
 
-# 5. Notarize (submit a zip of just the .app) + staple --------------------------
-say "Submitting to Apple notary service (can take a few minutes)…"
-ditto -c -k --keepParent "$APP" "$WORK/notarize.zip"
-xcrun notarytool submit "$WORK/notarize.zip" --keychain-profile "$PROFILE" --wait
-say "Stapling the notarization ticket…"
-xcrun stapler staple "$APP"
-spctl -a -vvv -t install "$APP" || true     # should print: accepted, source=Notarized Developer ID
+  say "Signing $app …"
+  sign_app "$app"
+  say "Notarizing (a few minutes)…"
+  ditto -c -k --keepParent "$app" "$dir/n.zip"
+  xcrun notarytool submit "$dir/n.zip" --keychain-profile "$PROFILE" --wait
+  xcrun stapler staple "$app"
+  spctl -a -vvv -t install "$app" || true
 
-# 6. Re-zip the build (Sporeholm.app + version.txt) with ditto (preserves perms) -
-say "Re-zipping the signed build…"
-rm -f "$OUT"
-ditto -c -k "$WORK/build" "$OUT"             # zips the CONTENTS → Sporeholm.app + version.txt at root
+  local out="$PWD/$asset"; rm -f "$out"
+  ditto -c -k "$dir/x" "$out"            # preserve structure (game: app + version.txt; launcher: app)
+  OUT_ZIP="$out"
+  OUT_SHA="$(shasum -a 256 "$out" | awk '{print $1}')"
+  OUT_SIZE="$(stat -f%z "$out")"
+  say "Signed → $out   sha=$OUT_SHA   size=$OUT_SIZE"
+}
 
-SHA="$(shasum -a 256 "$OUT" | awk '{print $1}')"
-SIZE="$(stat -f%z "$OUT")"
-say "Signed zip: $OUT"
-echo "    sha256 = $SHA"
-echo "    size   = $SIZE bytes"
+# ---- sign both artifacts -----------------------------------------------------
+process "Sporeholm-macos.zip" game
+GAME_SHA="$OUT_SHA"; GAME_SIZE="$OUT_SIZE"; GAME_ZIP="$OUT_ZIP"
 
-# 7. Patch manifest.json (macOS sha/size must match the new zip) + re-upload -----
+process "SporeholmLauncher-macos.zip" launcher
+LAUNCHER_SHA="$OUT_SHA"; LAUNCHER_SIZE="$OUT_SIZE"; LAUNCHER_ZIP="$OUT_ZIP"
+
+# ---- patch manifest (game + launcher macOS checksums) + re-upload -------------
 if command -v gh >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
-  say "Updating manifest.json and re-uploading to the release…"
+  say "Updating manifest.json and re-uploading…"
   curl -fL "https://github.com/$REPO/releases/latest/download/manifest.json" -o "$WORK/manifest.json"
-  python3 - "$WORK/manifest.json" "$SHA" "$SIZE" <<'PY'
+  python3 - "$WORK/manifest.json" "$GAME_SHA" "$GAME_SIZE" "$LAUNCHER_SHA" "$LAUNCHER_SIZE" <<'PY'
 import json, sys
-path, sha, size = sys.argv[1], sys.argv[2], int(sys.argv[3])
-m = json.load(open(path))
-m["files"]["macos"]["sha256"] = sha
-m["files"]["macos"]["size"]   = size
-json.dump(m, open(path, "w"), indent=2)
+p, gsha, gsize, lsha, lsize = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], int(sys.argv[5])
+m = json.load(open(p))
+m["files"]["macos"]["sha256"] = gsha; m["files"]["macos"]["size"] = gsize
+if isinstance(m.get("launcher"), dict) and "macos" in m["launcher"].get("files", {}):
+    m["launcher"]["files"]["macos"]["sha256"] = lsha
+    m["launcher"]["files"]["macos"]["size"]   = lsize
+json.dump(m, open(p, "w"), indent=2)
+print("manifest patched (game + launcher macOS checksums)")
 PY
-  gh release upload "$TAG" --repo "$REPO" --clobber "$OUT" "$WORK/manifest.json"
-  say "Done. The signed, notarized macOS build is live and the launcher will verify + install it."
+  gh release upload "$TAG" --repo "$REPO" --clobber "$GAME_ZIP" "$LAUNCHER_ZIP" "$WORK/manifest.json"
+  say "Done — signed + notarized game and launcher are live; macOS Gatekeeper will open them cleanly."
 else
   cat <<EOF
 
-==> Almost done — finish the upload manually (gh and/or python3 not found here):
-    1. Re-upload the signed build:
-         gh release upload $TAG --repo $REPO --clobber "$OUT"
-       (or drag it into the release on github.com, replacing Sporeholm-macos.zip)
-    2. Update manifest.json so files.macos = { "sha256": "$SHA", "size": $SIZE }
-       then re-upload manifest.json the same way.
-       (Tell Claude the sha256 + size above and it can patch + upload the manifest for you.)
+==> Almost done — finish manually (gh and/or python3 not found):
+    Re-upload (asset names must match exactly):
+      gh release upload $TAG --repo $REPO --clobber "$GAME_ZIP" "$LAUNCHER_ZIP"
+    Then in manifest.json set:
+      files.macos            = { sha256: $GAME_SHA,     size: $GAME_SIZE }
+      launcher.files.macos   = { sha256: $LAUNCHER_SHA, size: $LAUNCHER_SIZE }
+    and re-upload manifest.json. (Or send Claude those four values and it'll patch + upload.)
 EOF
 fi
+
+# Note: the launcher .app is universal (an arch-picking shell trampoline + arm64/x64 binaries).
+# If Apple's notary service rejects it (some macOS setups dislike a script as the main
+# executable), tell Claude — the fallback is a single-arch (arm64) launcher .app, which signs
+# and notarizes with no caveats.

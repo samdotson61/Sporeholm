@@ -129,10 +129,11 @@ should read **Installed: vX.Y.Z** (from the stamped `version.txt`) and show **Up
 Builds run unsigned, but each OS warns on first launch until signed.
 
 - **macOS** — run [`scripts/sign-macos.sh`](scripts/sign-macos.sh) **on a Mac** with a *Developer ID
-  Application* cert (Apple Developer Program). It signs (hardened runtime + .NET entitlements),
-  notarizes, staples, re‑zips (keeping `version.txt`), updates the manifest checksum, and
-  re‑uploads — after which Gatekeeper accepts it silently. One‑time: `xcrun notarytool
-  store-credentials sporeholm-notary …` (see the script header).
+  Application* cert (Apple Developer Program). One run signs **both** the game (`Sporeholm.app`)
+  and the launcher (`SporeholmLauncher.app`): hardened runtime + .NET JIT entitlements →
+  notarize → staple → re‑zip (keeping `version.txt` / bundle perms) → patch **both** macOS
+  checksums in `manifest.json` → re‑upload. After that Gatekeeper opens both silently. One‑time
+  setup: `xcrun notarytool store-credentials sporeholm-notary …` (see the script header).
 - **Windows** — needs a separate code‑signing certificate (Apple's program does **not** cover
   Windows). Options: **Azure Trusted Signing** (~$10/mo, cloud, no token), an **OV** cert
   (~$200–350/yr, now on a USB/HSM token), or **EV** (instant SmartScreen trust, ~$300–500/yr,
