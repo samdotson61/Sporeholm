@@ -45,16 +45,26 @@ Edit `project.godot` → `config/version="vX.Y.Z"`, update `changelog.md` (top `
 section feeds the launcher's news feed), and the in‑game menu text. Commit.
 
 ### 2. Export the game from Godot
-*Project ▸ Export*. For each platform, export into its **own empty folder**:
+*Project ▸ Export*, or headless (what the published v0.8.9 used):
+```powershell
+$g = "<…>\Godot_v4.6.2-stable_mono_win64.exe"
+& $g --headless --path . --export-release "Windows Desktop" C:\exports\win\Sporeholm.exe
+& $g --headless --path . --export-release "Linux"           C:\exports\linux\Sporeholm.x86_64
+& $g --headless --path . --export-release "macOS"           C:\exports\mac\Sporeholm.app
+```
 
-| Preset (already in `export_presets.cfg`) | Export to |
+| Preset | Output |
 |---|---|
-| **Windows Desktop** | `C:\exports\win\Sporeholm.exe` (folder `C:\exports\win`) |
-| **Linux** | `C:\exports\linux\Sporeholm.x86_64` |
-| **macOS** | `C:\exports\mac\Sporeholm.app` |
+| **Windows Desktop** | folder `C:\exports\win` (Sporeholm.exe + .pck + `data_…\Sporeholm.dll`) |
+| **Linux** | folder `C:\exports\linux` (Sporeholm.x86_64 + .pck + data) |
+| **macOS** | folder `C:\exports\mac` containing `Sporeholm.app` |
 
-Windows‑only is a fine first release; the launcher just reports "no build for this OS" on
-platforms you didn't ship. (Linux/macOS need their export templates installed first.)
+**Gotchas (all learned the hard way):**
+- **The C# game needs `Sporeholm.sln`** (committed). Without it the export "succeeds" but ships no game code.
+- **`export_presets.cfg` is git‑ignored** — the Windows/Linux/macOS presets live only on the build machine. Keep them configured there.
+- **macOS must be `universal`** (no x86_64‑only macOS template exists), and universal **requires `Import ETC2 ASTC`** (now on in `project.godot`; Windows/Linux presets keep `etc2_astc` off so their `.pck` stays lean). The preset uses `distribution_type=0` (Testing) so it exports **unsigned** — runnable, but macOS Gatekeeper warns until code‑signed (deferred). The launcher restores the exec bit + clears quarantine on launch.
+
+Any platform you skip just reports "no build for this OS" in the launcher.
 
 ### 3. Package the game release
 ```powershell

@@ -62,6 +62,7 @@ public static class GameLauncher
         ProcessStartInfo psi;
         if (os == "macos")
         {
+            TryMakeAppRunnable(exe);   // restore the exec bit (lost when zipped on Windows) + clear quarantine
             psi = new ProcessStartInfo { FileName = "open", Arguments = $"\"{exe}\"", UseShellExecute = false };
         }
         else
@@ -87,5 +88,24 @@ public static class GameLauncher
             p?.WaitForExit(2000);
         }
         catch { /* not fatal; the file may already be executable */ }
+    }
+
+    /// <summary>A .app zipped on Windows loses the executable bit on its inner binary, and
+    /// an unsigned build downloaded by the launcher may be quarantined. Restore both so
+    /// `open` will launch it. Best-effort and macOS-only (the tools don't exist elsewhere).</summary>
+    private static void TryMakeAppRunnable(string appPath)
+    {
+        Run("chmod", $"-R +x \"{Path.Combine(appPath, "Contents", "MacOS")}\"");
+        Run("xattr", $"-dr com.apple.quarantine \"{appPath}\"");
+    }
+
+    private static void Run(string file, string args)
+    {
+        try
+        {
+            var p = Process.Start(new ProcessStartInfo { FileName = file, Arguments = args, UseShellExecute = false });
+            p?.WaitForExit(3000);
+        }
+        catch { /* best effort */ }
     }
 }
