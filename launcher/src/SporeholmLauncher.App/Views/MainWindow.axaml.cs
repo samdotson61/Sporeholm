@@ -33,7 +33,7 @@ public partial class MainWindow : Window
 
         if (_cfg.Offline)
         {
-            VersionLine.Text = $"Installed: {InstalledLabel(installed.Version)}    •    Offline";
+            VersionLine.Text = $"Installed: {InstalledLabel(GameLauncher.InstalledVersion() ?? installed.Version)}    •    Offline";
             ShowNotes("Offline mode is on — open Settings to turn it off. You can still play the installed build.");
             SetMode(GameLauncher.IsInstalled ? Mode.Play : Mode.None);
             return;
@@ -77,7 +77,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            VersionLine.Text = $"Installed: {InstalledLabel(installed.Version)}    •    update check failed";
+            VersionLine.Text = $"Installed: {InstalledLabel(GameLauncher.InstalledVersion() ?? installed.Version)}    •    update check failed";
             ShowNotes($"Couldn't reach the update source:\n{ex.Message}\n\nYou can still play the installed build, or open Settings.");
             SetMode(GameLauncher.IsInstalled ? Mode.Play : Mode.None);
         }

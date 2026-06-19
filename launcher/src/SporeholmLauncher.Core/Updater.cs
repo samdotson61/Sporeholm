@@ -46,9 +46,12 @@ public sealed class Updater
         // Ground "installed" in what's actually on disk, not just installed.json:
         // a game folder with a runnable build counts as installed even if the
         // record is missing or stale (a hand-copied build, or a lost installed.json).
+        // The build's own version.txt stamp is the authoritative installed version
+        // (so update parity holds even with no install record); installed.json is the fallback.
         bool onDisk = GameLauncher.IsInstalled;
         bool isInstalled = installed.IsInstalled || onDisk;
-        string? installedVersion = installed.IsInstalled ? installed.Version : null;
+        string? installedVersion = GameLauncher.InstalledVersion()
+                                   ?? (installed.IsInstalled ? installed.Version : null);
 
         UpdateState state;
         if (file == null) state = UpdateState.NoBuildForThisOs;

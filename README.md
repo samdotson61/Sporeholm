@@ -4,6 +4,10 @@
 
 Current version: **v0.8.9** — in active development.
 
+### ▶ [Download Sporeholm (Windows)](https://github.com/samdotson61/Sporeholm/releases/latest/download/SporeholmLauncher.exe)
+
+Download the launcher, double‑click it, and it installs the latest build and keeps the game up to date — no setup, no .NET required. ([How the launcher works](launcher/README.md).)
+
 ---
 
 ## What is this game? (the plain-English version)

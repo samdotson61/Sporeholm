@@ -39,7 +39,8 @@ public static class CliRunner
     {
         var installed = InstalledState.Load();
         var detected = GameLauncher.IsInstalled;
-        var installedLabel = installed.Version ?? (detected ? "(detected build — no version record)" : "(none)");
+        var installedLabel = (GameLauncher.InstalledVersion() ?? installed.Version)
+                             ?? (detected ? "(detected build — no version record)" : "(none)");
         o.WriteLine($"Installed : {installedLabel}");
         o.WriteLine($"Game dir  : {LauncherPaths.InstallDir}{(detected ? "  [build present]" : "  [no build]")}");
         o.WriteLine($"Data dir  : {LauncherPaths.DataDir}{(LauncherPaths.IsPortable ? "  [portable]" : "")}");
@@ -102,7 +103,7 @@ public static class CliRunner
             o.WriteLine("No game build is installed yet. Run 'update' (online) or install a build first.");
             return 2;
         }
-        o.WriteLine($"Launching {InstalledState.Load().Version ?? "the installed build"}…");
+        o.WriteLine($"Launching {GameLauncher.InstalledVersion() ?? InstalledState.Load().Version ?? "the installed build"}…");
         GameLauncher.Launch();
         return 0;
     }

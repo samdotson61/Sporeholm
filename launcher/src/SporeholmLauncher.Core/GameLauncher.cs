@@ -9,6 +9,25 @@ public static class GameLauncher
 {
     public static bool IsInstalled => FindExecutable() != null;
 
+    /// <summary>The version stamped into the installed build — a <c>version.txt</c> at the
+    /// install root, written into the zip by the packaging script. This is the ground-truth
+    /// "what's actually installed" used for update parity, independent of the launcher's own
+    /// install record. Null if the build carries no stamp (e.g. an older or hand-made build).</summary>
+    public static string? InstalledVersion()
+    {
+        try
+        {
+            var f = Path.Combine(LauncherPaths.InstallDir, "version.txt");
+            if (File.Exists(f))
+            {
+                var v = File.ReadAllText(f).Trim();
+                if (!string.IsNullOrWhiteSpace(v)) return v;
+            }
+        }
+        catch { /* unreadable → treat as unstamped */ }
+        return null;
+    }
+
     public static string? FindExecutable()
     {
         var dir = LauncherPaths.InstallDir;

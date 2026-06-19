@@ -65,7 +65,21 @@ function Resolve-Notes {
     return ($excerpt -join "`n").Trim()
 }
 
-function Add-Build([hashtable]$files, [string]$os, [string]$buildDir) {
+# Drop a version.txt at the root of the zip (without touching the caller's export
+# folder) so the *installed* build declares its own version — the launcher reads it
+# back off disk for update parity even if it has no install record of its own.
+function Add-VersionStamp([string]$zipPath, [string]$ver) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Update')
+    try {
+        $stale = $zip.GetEntry('version.txt'); if ($stale) { $stale.Delete() }
+        $entry = $zip.CreateEntry('version.txt')
+        $sw = New-Object System.IO.StreamWriter($entry.Open())
+        try { $sw.Write($ver) } finally { $sw.Dispose() }
+    } finally { $zip.Dispose() }
+}
+
+function Add-Build([hashtable]$files, [string]$os, [string]$buildDir, [string]$ver) {
     if (-not $buildDir) { return }
     if (-not (Test-Path $buildDir)) { throw "Build folder for '$os' not found: $buildDir" }
     if (-not (Get-ChildItem -Path $buildDir -File -Recurse)) { throw "Build folder for '$os' is empty: $buildDir" }
@@ -73,6 +87,7 @@ function Add-Build([hashtable]$files, [string]$os, [string]$buildDir) {
     $zipPath = Join-Path $OutDir $zipName
     Write-Host "  zipping $os → $zipName"
     Compress-Archive -Path (Join-Path $buildDir '*') -DestinationPath $zipPath -Force
+    Add-VersionStamp $zipPath $ver
     $sha  = (Get-FileHash -Algorithm SHA256 -Path $zipPath).Hash.ToLower()
     $size = (Get-Item $zipPath).Length
     $files[$os] = [ordered]@{ name = $zipName; sha256 = $sha; size = $size }
@@ -86,9 +101,9 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 Write-Host "Packaging Sporeholm $ver ($Channel)"
 $files = @{}   # plain hashtable so it passes to Add-Build by reference (an [ordered] dict would be copied)
-Add-Build $files 'windows' $WindowsBuild
-Add-Build $files 'linux'   $LinuxBuild
-Add-Build $files 'macos'   $MacBuild
+Add-Build $files 'windows' $WindowsBuild $ver
+Add-Build $files 'linux'   $LinuxBuild   $ver
+Add-Build $files 'macos'   $MacBuild     $ver
 if ($files.Count -eq 0) { throw "Provide at least one of -WindowsBuild / -LinuxBuild / -MacBuild." }
 
 $manifest = [ordered]@{
