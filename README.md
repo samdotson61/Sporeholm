@@ -7,10 +7,16 @@ Current version: **v0.8.9** — in active development.
 ### ▶ Download Sporeholm
 
 - **Windows** — [SporeholmLauncher.exe](https://github.com/samdotson61/Sporeholm/releases/latest/download/SporeholmLauncher.exe)
-- **Linux** — [SporeholmLauncher-linux](https://github.com/samdotson61/Sporeholm/releases/latest/download/SporeholmLauncher-linux)
-- **macOS** — [SporeholmLauncher-macos](https://github.com/samdotson61/Sporeholm/releases/latest/download/SporeholmLauncher-macos)
+- **Linux** — [SporeholmLauncher-linux](https://github.com/samdotson61/Sporeholm/releases/latest/download/SporeholmLauncher-linux) (`chmod +x`, then run)
+- **macOS** — [SporeholmLauncher-macos.zip](https://github.com/samdotson61/Sporeholm/releases/latest/download/SporeholmLauncher-macos.zip) — unzip, then open **SporeholmLauncher.app**
 
 Download the launcher for your OS and run it — it installs the latest build and keeps the game up to date, no setup or .NET required. ([How the launcher works](launcher/README.md).)
+
+> **macOS first launch:** the app isn't code‑signed yet, so Gatekeeper blocks the first
+> open. Either **right‑click the app → Open** (then confirm), or go to **System Settings →
+> Privacy & Security → Open Anyway**. After that it opens normally. (Signing — see
+> [`scripts/sign-macos.sh`](launcher/scripts/sign-macos.sh) — removes this prompt.) The
+> `.app` is universal, so it runs natively on both Apple Silicon and Intel.
 
 ---
 
