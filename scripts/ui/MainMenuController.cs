@@ -168,7 +168,8 @@ public partial class MainMenuController : Control
 	{
 		var v = new Label
 		{
-			Text = "v0.8.9",
+			// Single source of truth: project.godot → config/version (see RELEASING.md).
+			Text = ProjectSettings.GetSetting("application/config/version", "dev").AsString(),
 			HorizontalAlignment = HorizontalAlignment.Center,
 		};
 		ApplyGrobold(v, 14);

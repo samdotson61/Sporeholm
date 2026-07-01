@@ -63,6 +63,7 @@ $g = "<…>\Godot_v4.6.2-stable_mono_win64.exe"
 - **The C# game needs `Sporeholm.sln`** (committed). Without it the export "succeeds" but ships no game code.
 - **`export_presets.cfg` is git‑ignored** — the Windows/Linux/macOS presets live only on the build machine. Keep them configured there.
 - **macOS must be `universal`** (no x86_64‑only macOS template exists), and universal **requires `Import ETC2 ASTC`** (now on in `project.godot`; Windows/Linux presets keep `etc2_astc` off so their `.pck` stays lean). The preset uses `distribution_type=0` (Testing) so it exports **unsigned** — runnable, but macOS Gatekeeper warns until code‑signed (deferred). The launcher restores the exec bit + clears quarantine on launch.
+- **Set the macOS preset's `application/short_version` + `application/version` to the game version** when bumping — v0.8.9 shipped stamped "1.0". (Safety net: `package-macos.sh` re-syncs the .app's Info.plist from the zip's `version.txt`, so a stale preset self-heals at finalize time.)
 
 Any platform you skip just reports "no build for this OS" in the launcher.
 
@@ -85,9 +86,11 @@ changelog.md              # copied from the game (news feed source)
 #   omit -Rids to build win-x64, linux-x64, osx-x64, osx-arm64
 ```
 Output: `launcher\dist\<rid>\SporeholmLauncher[.exe]` — the self‑contained file players
-download (no .NET needed). If uploading more than one OS, rename them so they don't
-collide as release assets, e.g. `SporeholmLauncher-windows.exe`, `SporeholmLauncher-linux`,
-`SporeholmLauncher-macos`.
+download (no .NET needed). Release asset names (what the manifest + README links expect):
+`SporeholmLauncher.exe` (win-x64), `SporeholmLauncher-linux` (linux-x64), and
+`SporeholmLauncher-macos.zip` — the macOS one is **not** a renamed binary; it's the signed
+`.app` zip that `package-macos.sh` builds in step 5.5 (which also rebuilds the other two
+when the launcher version bumps, so self‑update stays coherent across OSes).
 
 ### 5. Publish to GitHub Releases
 
@@ -112,6 +115,30 @@ gh release upload vX.Y.Z --repo samdotson61/Sporeholm `
 > The tag **is** the latest version the launcher detects (`releases/latest` → `tag_name`),
 > so the tag must equal `config/version`.
 
+### 5.5 Finalize macOS **on a Mac** (required — every release that ships macOS)
+
+Windows cannot produce runnable macOS artifacts. Three separate reasons, all shipped
+broken in v0.8.9 and found by actually launching on a Mac:
+
+1. **Zips made on Windows lose the Unix exec bits** (extractors ignore .NET's permission
+   stamps because the entries read as MS-DOS-made) → the `.app` fails to spawn at all.
+2. **Unsigned binaries are SIGKILLed on Apple Silicon** even with exec bits restored.
+3. **`dotnet publish` single-file on macOS never embeds the native dylibs** — they must be
+   copied into the `.app` beside the binaries or the launcher GUI crashes on every Mac.
+
+One command on the Mac fixes all three, smoke-launches the result, and republishes:
+
+```bash
+launcher/scripts/package-macos.sh --upload          # latest release; --tag vX.Y.Z to pin
+```
+
+It repairs the game zip (exec bits + plist version + re-sign), rebuilds the launcher for
+all four RIDs from `LauncherInfo.cs`'s version, assembles/signs the universal `.app` with
+its dylibs, **launches the freshly-zipped launcher once** (aborts the upload if it doesn't
+open — "it built" is not "it opens"), then patches `manifest.json` (game macOS entry + the
+whole `launcher` section) and re-uploads. Uses a Developer ID cert if the keychain has
+one, otherwise ad-hoc (runnable; see Code signing below for notarization).
+
 ### 6. Verify
 ```powershell
 # point a throwaway data dir at the live release and check
@@ -122,18 +149,30 @@ $env:SPOREHOLM_LAUNCHER_DATA = "$env:TEMP\sporeholm-verify"
 Then double‑click the launcher: **news → Install → Play**. Re‑open it after installing — it
 should read **Installed: vX.Y.Z** (from the stamped `version.txt`) and show **Up to date**.
 
+**On the Mac** (non‑negotiable since v0.8.9 shipped a launcher that had never been launched
+on one): after `package-macos.sh --upload`, download `SporeholmLauncher-macos.zip` from the
+release **as a player would**, unzip, double‑click, and take it through **Install → Play**
+once. `package-macos.sh` already smoke-launches, but this end‑to‑end pass also proves the
+uploaded manifest checksums match what players actually download.
+
 ---
 
 ## Code signing (removes the OS "unknown developer" warnings)
 
 Builds run unsigned, but each OS warns on first launch until signed.
 
-- **macOS** — run [`scripts/sign-macos.sh`](scripts/sign-macos.sh) **on a Mac** with a *Developer ID
-  Application* cert (Apple Developer Program). One run signs **both** the game (`Sporeholm.app`)
-  and the launcher (`SporeholmLauncher.app`): hardened runtime + .NET JIT entitlements →
-  notarize → staple → re‑zip (keeping `version.txt` / bundle perms) → patch **both** macOS
-  checksums in `manifest.json` → re‑upload. After that Gatekeeper opens both silently. One‑time
-  setup: `xcrun notarytool store-credentials sporeholm-notary …` (see the script header).
+- **macOS** — two tiers:
+  - **Ad-hoc (current)** — `package-macos.sh` (step 5.5) ad-hoc signs when no Developer ID
+    cert is in the keychain. The apps *run*, but Gatekeeper shows a one-time "unverified
+    developer" prompt on browser-downloaded copies (right-click ▸ Open, or System Settings ▸
+    Privacy & Security ▸ Open Anyway on newer macOS).
+  - **Developer ID + notarization (removes the prompt)** — get an Apple Developer cert, then
+    run [`scripts/sign-macos.sh`](scripts/sign-macos.sh) **on a Mac**. One run signs **both**
+    the game (`Sporeholm.app`) and the launcher (`SporeholmLauncher.app`): hardened runtime +
+    .NET JIT entitlements → notarize → staple → re‑zip (keeping `version.txt` / bundle perms)
+    → patch **both** macOS checksums in `manifest.json` → re‑upload. After that Gatekeeper
+    opens both silently. One‑time setup: `xcrun notarytool store-credentials sporeholm-notary …`
+    (see the script header).
 - **Windows** — needs a separate code‑signing certificate (Apple's program does **not** cover
   Windows). Options: **Azure Trusted Signing** (~$10/mo, cloud, no token), an **OV** cert
   (~$200–350/yr, now on a USB/HSM token), or **EV** (instant SmartScreen trust, ~$300–500/yr,

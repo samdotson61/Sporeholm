@@ -10,3 +10,6 @@ release/
 .vs/
 .idea/
 *.user
+
+# macOS finalize output (package-macos.sh)
+out-macos/

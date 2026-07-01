@@ -79,6 +79,14 @@ the news screen, installs the game on first run, and keeps it updated. (Under th
 the publish is `dotnet publish src/SporeholmLauncher.App -c Release -r <rid>
 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true`.)
 
+> **macOS is the exception — one file is not enough.** On macOS, `dotnet publish`
+> single-file *never* embeds the native dylibs (libSkiaSharp, libHarfBuzzSharp,
+> libAvaloniaNative); it leaves them beside the binary, and the GUI cannot render
+> without them. The shippable macOS artifact is therefore a signed universal
+> `SporeholmLauncher.app` (arch trampoline + both binaries + the dylibs) zipped with
+> Unix permissions — built by **`scripts/package-macos.sh` on a Mac**, which also
+> smoke-launches it before upload. See RELEASING.md step 5.5.
+
 > The launcher installs the game into a per-user data folder (below). It also supports
 > a **co-located** mode for a future Steam/itch depot: drop a `portable.txt` next to
 > the launcher and it keeps the game + updates in its own folder instead.
@@ -103,7 +111,8 @@ just edit the file or use `config set`:
 
 **Portable mode:** drop a `portable.txt` file next to the launcher executable and it
 keeps the game, updates, mods, and config in its own folder instead of the per-user
-data dir. (The bundle ships this marker; `SPOREHOLM_LAUNCHER_DATA` still overrides everything.)
+data dir — intended for a future Steam/itch depot layout. (`SPOREHOLM_LAUNCHER_DATA`
+still overrides everything.)
 
 ```bash
 dotnet run --project src/SporeholmLauncher.Cli -- config set source folder
@@ -217,14 +226,22 @@ sha256 <file>       print a file's SHA-256
 **Working + tested:** the full update engine (check → download → SHA-256 verify →
 backup → install → rollback, with a corrupt-download safe-fail), the changelog/news
 feed, game-launch discovery per OS, the mod layout, all three release sources, the
-CLI, and the Avalonia GUI. Self-contained single-file builds verified for all three
-desktop OSes (Windows/Linux/macOS). Covered by an end-to-end run (local-folder
-release) and a producer→consumer run (`package-release.ps1` → install → news).
+CLI, and the Avalonia GUI. Covered by an end-to-end run (local-folder release) and a
+producer→consumer run (`package-release.ps1` → install → news).
+
+**Verified on real hardware:** Windows (dev box) and **macOS / Apple Silicon** —
+2026-07-01, the full player path against the live GitHub release: download the zip →
+unzip → double-click → news feed → **Install** (download + SHA-256 verify + extract) →
+**Play** → the game runs. (v0.8.9's original macOS zip had never been launched on a Mac
+and shipped triple-broken — exec bits / signing / missing dylibs — hence the hard rule:
+**a macOS artifact is not done until `package-macos.sh` has smoke-launched it**.)
 
 **Before public distribution:**
-- **Install the Linux/macOS export templates** in Godot and finalise the (pre-wired)
-  Linux + macOS export presets — set the macOS bundle id, then export those builds.
-- **Code-signing / notarization** of the published launcher binaries (so OSes don't
-  warn on first run).
-- A launcher **app icon**.
-- First real GitHub release published by `package-release.ps1 -Publish`.
+- **Developer ID signing + notarization** of the macOS artifacts (`sign-macos.sh`; needs
+  an Apple Developer cert). Until then they're ad-hoc signed by `package-macos.sh` —
+  they run, but Gatekeeper shows a one-time prompt on browser downloads.
+- **Windows code-signing** (separate cert; see RELEASING.md) so SmartScreen stops warning.
+
+**Known cosmetics (macOS):** the running app's menu-bar name shows "Avalonia
+Application" instead of "Sporeholm Launcher" (trampoline launch quirk), and the news
+feed renders markdown `###` markers literally. Neither affects function.

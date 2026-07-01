@@ -5,5 +5,5 @@ namespace SporeholmLauncher.Core;
 /// triggers the launcher to update itself (see <see cref="LauncherSelfUpdater"/>).</summary>
 public static class LauncherInfo
 {
-    public const string Version = "1.0.0";
+    public const string Version = "1.0.1";
 }

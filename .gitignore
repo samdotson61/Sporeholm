@@ -11,3 +11,6 @@ bin/
 .mono/
 *.user
 *.suo
+
+# macOS Finder junk
+.DS_Store

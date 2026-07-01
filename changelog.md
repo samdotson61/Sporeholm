@@ -7,6 +7,64 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.10] — 2026-07-01 — macOS release repaired (launcher 1.0.1) + release pipeline hardening
+
+The v0.8.9 macOS downloads had never been launched on a real Mac — and didn't run on one.
+This release repairs the shipped v0.8.9 assets **in place** (live now), hardens the
+pipeline so it can't recur, and carries two small game-side polish fixes for the next export.
+
+### The three macOS defects (each independently fatal, all fixed)
+- **No executable permissions** — the zips were built on Windows, which stamps entries as
+  MS-DOS-made, so every extractor ignored the Unix exec bits: the launcher `.app` failed to
+  open at all ("Launchd job spawn failed"), and so would the game zip on a direct download.
+- **Unsigned binaries** — Apple Silicon refuses unsigned arm64 code outright (SIGKILL), so
+  even with exec bits restored the launcher died. (The game itself was fine — Godot ad-hoc
+  signs its exports.)
+- **Missing native libraries** — `dotnet publish` single-file *never* embeds native dylibs
+  on macOS; libSkiaSharp / libHarfBuzzSharp / libAvaloniaNative were left out of the `.app`
+  entirely, so the launcher GUI would have crashed at startup on Intel Macs too.
+
+### Live now (v0.8.9 release assets replaced, 2026-07-01)
+- **`SporeholmLauncher-macos.zip`** — rebuilt as a signed universal `.app` (arch trampoline +
+  arm64/x64 binaries + the native dylibs), zipped with Unix permissions. **Launcher 1.0.1.**
+- **`SporeholmLauncher.exe` / `SporeholmLauncher-linux`** — rebuilt at 1.0.1 from the same
+  source so the manifest's launcher version bump can't strand self-update on any OS.
+- **`Sporeholm-macos.zip`** — exec bits restored, `Info.plist` version corrected (read "1.0",
+  now "0.8.9"), re-signed, re-zipped with permissions. Game content unchanged.
+- **`manifest.json`** — new checksums/sizes for all replaced assets + launcher 1.0.1.
+- **Verified end-to-end on Apple Silicon as a player**: download → unzip → double-click →
+  news feed → Install (download + SHA-256 verify + extract) → Play → the game runs.
+
+### Release pipeline (so this can't happen again)
+- New **`launcher/scripts/package-macos.sh`** — the mandatory Mac finalize step: repairs the
+  game zip (exec bits + plist version synced from `version.txt` + re-sign), rebuilds the
+  launcher for all four RIDs, assembles/signs the universal `.app` **with its dylibs**,
+  **smoke-launches the freshly-zipped launcher** (refuses to upload if it doesn't open),
+  then patches the manifest and re-uploads. Documented as RELEASING.md step 5.5.
+- `make-mac-app.ps1` now bundles the dylibs (hard error if they're missing) and labels its
+  output as an intermediate that must be finalized on a Mac.
+- RELEASING.md: macOS preset must carry the game version (v0.8.9 shipped stamped "1.0";
+  the finalize script now self-heals this from `version.txt`), plus a required
+  player-path verification pass on a real Mac.
+
+### Game-side polish (ships with the next export)
+- The resource bar's stale dev note "(unstored — Phase 5 will gate)" — visible since the
+  Phase 5 storage system actually shipped — now reads **"(colony total)"**.
+- The main-menu version label was hardcoded (a manual bump step that had already drifted
+  once); it now reads `project.godot` → `config/version` directly, the documented single
+  source of truth.
+
+### Known cosmetics (macOS launcher, noted for later)
+- The menu bar shows "Avalonia Application" instead of "Sporeholm Launcher" (arch-trampoline
+  launch quirk); the news feed renders markdown `###` markers literally. Neither affects
+  function. (`scripts/ui/ResourceHUD.cs` is dead code — superseded by the HUD merge in
+  v0.3.19 — left in place pending a deliberate removal.)
+
+Build clean, 0 warnings / 0 errors; every repaired artifact was launch-verified on Apple
+Silicon before upload, including the full launcher → install → play player path.
+
+---
+
 ## [0.8.9] — 2026-06-16 — Agricultural audit fixes
 
 Consistency fixes from a full audit of the farming-and-animals systems.

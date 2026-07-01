@@ -12,9 +12,10 @@ Current version: **v0.8.9** — in active development.
 
 Download the launcher for your OS and run it — it installs the latest build and keeps the game up to date, no setup or .NET required. ([How the launcher works](launcher/README.md).)
 
-> **macOS first launch:** the app isn't code‑signed yet, so Gatekeeper blocks the first
-> open. Either **right‑click the app → Open** (then confirm), or go to **System Settings →
-> Privacy & Security → Open Anyway**. After that it opens normally. (Signing — see
+> **macOS first launch:** the app is signed but not yet **notarized**, so Gatekeeper
+> prompts once on a browser-downloaded copy. Either **right‑click the app → Open** (then
+> confirm), or on newer macOS go to **System Settings → Privacy & Security → Open Anyway**.
+> After that it opens normally. (Notarization — see
 > [`scripts/sign-macos.sh`](launcher/scripts/sign-macos.sh) — removes this prompt.) The
 > `.app` is universal, so it runs natively on both Apple Silicon and Intel.
 
@@ -39,7 +40,11 @@ If you've ever played a "manage your own little settlement and try to keep every
 
 Everything saves and loads, so you can put a colony down and pick it back up later.
 
-> **Heads-up:** it's still being built. The full play loop above works today, but you currently launch it through the game engine (see **How to run** below). An easy one-click installer that updates and launches the game for you — and opens the door to player-made mods — is planned next (see **Roadmap**).
+> **Heads-up:** it's still being built, but the full play loop above works today — and you
+> don't need any developer tools to try it: grab the **launcher** from the download links at
+> the top and it installs, updates, and starts the game for you (and owns the `mods/` layout
+> for player-made mods later). Developers can still run straight from the engine (see **How
+> to run**).
 
 ---
 
@@ -227,7 +232,7 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 | 6 | Entity system (animals + creatures) | Shipped (v0.6.0 — 15 species; expanded to 30 in v0.8.0a) |
 | 7 | Combat (Healer + Rescue + Training + Weapons/Apparel) | Shipped (v0.7.2 — full body-part combat) |
 | **8** | **Agricultural systems** (farming, animal husbandry, hunting) | **Complete** (v0.8.0 farming · v0.8.0a roster→30 · v0.8.1 hunting + butchery · v0.8.2 taming + produce · v0.8.3 breeding · v0.8.4 grow-time balance · v0.8.5 pastures) |
-| **8.5** | **Launcher** — one-click install / auto-update / play, mod-ready | **Planned next** (before Phase 9) |
+| **8.5** | **Launcher** — one-click install / auto-update / play, mod-ready | **Shipped** (v0.8.9 beta · launcher 1.0.1 — macOS packaging repaired + player-path verified on Apple Silicon, v0.8.10; notarization pending) |
 | 9 | Events + Storyteller (Peaceful / Random / Adventure — extensible) | Stub |
 | 10 | Weather + Environment (Insulation half done) | — |
 | 11 | Technology + Culture (research + power) | — |
@@ -242,9 +247,10 @@ Full per-version detail in [`changelog.md`](changelog.md).
 
 ## How to run
 
-> **Coming soon:** a simple **one-click launcher** that downloads the latest version, keeps it updated, and starts the game for you — no engine or setup required (see the **Roadmap**). Until that lands, the game runs from the Godot engine, as below.
+**Players:** download the **launcher** for your OS (links at the top of this page) and run it —
+it installs the latest build, keeps it updated, and starts the game. No engine, no setup.
 
-**Today (developer setup):** you'll need **Godot 4.6+** with **.NET / C# support** (the Mono build).
+**Developers** (running from source): you'll need **Godot 4.6+** with **.NET / C# support** (the Mono build).
 
 1. Clone the repo.
 2. Open Godot, import the project (`project.godot`).

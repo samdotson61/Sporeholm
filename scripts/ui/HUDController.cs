@@ -216,7 +216,7 @@ public partial class HUDController : Control
 				("💎", "Crystal Shard", "CrystalShard"),
 			});
 
-		var qualifier = Lbl("(unstored — Phase 5 will gate)", UITheme.Scaled(10), Muted);
+		var qualifier = Lbl("(colony total)", UITheme.Scaled(10), Muted);
 		qualifier.SizeFlagsVertical = SizeFlags.ShrinkBegin;
 		resRow.AddChild(qualifier);
 
