@@ -1,0 +1,41 @@
+# Build + test on every push/PR. No Godot engine needed: the game project builds
+# with the plain .NET SDK (Godot.NET.Sdk comes from NuGet), and the sim layer's
+# tests are engine-free by design. The launcher's pure-BCL Core tests run on all
+# three desktop OSes it ships to.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  game:
+    name: Game — build + registry tests (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build game solution
+        run: dotnet build Sporeholm.sln --nologo
+      - name: Run game tests
+        run: dotnet test tests/Sporeholm.Tests --nologo --no-build || dotnet test tests/Sporeholm.Tests --nologo
+
+  launcher:
+    name: Launcher — build + Core tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build launcher solution
+        run: dotnet build launcher/SporeholmLauncher.sln --nologo
+      - name: Run launcher tests
+        run: dotnet test launcher/tests/SporeholmLauncher.Core.Tests --nologo
