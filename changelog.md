@@ -35,6 +35,14 @@ pipeline so it can't recur, and carries two small game-side polish fixes for the
 - **Verified end-to-end on Apple Silicon as a player**: download → unzip → double-click →
   news feed → Install (download + SHA-256 verify + extract) → Play → the game runs.
 
+### Signed + notarized (no more Gatekeeper prompt)
+- Both the game and the launcher are now **Developer ID signed and notarized by Apple**,
+  with the notarization ticket stapled into each `.app`. A browser-downloaded copy opens on
+  a double-click with **no Gatekeeper prompt at all** — verified through the real quarantine
+  path (`spctl -a` → "accepted, source=Notarized Developer ID" on both). The universal
+  launcher's shell-trampoline main executable notarized without issue, so no single-arch
+  fallback was needed.
+
 ### Release pipeline (so this can't happen again)
 - New **`launcher/scripts/package-macos.sh`** — the mandatory Mac finalize step: repairs the
   game zip (exec bits + plist version synced from `version.txt` + re-sign), rebuilds the

@@ -159,20 +159,18 @@ uploaded manifest checksums match what players actually download.
 
 ## Code signing (removes the OS "unknown developer" warnings)
 
-Builds run unsigned, but each OS warns on first launch until signed.
-
-- **macOS** — two tiers:
-  - **Ad-hoc (current)** — `package-macos.sh` (step 5.5) ad-hoc signs when no Developer ID
-    cert is in the keychain. The apps *run*, but Gatekeeper shows a one-time "unverified
-    developer" prompt on browser-downloaded copies (right-click ▸ Open, or System Settings ▸
-    Privacy & Security ▸ Open Anyway on newer macOS).
-  - **Developer ID + notarization (removes the prompt)** — get an Apple Developer cert, then
-    run [`scripts/sign-macos.sh`](scripts/sign-macos.sh) **on a Mac**. One run signs **both**
-    the game (`Sporeholm.app`) and the launcher (`SporeholmLauncher.app`): hardened runtime +
-    .NET JIT entitlements → notarize → staple → re‑zip (keeping `version.txt` / bundle perms)
-    → patch **both** macOS checksums in `manifest.json` → re‑upload. After that Gatekeeper
-    opens both silently. One‑time setup: `xcrun notarytool store-credentials sporeholm-notary …`
-    (see the script header).
+- **macOS — Developer ID + notarization (the standard path; set up + verified 2026-07-01)** —
+  run [`scripts/sign-macos.sh`](scripts/sign-macos.sh) **on the Mac** after every release
+  that ships macOS. One run signs **both** the game (`Sporeholm.app`) and the launcher
+  (`SporeholmLauncher.app`): hardened runtime + .NET JIT entitlements → notarize → staple →
+  re‑zip (keeping `version.txt` / bundle perms) → patch **both** macOS checksums in
+  `manifest.json` → re‑upload. Gatekeeper then opens both silently, even on a fresh browser
+  download (verified through the real quarantine path). One‑time setup — already done on
+  this Mac: cert `Developer ID Application: Samuel Dotson (5DF98UFG94)` + notary profile
+  `sporeholm-notary`; for a future machine, see the script header. Fallback: with no cert in
+  the keychain, `package-macos.sh` ad-hoc signs — runnable, but Gatekeeper prompts once.
+  Heads-up: `releases/latest/download/` URLs can serve a stale CDN copy for a few minutes
+  after re-uploading an asset — verify with `gh release download` (API), not the redirect.
 - **Windows** — needs a separate code‑signing certificate (Apple's program does **not** cover
   Windows). Options: **Azure Trusted Signing** (~$10/mo, cloud, no token), an **OV** cert
   (~$200–350/yr, now on a USB/HSM token), or **EV** (instant SmartScreen trust, ~$300–500/yr,

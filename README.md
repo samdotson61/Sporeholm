@@ -12,12 +12,9 @@ Current version: **v0.8.9** — in active development.
 
 Download the launcher for your OS and run it — it installs the latest build and keeps the game up to date, no setup or .NET required. ([How the launcher works](launcher/README.md).)
 
-> **macOS first launch:** the app is signed but not yet **notarized**, so Gatekeeper
-> prompts once on a browser-downloaded copy. Either **right‑click the app → Open** (then
-> confirm), or on newer macOS go to **System Settings → Privacy & Security → Open Anyway**.
-> After that it opens normally. (Notarization — see
-> [`scripts/sign-macos.sh`](launcher/scripts/sign-macos.sh) — removes this prompt.) The
-> `.app` is universal, so it runs natively on both Apple Silicon and Intel.
+> **macOS:** the app is **signed and notarized** by Apple (Developer ID), so it opens on a
+> double-click with no Gatekeeper prompt — even on a fresh browser download. The `.app` is
+> universal, so it runs natively on both Apple Silicon and Intel.
 
 ---
 
@@ -232,7 +229,7 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 | 6 | Entity system (animals + creatures) | Shipped (v0.6.0 — 15 species; expanded to 30 in v0.8.0a) |
 | 7 | Combat (Healer + Rescue + Training + Weapons/Apparel) | Shipped (v0.7.2 — full body-part combat) |
 | **8** | **Agricultural systems** (farming, animal husbandry, hunting) | **Complete** (v0.8.0 farming · v0.8.0a roster→30 · v0.8.1 hunting + butchery · v0.8.2 taming + produce · v0.8.3 breeding · v0.8.4 grow-time balance · v0.8.5 pastures) |
-| **8.5** | **Launcher** — one-click install / auto-update / play, mod-ready | **Shipped** (v0.8.9 beta · launcher 1.0.1 — macOS packaging repaired + player-path verified on Apple Silicon, v0.8.10; notarization pending) |
+| **8.5** | **Launcher** — one-click install / auto-update / play, mod-ready | **Complete** (v0.8.9 beta · launcher 1.0.1 — macOS packaging repaired, **signed + notarized**, player-path verified on Apple Silicon, v0.8.10) |
 | 9 | Events + Storyteller (Peaceful / Random / Adventure — extensible) | Stub |
 | 10 | Weather + Environment (Insulation half done) | — |
 | 11 | Technology + Culture (research + power) | — |

@@ -21,7 +21,7 @@
 set -euo pipefail
 
 REPO="samdotson61/Sporeholm"
-TAG="v0.8.9"
+TAG="${TAG:-$(gh release view --repo "$REPO" --json tagName --jq .tagName)}"
 PROFILE="${NOTARY_PROFILE:-sporeholm-notary}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -82,7 +82,9 @@ process() {
   spctl -a -vvv -t install "$app" || true
 
   local out="$PWD/$asset"; rm -f "$out"
-  ditto -c -k "$dir/x" "$out"            # preserve structure (game: app + version.txt; launcher: app)
+  # zip -rX (not ditto): preserves structure + unix perms WITHOUT AppleDouble ._ files
+  # (com.apple.provenance is SIP-protected, so ditto would always emit them).
+  ( cd "$dir/x" && zip -qrX "$out" * )   # game: app + version.txt at root; launcher: app
   OUT_ZIP="$out"
   OUT_SHA="$(shasum -a 256 "$out" | awk '{print $1}')"
   OUT_SIZE="$(stat -f%z "$out")"

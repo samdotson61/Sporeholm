@@ -237,9 +237,10 @@ and shipped triple-broken — exec bits / signing / missing dylibs — hence the
 **a macOS artifact is not done until `package-macos.sh` has smoke-launched it**.)
 
 **Before public distribution:**
-- **Developer ID signing + notarization** of the macOS artifacts (`sign-macos.sh`; needs
-  an Apple Developer cert). Until then they're ad-hoc signed by `package-macos.sh` —
-  they run, but Gatekeeper shows a one-time prompt on browser downloads.
+- ~~Developer ID signing + notarization of the macOS artifacts~~ — **DONE 2026-07-01**:
+  both apps are Developer ID signed, notarized, and stapled (`sign-macos.sh`; notary
+  profile `sporeholm-notary` + cert live in the Mac's keychain). Gatekeeper opens them
+  with no prompt, verified through the real quarantine path.
 - **Windows code-signing** (separate cert; see RELEASING.md) so SmartScreen stops warning.
 
 **Known cosmetics (macOS):** the running app's menu-bar name shows "Avalonia
