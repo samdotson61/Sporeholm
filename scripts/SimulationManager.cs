@@ -1178,6 +1178,21 @@ namespace Sporeholm
 			_core?.Resources?.Inventory?.Snapshot()
 				?? System.Array.Empty<Sporeholm.Simulation.Items.InventoryRow>();
 
+		// v0.8.11 — per-(Kind, Material, Item.SubType) tallies of items lying
+		// on the map, copied into the caller's reusable dictionary. Paired
+		// with GetInventorySnapshot this gives the HUD everything the colony
+		// owns — stored AND on the ground — bucketed finely enough that the
+		// resource breakdown rows sum exactly to the category totals.
+		public void CopyDroppedGroupTotals(
+			System.Collections.Generic.Dictionary<
+				(Sporeholm.Simulation.Items.ItemKind Kind, string Family, string MatSub, string ItemSub),
+				int> dest)
+		{
+			var map = _core?.Map;
+			if (map == null) { dest.Clear(); return; }
+			map.CopyDroppedGroupTotals(dest);
+		}
+
 		// v0.3.47 — current sim-thread tick counter. Save format uses this
 		// to compute item AgeInTicks at save time so reload can re-anchor
 		// to the new GlobalTick without losing the spoilage clock.

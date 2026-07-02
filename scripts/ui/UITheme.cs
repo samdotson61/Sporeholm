@@ -165,6 +165,10 @@ namespace Sporeholm.UI
         public static readonly Color TextAccent    = new(0.95f, 0.80f, 0.28f);     // gold (titles)
         public static readonly Color TextWarn      = new(0.95f, 0.50f, 0.20f);     // amber (mild alerts)
         public static readonly Color TextDanger    = new(0.95f, 0.20f, 0.20f);     // red (critical)
+        // v0.8.11 — shared hairline for separators / rules inside panels.
+        // Components used to hand-roll near-identical browns (0.7 / 0.5
+        // alpha variants); one constant keeps every divider in step.
+        public static readonly Color Hairline      = new(0.55f, 0.40f, 0.15f, 0.60f);
 
         // ── Tile-tooltip overlay colour ─────────────────────────────────────
         public static readonly Color TooltipBg     = new(0.04f, 0.03f, 0.02f, 0.95f);

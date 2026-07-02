@@ -202,25 +202,48 @@ namespace Sporeholm.World
         // to a single dictionary lookup under the lock.
         private readonly Dictionary<ItemKind, int> _droppedKindTotals = new();
         private readonly Dictionary<(ItemKind Kind, string Family), int> _droppedFamilyTotals = new();
+        // v0.8.11 — third tally axis: full (Kind, Material.Family,
+        // Material.SubType, Item.SubType) group key. The HUD's resource
+        // breakdown rows need per-subtype ground counts so the category
+        // total (which has always included ground items via the family/
+        // kind tallies above) equals the sum of its displayed rows —
+        // Sam's screenshot showed Wood 4806 over rows summing 52 because
+        // 4,754 logs lay on the map with no row counting them. Same lock,
+        // same choke point, O(1) per drop/remove.
+        private readonly Dictionary<(ItemKind Kind, string Family, string MatSub, string ItemSub), int>
+            _droppedGroupTotals = new();
 
-        // Caller MUST hold _itemsLock. Sign is +1 on add, -1 on remove.
-        // Quantity zero-bookkeeping is fine: keys can stay in the dict
-        // with a zero value (rare in steady state since gather drops are
-        // bursty, not balanced).
-        private void AdjustDroppedTotals(Item item, int sign)
+        // Caller MUST hold _itemsLock. `deltaQty` is the signed quantity
+        // change. Single choke point for ALL three tally dictionaries —
+        // partial consumes (PickupBestFoodAt / PickupDroppedAt /
+        // ConsumeDroppedItemsByMaterial) used to adjust the kind + family
+        // dicts inline, which is exactly how a fourth dictionary would
+        // drift out of sync; they now route through here too.
+        private void AdjustDroppedTotalsBy(Item item, int deltaQty)
         {
-            int qty = item.Quantity * sign;
-            if (qty == 0) return;
+            if (deltaQty == 0) return;
             _droppedKindTotals.TryGetValue(item.Kind, out int kTotal);
-            _droppedKindTotals[item.Kind] = kTotal + qty;
+            _droppedKindTotals[item.Kind] = kTotal + deltaQty;
             string family = item.Material.Family;
             if (!string.IsNullOrEmpty(family))
             {
                 var fkey = (item.Kind, family);
                 _droppedFamilyTotals.TryGetValue(fkey, out int fTotal);
-                _droppedFamilyTotals[fkey] = fTotal + qty;
+                _droppedFamilyTotals[fkey] = fTotal + deltaQty;
             }
+            var gkey = (item.Kind, family ?? "", item.Material.SubType ?? "", item.SubType ?? "");
+            _droppedGroupTotals.TryGetValue(gkey, out int gTotal);
+            int next = gTotal + deltaQty;
+            if (next == 0) _droppedGroupTotals.Remove(gkey);
+            else           _droppedGroupTotals[gkey] = next;
         }
+
+        // Caller MUST hold _itemsLock. Sign is +1 on add, -1 on remove.
+        // Quantity zero-bookkeeping is fine: keys can stay in the dict
+        // with a zero value (rare in steady state since gather drops are
+        // bursty, not balanced).
+        private void AdjustDroppedTotals(Item item, int sign) =>
+            AdjustDroppedTotalsBy(item, item.Quantity * sign);
 
         // O(1) totals read for the HUD aggregator. Lock acquisition is
         // the only real cost — no allocations, no scans.
@@ -239,6 +262,22 @@ namespace Sporeholm.World
             {
                 _droppedFamilyTotals.TryGetValue((kind, family), out int t);
                 return t;
+            }
+        }
+
+        // v0.8.11 — copy the per-group ground tallies into a caller-owned
+        // dictionary (the HUD reuses one across frames, so steady-state
+        // cost is a clear + a few dozen inserts under the lock — no
+        // allocation). Zero-quantity keys are pruned at write time so the
+        // copy only ever carries live groups.
+        public void CopyDroppedGroupTotals(
+            Dictionary<(ItemKind Kind, string Family, string MatSub, string ItemSub), int> dest)
+        {
+            dest.Clear();
+            lock (_itemsLock)
+            {
+                foreach (var kv in _droppedGroupTotals)
+                    if (kv.Value != 0) dest[kv.Key] = kv.Value;
             }
         }
 
@@ -570,15 +609,7 @@ namespace Sporeholm.World
                     CorpseInfo   = chosen.CorpseInfo,
                 };
                 chosen.Quantity -= 1;
-                _droppedKindTotals.TryGetValue(chosen.Kind, out int kTot);
-                _droppedKindTotals[chosen.Kind] = kTot - 1;
-                string family = chosen.Material.Family;
-                if (!string.IsNullOrEmpty(family))
-                {
-                    var fkey = (chosen.Kind, family);
-                    _droppedFamilyTotals.TryGetValue(fkey, out int fTot);
-                    _droppedFamilyTotals[fkey] = fTot - 1;
-                }
+                AdjustDroppedTotalsBy(chosen, -1);
                 list.RemoveAll(item => item.Quantity <= 0);
                 if (list.Count == 0) _droppedItems.Remove((tx, ty));
 
@@ -619,11 +650,7 @@ namespace Sporeholm.World
                     int take = System.Math.Min(amount - taken, it.Quantity);
                     it.Quantity -= take;
                     taken += take;
-                    _droppedKindTotals.TryGetValue(kind, out int kTot);
-                    _droppedKindTotals[kind] = kTot - take;
-                    var fkey = (kind, family);
-                    _droppedFamilyTotals.TryGetValue(fkey, out int fTot);
-                    _droppedFamilyTotals[fkey] = fTot - take;
+                    AdjustDroppedTotalsBy(it, -take);
                     changed = true;
                 }
                 list.RemoveAll(it => it.Quantity <= 0);
@@ -709,11 +736,7 @@ namespace Sporeholm.World
                     item.Quantity -= take;
                     taken += take;
                     // Decrement totals by exactly the consumed delta.
-                    _droppedKindTotals.TryGetValue(kind, out int kTot);
-                    _droppedKindTotals[kind] = kTot - take;
-                    var fkey = (kind, family);
-                    _droppedFamilyTotals.TryGetValue(fkey, out int fTot);
-                    _droppedFamilyTotals[fkey] = fTot - take;
+                    AdjustDroppedTotalsBy(item, -take);
                     if (affectedTiles.Count == 0 || affectedTiles[^1] != (x, y))
                         affectedTiles.Add((x, y));
                 }

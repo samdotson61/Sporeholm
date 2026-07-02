@@ -30,11 +30,12 @@ namespace Sporeholm.Simulation
         public LocalMap? Map { get; set; }
 
         // Per-resource "unstored" floats. Mirrors the v0.3.0 ledger so
-        // legacy gather-paths (`r.Stone += 4f`) keep working. The HUD's
-        // "(unstored — Phase 5 will gate)" qualifier already calls this
-        // out as transitional. v0.3.46 keeps these only for Stone / Wood /
-        // Magic write paths in case something we missed adds via float;
-        // Food is fully migrated to items.
+        // legacy gather-paths (`r.Stone += 4f`) keep working. v0.8.11
+        // audit: no code writes these setters anymore, so the buffers are
+        // always zero at runtime — and the HUD no longer reads the float
+        // getters at all (it aggregates Inventory + LocalMap ground
+        // tallies itself so its totals equal its breakdown rows). Kept
+        // as a compatibility shim for any future float-path caller.
         private float _unstoredFood, _unstoredStone, _unstoredWood, _unstoredMagic;
 
         public float Food

@@ -1,59 +1,99 @@
 using Godot;
 using System.Collections.Generic;
+using System.Globalization;
 using Sporeholm.Simulation.Items;
 using Sporeholm.UI;
 
-// Top-bar HUD: era name, S.D. date, population, mood summary, speed controls.
-// Phase 3.x refactor — was a full-width flush bar with `ColorRect` background;
-// now renders as two floating capsules (stats top-left, speed/menu top-right)
-// using `FloatingPanelStyle` so it matches the rest of the Phase 3.x UI and
-// leaves the top centre / corners clear for the ResourceHUD + TileInfoOverlay.
+// Top-bar HUD: era name, S.D. date, population, mood summary, resource
+// readout, speed controls. Renders as two floating capsules (stats +
+// resources top-left, speed/menu top-right) using `FloatingPanelStyle`.
+//
+// v0.8.11 — resource readout rebuilt for counting parity + presentation:
+//   • Every category total is computed as the SUM OF ITS BREAKDOWN ROWS
+//     (stored inventory + items lying on the map, bucketed per sub-type),
+//     so the header number always equals what the expanded rows show.
+//     Pre-v0.8.11 the total folded in map-ground items via the
+//     ColonyResources float getters while the rows only counted stored
+//     inventory — Sam's screenshot: Wood 4806 over rows summing 52.
+//   • Rows derive from ItemRegistry / MaterialRegistry instead of a
+//     hard-coded list, so new foods / minerals surface automatically
+//     (the old list was missing all six v0.5.15 minerals and every
+//     Phase 8 food). A catch-all "Other" row guards the parity invariant
+//     even for unregistered sub-types. Zero-count rows stay hidden.
+//   • All colours come from UITheme (the local Gold/Parchment/Muted
+//     duplicates drifted from the shared palette); hairlines use the
+//     shared UITheme.Hairline; numbers are thousands-formatted.
+//   • Both capsule rows are flow containers with a width budget so the
+//     left capsule wraps instead of colliding with the Speed/Menu
+//     capsule on narrow windows or large UI Size.
 public partial class HUDController : Control
 {
 	[Signal] public delegate void MenuRequestedEventHandler();
 
-	private static readonly Color HudBg    = new(0.14f, 0.09f, 0.04f, 0.92f);
-	private static readonly Color Gold     = new(0.88f, 0.70f, 0.22f);
-	private static readonly Color Parchment = new(0.95f, 0.89f, 0.70f);
-	private static readonly Color Muted    = new(0.60f, 0.50f, 0.32f);
+	private const int BandSeparation = 12;
+	private const int StatsSepX      = 10;
+	private const int ResSepX        = 12;
+	private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
-	private Label          _eraLabel = null!, _dateLabel = null!, _popLabel = null!, _moodLabel = null!;
+	private Label _eraLabel = null!, _dateLabel = null!, _popLabel = null!, _moodLabel = null!;
+
+	// One breakdown row inside a category — a hidden-until-nonzero HBox
+	// with a name label and a right-aligned count. Stored/Ground are
+	// per-frame accumulators filled by _Process's aggregation walk.
+	private sealed class SubRow
+	{
+		public Control Root     = null!;
+		public Label   ValueLbl = null!;
+		public string  Name     = "";
+		public int Stored, Ground;
+		public int ShownStored = -1, ShownGround = -1;   // tooltip write-elide
+	}
 
 	// v0.3.41 — per-category collapsible widgets for the resource row.
-	// Click on the caret toggles the expansion box's visibility; the
-	// flag and caret text track the state.
+	// v0.8.11 — rows are registry-driven (see class comment) and the
+	// category total is the literal sum of them.
 	private sealed class ResourceCategory
 	{
-		public Button         CaretBtn       = null!;
-		public Label          TotalLbl       = null!;
-		public VBoxContainer  ExpansionBox   = null!;
-		public bool           Expanded;
-		// v0.3.46 (Phase 4) — sub-item count labels keyed by ItemRegistry
-		// SubType string. _Process walks the inventory snapshot and writes
-		// the live totals into these.
-		public Dictionary<string, Label> SubLabels = new();
-		// v0.3.46 — what ItemKind this category represents, used by the
-		// inventory snapshot sum. Stone / Wood are special-cased on
-		// MaterialFamily ("Stone" / "Wood") rather than ItemKind.
-		public ItemKind  Kind = ItemKind.Food;
-		public string?   MaterialFamily;        // non-null = "sum items in this family"
+		public string Name  = "";
+		public string Blurb = "";
+		public Button        CaretBtn     = null!;
+		public Label         TitleLbl     = null!;
+		public Label         TotalLbl     = null!;
+		public VBoxContainer ExpansionBox = null!;
+		public Label         EmptyLbl     = null!;
+		public bool          Expanded;
+		// Lookup by aggregation key (item SubType, or Material.SubType for
+		// the Stone/Wood material families) + ordered list for display.
+		public Dictionary<string, SubRow> Rows    = new();
+		public List<SubRow>               RowList = new();
+		public SubRow                     OtherRow = null!;
+		public ItemKind Kind = ItemKind.Food;
+		public string?  MaterialFamily;          // non-null = bucket by material sub-type
+		public int Stored, Ground;
+		public int ShownStored = -1, ShownGround = -1;   // tooltip write-elide
 	}
-	// v0.4.2 — Magic category re-enabled. Magic items now have production
-	// paths: MagicBerry plants drop RawEssence alongside the food item,
-	// and MagicCrystal stone-ore-vein excavation drops CrystalShard
-	// alongside the StoneBlock. The category is no longer always-zero.
+
 	private ResourceCategory _foodCat  = null!;
 	private ResourceCategory _stoneCat = null!;
 	private ResourceCategory _woodCat  = null!;
 	private ResourceCategory _magicCat = null!;
+	private ResourceCategory[] _cats = System.Array.Empty<ResourceCategory>();
+
+	// Reused across frames by CopyDroppedGroupTotals — no steady-state alloc.
+	private readonly Dictionary<(ItemKind Kind, string Family, string MatSub, string ItemSub), int>
+		_groundTallies = new();
+
 	private AnimatedButton _pauseBtn = null!;
 	// v0.3.28 — kept so GameController can query "is the cursor over a HUD
 	// capsule?" before applying mouse-wheel zoom.
 	private PanelContainer _leftPanel  = null!;
 	private PanelContainer _rightPanel = null!;
+	private HFlowContainer _statsFlow  = null!;
+	private HFlowContainer _resFlow    = null!;
 
 	private readonly List<(AnimatedButton btn, float speed)> _speedBtns = new();
 	private float _activeSpeed = 1f;
+	private bool  _tips = true;
 
 	// Single source of truth — never mirror locally.
 	private bool IsPaused => Sim?.Paused ?? false;
@@ -71,6 +111,10 @@ public partial class HUDController : Control
 
 		BuildContent();
 		UITheme.UIScaleChanged += OnUIScaleChanged;
+		// Re-budget the capsule width whenever the window (this full-rect
+		// control) resizes, and once now that the first layout has settled.
+		Resized += () => Callable.From(UpdateResponsiveLayout).CallDeferred();
+		Callable.From(UpdateResponsiveLayout).CallDeferred();
 	}
 
 	public override void _ExitTree()
@@ -88,6 +132,7 @@ public partial class HUDController : Control
 		_speedBtns.Clear();
 		foreach (Node c in GetChildren()) c.QueueFree();
 		BuildContent();
+		Callable.From(UpdateResponsiveLayout).CallDeferred();
 		// On the next _Process the resource labels populate from the sim, and
 		// SyncPauseButton runs on the next UpdateStats — no explicit refresh
 		// needed.
@@ -98,7 +143,7 @@ public partial class HUDController : Control
 	private void BuildContent()
 	{
 		var cfg = new ConfigFile();
-		bool tips = cfg.Load("user://settings.cfg") != Error.Ok
+		_tips = cfg.Load("user://settings.cfg") != Error.Ok
 			|| (bool)cfg.GetValue("gameplay", "show_tooltips", true);
 
 		var band = new HBoxContainer { MouseFilter = MouseFilterEnum.Pass };
@@ -106,14 +151,14 @@ public partial class HUDController : Control
 		band.OffsetLeft   = UITheme.EdgeInset;
 		band.OffsetRight  = -UITheme.EdgeInset;
 		band.OffsetTop    = UITheme.EdgeInset;
-		band.AddThemeConstantOverride("separation", 12);
+		band.AddThemeConstantOverride("separation", BandSeparation);
 		AddChild(band);
 
 		// ────────────────────────────────────────────────────────────────────
-		// Left capsule — two rows: stats on top, resources beneath.
-		// ResourceHUD was a separate centred-floating component (v0.3.14–v0.3.18);
-		// v0.3.19 merges it into here per the user's "top-left, no overlap"
-		// request. Single VBox keeps the panel compact in the top-left corner.
+		// Left capsule — stats row over a hairline rule over the resource row.
+		// Both rows are flow containers: UpdateResponsiveLayout gives them a
+		// width budget so they wrap on narrow windows instead of pushing the
+		// Speed/Menu capsule off-screen.
 		// ────────────────────────────────────────────────────────────────────
 		_leftPanel = new PanelContainer
 		{
@@ -121,107 +166,78 @@ public partial class HUDController : Control
 			// v0.3.44 — pin each capsule to the band's top edge so an
 			// expanded left capsule (e.g. all resource categories open)
 			// doesn't pull the right-hand Speed/Menu capsule down to match
-			// its height. HBoxContainer's default vertical sizing is
-			// Fill, which is what produced the symptom in the screenshot.
+			// its height.
 			SizeFlagsVertical   = SizeFlags.ShrinkBegin,
 		};
 		_leftPanel.AddThemeStyleboxOverride("panel", FloatingPanelStyle.Make());
 		band.AddChild(_leftPanel);
-		var leftPanel = _leftPanel;
 
 		var leftVbox = new VBoxContainer();
-		leftVbox.AddThemeConstantOverride("separation", 4);
-		leftPanel.AddChild(leftVbox);
+		leftVbox.AddThemeConstantOverride("separation", 5);
+		_leftPanel.AddChild(leftVbox);
 
 		// Row 1 — stats
-		var statsRow = new HBoxContainer();
-		statsRow.AddThemeConstantOverride("separation", 10);
-		leftVbox.AddChild(statsRow);
+		_statsFlow = new HFlowContainer { MouseFilter = MouseFilterEnum.Pass };
+		_statsFlow.AddThemeConstantOverride("h_separation", StatsSepX);
+		_statsFlow.AddThemeConstantOverride("v_separation", 4);
+		leftVbox.AddChild(_statsFlow);
 
-		statsRow.AddChild(Lbl("🌅", UITheme.Scaled(16), Gold));
-		_eraLabel = Lbl("Dawn Era", UITheme.Scaled(15), Parchment);
-		statsRow.AddChild(_eraLabel);
+		_statsFlow.AddChild(Lbl("🌅", UITheme.Scaled(16), UITheme.TextAccent));
+		_eraLabel = Lbl("Dawn Era", UITheme.Scaled(15), UITheme.TextPrimary);
+		_statsFlow.AddChild(_eraLabel);
 
-		statsRow.AddChild(Divider());
+		_statsFlow.AddChild(Divider());
 
-		statsRow.AddChild(Lbl("📅", UITheme.Scaled(14), Parchment));
-		_dateLabel = Lbl("Day 1, Spring, Year 0 S.D.", UITheme.Scaled(13), Parchment);
-		statsRow.AddChild(_dateLabel);
+		_statsFlow.AddChild(Lbl("📅", UITheme.Scaled(14), UITheme.TextPrimary));
+		_dateLabel = Lbl("Day 1, Spring, Year 0 S.D.", UITheme.Scaled(13), UITheme.TextPrimary);
+		_statsFlow.AddChild(_dateLabel);
 
-		statsRow.AddChild(Divider());
+		_statsFlow.AddChild(Divider());
 
-		statsRow.AddChild(ShroompIcon(UITheme.Scaled(18)));
-		_popLabel = Lbl("Pop: 7", UITheme.Scaled(13), Parchment);
-		statsRow.AddChild(_popLabel);
+		_statsFlow.AddChild(ShroompIcon(UITheme.Scaled(18)));
+		_popLabel = Lbl("Pop: 7", UITheme.Scaled(13), UITheme.TextPrimary);
+		_statsFlow.AddChild(_popLabel);
 
-		statsRow.AddChild(Divider());
+		_statsFlow.AddChild(Divider());
 
-		_moodLabel = Lbl("😊 0  😢 0", UITheme.Scaled(13), Parchment);
-		statsRow.AddChild(_moodLabel);
+		_moodLabel = Lbl("😊 0  😢 0", UITheme.Scaled(13), UITheme.TextPrimary);
+		_statsFlow.AddChild(_moodLabel);
 
-		// Row 2 — resources. Each category is a VBox: a header row (caret
-		// + name + total) and an initially-hidden expansion VBox listing
-		// the known sub-items. Clicking the caret toggles the expansion.
-		// Sub-items here are placeholders until the Phase 4 procedural
-		// item system lands; the Resources tab in BottomTabPanel will
-		// show the full granular ledger.
-		var resRow = new HBoxContainer();
-		resRow.AddThemeConstantOverride("separation", 14);
-		resRow.SizeFlagsVertical = SizeFlags.ShrinkBegin;
-		leftVbox.AddChild(resRow);
+		// Hairline rule between the two rows — same treatment as the
+		// vertical dividers so the capsule reads as one designed unit.
+		var rule = new HSeparator();
+		rule.AddThemeColorOverride("color", UITheme.Hairline);
+		leftVbox.AddChild(rule);
 
-		// v0.3.46 (Phase 4) — sub-item rows are keyed by their canonical
-		// ItemRegistry / MaterialRegistry sub-type string so _Process can
-		// look them up against the inventory snapshot. The display label
-		// uses the friendly name; the lookup key is the raw sub-type.
-		// v0.4.2 — sub-items aligned with the new taxonomy. Food shows
-		// the four real food sub-types (Capberry / SmallMushroom /
-		// HerbCluster / MagicBerry); SmallMushroom row counts EVERY
-		// mushroom variant via material aggregation. Stone adds Quartz
-		// + MagicCrystal. Wood reduces to DeadWood / LivingWood / Fungal.
-		_foodCat  = AddCollapsibleResource(resRow, "🍓", "Food",
-			ItemKind.Food, materialFamily: null,
-			new[]
-			{
-				("🫐", "Capberry",      "Capberry"),
-				("🍄", "Small Mushroom",  "SmallMushroom"),
-				("🌿", "Herb Cluster",    "HerbCluster"),
-				("🌺", "Magic Berry",     "MagicBerry"),
-			});
-		_stoneCat = AddCollapsibleResource(resRow, "🪨", "Stone",
-			ItemKind.Material, materialFamily: "Stone",
-			new[]
-			{
-				("◼",  "Granite",       "Granite"),
-				("◻",  "Limestone",     "Limestone"),
-				("◼",  "Marble",        "Marble"),
-				("⬛", "Obsidian",       "Obsidian"),
-				("◇",  "Quartz",        "Quartz"),
-				("✨", "Magic Stone",    "Magicstone"),
-				("💎", "Magic Crystal",  "MagicCrystal"),
-			});
-		_woodCat  = AddCollapsibleResource(resRow, "🪵", "Wood",
-			ItemKind.Material, materialFamily: "Wood",
-			new[]
-			{
-				("🪵", "Dead Wood",   "DeadWood"),
-				("🌿", "Living Wood", "LivingWood"),
-				("🍄", "Fungal Wood", "Fungal"),
-			});
-		_magicCat = AddCollapsibleResource(resRow, "✨", "Magic",
-			ItemKind.Magic, materialFamily: null,
-			new[]
-			{
-				("✨", "Raw Essence",   "RawEssence"),
-				("💎", "Crystal Shard", "CrystalShard"),
-			});
+		// Row 2 — resources. Each category is a fixed-min-width column:
+		// caret + icon + name on the left, right-aligned total on a stable
+		// edge. Expanding drops the per-sub-type breakdown beneath; rows
+		// derive from the registries and only show when non-zero.
+		_resFlow = new HFlowContainer { MouseFilter = MouseFilterEnum.Pass };
+		_resFlow.AddThemeConstantOverride("h_separation", ResSepX);
+		_resFlow.AddThemeConstantOverride("v_separation", 6);
+		leftVbox.AddChild(_resFlow);
 
-		var qualifier = Lbl("(colony total)", UITheme.Scaled(10), Muted);
-		qualifier.SizeFlagsVertical = SizeFlags.ShrinkBegin;
-		resRow.AddChild(qualifier);
+		_foodCat = AddCollapsibleResource(_resFlow, "🍓", "Food",
+			"Everything edible the colony owns.",
+			ItemKind.Food, materialFamily: null, RowsFromItemKind(ItemKind.Food));
+		_resFlow.AddChild(Divider());
+		_stoneCat = AddCollapsibleResource(_resFlow, "🪨", "Stone",
+			"Excavated stone and minerals, by type.",
+			ItemKind.Material, materialFamily: "Stone", RowsFromMaterialFamily("Stone"));
+		_resFlow.AddChild(Divider());
+		_woodCat = AddCollapsibleResource(_resFlow, "🪵", "Wood",
+			"Felled timber, by wood type.",
+			ItemKind.Material, materialFamily: "Wood", RowsFromMaterialFamily("Wood"));
+		_resFlow.AddChild(Divider());
+		_magicCat = AddCollapsibleResource(_resFlow, "✨", "Magic",
+			"Essence, shards, and magical preparations.",
+			ItemKind.Magic, materialFamily: null, RowsFromItemKind(ItemKind.Magic));
 
-		// Flexible spacer — the ResourceHUD floats centred over this gap; the
-		// left and right capsules size to their content so they never crowd it.
+		_cats = new[] { _foodCat, _stoneCat, _woodCat, _magicCat };
+
+		// Flexible spacer — the left and right capsules size to their
+		// content so they never crowd each other.
 		band.AddChild(new Control
 		{
 			SizeFlagsHorizontal = SizeFlags.ExpandFill,
@@ -238,55 +254,68 @@ public partial class HUDController : Control
 		};
 		_rightPanel.AddThemeStyleboxOverride("panel", FloatingPanelStyle.Make());
 		band.AddChild(_rightPanel);
-		var rightPanel = _rightPanel;
 
 		var rightHbox = new HBoxContainer();
 		rightHbox.AddThemeConstantOverride("separation", 6);
-		rightPanel.AddChild(rightHbox);
+		_rightPanel.AddChild(rightHbox);
 
-		rightHbox.AddChild(Lbl("Speed:", UITheme.Scaled(12), Gold));
+		rightHbox.AddChild(Lbl("Speed:", UITheme.Scaled(12), UITheme.TextAccent));
 
 		// Pause button
 		_pauseBtn = MakeSmallBtn("⏸");
 		_pauseBtn.Pressed += OnPauseToggle;
-		if (tips) _pauseBtn.TooltipText = "Pause / Unpause simulation";
+		if (_tips) Tooltips.Apply(_pauseBtn, "Pause / Unpause simulation");
 		rightHbox.AddChild(_pauseBtn);
 
 		// Speed preset buttons
-		// v0.4.19 — multiplier values now match the displayed labels. Until
-		// this patch the buttons displayed 1×/2×/5×/10× but actually
-		// requested 1×/5×/20×/100× from `SimulationManager.SetSpeed`,
-		// so "2×" was running the sim five times faster than the
-		// player asked for. The sim tick interval is `BaseTickIntervalMs /
-		// SpeedMultiplier`, so movement, animations, and clock
-		// progression all scale linearly off this value.
-		AddSpeedBtn(rightHbox, "1×",  1f,  tips ? "Normal speed (1× — real-time)"          : "");
-		AddSpeedBtn(rightHbox, "2×",  2f,  tips ? "Double speed (2×)"                       : "");
-		AddSpeedBtn(rightHbox, "5×",  5f,  tips ? "Fast (5×)"                               : "");
-		AddSpeedBtn(rightHbox, "10×", 10f, tips ? "Maximum speed (10×)"                     : "");
+		// v0.4.19 — multiplier values match the displayed labels. The sim
+		// tick interval is `BaseTickIntervalMs / SpeedMultiplier`, so
+		// movement, animations, and clock progression all scale linearly
+		// off this value.
+		AddSpeedBtn(rightHbox, "1×",  1f,  _tips ? "Normal speed (1× — real-time)" : "");
+		AddSpeedBtn(rightHbox, "2×",  2f,  _tips ? "Double speed (2×)"             : "");
+		AddSpeedBtn(rightHbox, "5×",  5f,  _tips ? "Fast (5×)"                     : "");
+		AddSpeedBtn(rightHbox, "10×", 10f, _tips ? "Maximum speed (10×)"           : "");
 
 		SetActiveSpeed(1f);
 
 		// Main Menu button
 		rightHbox.AddChild(Divider());
 		var menu = MakeSmallBtn("Menu");
-		menu.Modulate = new Color(1.0f, 0.90f, 0.50f);
+		menu.Modulate = UITheme.TextAccent;
 		menu.Pressed += () => EmitSignal(SignalName.MenuRequested);
-		if (tips) menu.TooltipText = "Open pause menu";
+		if (_tips) Tooltips.Apply(menu, "Open pause menu");
 		rightHbox.AddChild(menu);
 
 		// ── Stat label tooltips ────────────────────────────────────────────
-		if (tips)
+		if (_tips)
 		{
 			_eraLabel.MouseFilter  = MouseFilterEnum.Pass;
-			_eraLabel.TooltipText  = "Current historical era of the colony.\nEra advances as population and culture grow.";
+			Tooltips.Apply(_eraLabel,  "Current historical era of the colony.\nEra advances as population and culture grow.");
 			_dateLabel.MouseFilter = MouseFilterEnum.Pass;
-			_dateLabel.TooltipText = "In-game date: Season, Day, Year S.D.\n120 days per year (4 seasons × 30 days).";
+			Tooltips.Apply(_dateLabel, "In-game date: Season, Day, Year S.D.\n120 days per year (4 seasons × 30 days).");
 			_popLabel.MouseFilter  = MouseFilterEnum.Pass;
-			_popLabel.TooltipText  = "Total living shroomps in the colony.";
+			Tooltips.Apply(_popLabel,  "Total living shroomps in the colony.");
 			_moodLabel.MouseFilter = MouseFilterEnum.Pass;
-			_moodLabel.TooltipText = "😊 Inspired shroomps (mood ≥ 80)\n😢 Distressed or worse (mood < 40).";
+			Tooltips.Apply(_moodLabel, "😊 Inspired shroomps (mood ≥ 80)\n😢 Distressed or worse (mood < 40).");
 		}
+	}
+
+	// ── Registry-driven row seeds ──────────────────────────────────────────────
+	// Single source of truth: whatever the registries define is what the HUD
+	// can break down. Adding a new food / mineral / magic item automatically
+	// gives it a row here (hidden until the colony owns one).
+
+	private static IEnumerable<(string Icon, string Name, string Key)> RowsFromItemKind(ItemKind kind)
+	{
+		foreach (var def in ItemRegistry.InKind(kind))
+			yield return (def.Icon, def.DisplayName, def.SubType);
+	}
+
+	private static IEnumerable<(string Icon, string Name, string Key)> RowsFromMaterialFamily(string family)
+	{
+		foreach (var def in MaterialRegistry.InFamily(family))
+			yield return (def.Icon, def.DisplayName, def.Key.SubType);
 	}
 
 	// ── Public update ──────────────────────────────────────────────────────────
@@ -329,7 +358,7 @@ public partial class HUDController : Control
 	{
 		bool paused = IsPaused;
 		_pauseBtn.Text     = paused ? "▶" : "⏸";
-		_pauseBtn.Modulate = paused ? new Color(1.0f, 0.85f, 0.30f) : Colors.White;
+		_pauseBtn.Modulate = paused ? UITheme.TextAccent : Colors.White;
 	}
 
 	// ── Speed buttons ──────────────────────────────────────────────────────────
@@ -348,7 +377,7 @@ public partial class HUDController : Control
 			Sim.SetSpeed(speed);
 			SetActiveSpeed(speed);
 		};
-		if (tooltip.Length > 0) btn.TooltipText = tooltip;
+		if (tooltip.Length > 0) Tooltips.Apply(btn, tooltip);
 		_speedBtns.Add((btn, speed));
 		parent.AddChild(btn);
 	}
@@ -364,9 +393,7 @@ public partial class HUDController : Control
 		foreach (var (btn, speed) in _speedBtns)
 		{
 			bool active = !IsPaused && Mathf.IsEqualApprox(speed, _activeSpeed);
-			btn.Modulate = active
-				? new Color(1.0f, 0.85f, 0.30f)  // gold = active
-				: Colors.White;
+			btn.Modulate = active ? UITheme.TextAccent : Colors.White;
 		}
 	}
 
@@ -397,80 +424,102 @@ public partial class HUDController : Control
 		return sp > 0 ? rest[..sp] : rest;
 	}
 
-	// ── Helpers ────────────────────────────────────────────────────────────────
+	// ── Resource aggregation ───────────────────────────────────────────────────
 
-	// Each `_Process` tick, pull the colony's resource ledger from the sim and
-	// update the four resource labels. Cheap to call every frame — snapshot
-	// returns a copy of four floats.
-	// v0.4.27 — throttle removed (was 200 ms in v0.4.23). Gameplay
-	// requirement: resource totals must visibly update the moment they
-	// actually change in the sim. With v0.4.23's `SetTextIfChanged`
-	// guard the per-frame cost when nothing changed is a quick
-	// inventory-snapshot walk + a handful of string compares — no
-	// `Label.Text` writes, no canvas redraws, no GPU sync points. Only
-	// frames where a resource truly changed pay any visible cost.
+	// Each `_Process` tick, aggregate the colony's stored inventory + on-map
+	// ground items into the four category widgets in a single walk each.
+	// PARITY INVARIANT: a category's header total is computed as the sum of
+	// what lands in its rows (including the "Other" catch-all), so the
+	// number always equals the expanded breakdown. Cheap per frame: one
+	// inventory snapshot (pre-existing cost), one small dictionary copy,
+	// and write-elided label updates — and the old per-frame
+	// GetResourcesSnapshot() (four O(n) inventory walks) is gone.
 	public override void _Process(double delta)
 	{
-		if (Sim == null) return;
+		if (Sim == null || _cats.Length == 0) return;
 
-		// v0.3.46 (Phase 4) — pull the inventory snapshot once per frame
-		// refresh and aggregate per-category + per-subtype totals in a
-		// single walk. The float-ledger fallback (r.Food etc.) still
-		// works because ColonyResources.Food is now an inventory-derived
-		// total + back-compat unstored buffer; we use the inventory
-		// directly here so the same walk fills the sub-item breakdown
-		// labels.
 		var inv = Sim.GetInventorySnapshot();
-		int foodTotal = 0, magicTotal = 0;
-		int stoneTotal = 0, woodTotal = 0;
+		Sim.CopyDroppedGroupTotals(_groundTallies);
 
-		// Zero out all sub-labels first so depleted entries fall back to 0.
-		// `SetTextIfChanged` skips the label write when the text is
-		// already what we'd be setting it to — a Label only redraws
-		// when its text actually mutates.
-		foreach (var lbl in _foodCat .SubLabels.Values) SetTextIfChanged(lbl, "0");
-		foreach (var lbl in _stoneCat.SubLabels.Values) SetTextIfChanged(lbl, "0");
-		foreach (var lbl in _woodCat .SubLabels.Values) SetTextIfChanged(lbl, "0");
-		foreach (var lbl in _magicCat.SubLabels.Values) SetTextIfChanged(lbl, "0");
+		foreach (var cat in _cats)
+		{
+			cat.Stored = cat.Ground = 0;
+			foreach (var row in cat.RowList) row.Stored = row.Ground = 0;
+		}
 
 		foreach (var row in inv)
+			Accumulate(row.Kind, row.MaterialFamily, row.MaterialSubType, row.SubType, row.Quantity, ground: false);
+		foreach (var kv in _groundTallies)
+			Accumulate(kv.Key.Kind, kv.Key.Family, kv.Key.MatSub, kv.Key.ItemSub, kv.Value, ground: true);
+
+		bool rowsChanged = false;
+		foreach (var cat in _cats) rowsChanged |= FlushCategory(cat);
+		// Row visibility changes can alter the capsule's natural width —
+		// re-budget so the flow wrap stays correct.
+		if (rowsChanged) Callable.From(UpdateResponsiveLayout).CallDeferred();
+	}
+
+	private void Accumulate(ItemKind kind, string family, string matSub, string itemSub, int qty, bool ground)
+	{
+		if (qty <= 0) return;
+		ResourceCategory? cat = kind switch
 		{
-			switch (row.Kind)
+			ItemKind.Food  => _foodCat,
+			ItemKind.Magic => _magicCat,
+			ItemKind.Material when family == "Stone" => _stoneCat,
+			ItemKind.Material when family == "Wood"  => _woodCat,
+			_ => null,   // other kinds/families live in the Resources tab ledger
+		};
+		if (cat == null) return;
+
+		string key = cat.MaterialFamily != null ? matSub : itemSub;
+		if (key == null || !cat.Rows.TryGetValue(key, out var row))
+			row = cat.OtherRow;   // unregistered sub-type — still counted, still displayed
+
+		if (ground) { row.Ground += qty; cat.Ground += qty; }
+		else        { row.Stored += qty; cat.Stored += qty; }
+	}
+
+	// Writes a category's accumulated counts into its labels + tooltips.
+	// Returns true when any row's visibility flipped (layout re-budget cue).
+	private bool FlushCategory(ResourceCategory cat)
+	{
+		int total = cat.Stored + cat.Ground;
+		SetTextIfChanged(cat.TotalLbl, total.ToString("N0", Inv));
+
+		bool rowsChanged = false;
+		int visibleRows = 0;
+		foreach (var row in cat.RowList)
+		{
+			int count = row.Stored + row.Ground;
+			bool show = count > 0;
+			if (row.Root.Visible != show) { row.Root.Visible = show; rowsChanged = true; }
+			if (!show) continue;
+			visibleRows++;
+			SetTextIfChanged(row.ValueLbl, count.ToString("N0", Inv));
+			if (_tips && (row.Stored != row.ShownStored || row.Ground != row.ShownGround))
 			{
-				case ItemKind.Food:
-					foodTotal += row.Quantity;
-					if (_foodCat.SubLabels.TryGetValue(row.SubType, out var fl))
-						SetTextIfChanged(fl, (ParseInt(fl.Text) + row.Quantity).ToString());
-					break;
-				case ItemKind.Material:
-					if (row.MaterialFamily == "Stone")
-					{
-						stoneTotal += row.Quantity;
-						if (_stoneCat.SubLabels.TryGetValue(row.MaterialSubType, out var sl))
-							SetTextIfChanged(sl, (ParseInt(sl.Text) + row.Quantity).ToString());
-					}
-					else if (row.MaterialFamily == "Wood")
-					{
-						woodTotal += row.Quantity;
-						if (_woodCat.SubLabels.TryGetValue(row.MaterialSubType, out var wl))
-							SetTextIfChanged(wl, (ParseInt(wl.Text) + row.Quantity).ToString());
-					}
-					break;
-				case ItemKind.Magic:
-					magicTotal += row.Quantity;
-					if (_magicCat.SubLabels.TryGetValue(row.SubType, out var ml))
-						SetTextIfChanged(ml, (ParseInt(ml.Text) + row.Quantity).ToString());
-					break;
+				row.ShownStored = row.Stored;
+				row.ShownGround = row.Ground;
+				Tooltips.Apply((Control)row.Root,
+					$"{row.Name}: {count.ToString("N0", Inv)}\n" +
+					$"Stockpiled {row.Stored.ToString("N0", Inv)} · On the ground {row.Ground.ToString("N0", Inv)}");
 			}
 		}
 
-		// Fold the legacy "unstored" buffer in so the category total still
-		// reflects float-ledger writes from any code path we haven't migrated.
-		var r = Sim.GetResourcesSnapshot();
-		SetTextIfChanged(_foodCat .TotalLbl, (foodTotal  + System.Math.Max(0, (int)r.Food         - foodTotal )).ToString());
-		SetTextIfChanged(_stoneCat.TotalLbl, (stoneTotal + System.Math.Max(0, (int)r.Stone        - stoneTotal)).ToString());
-		SetTextIfChanged(_woodCat .TotalLbl, (woodTotal  + System.Math.Max(0, (int)r.Wood         - woodTotal )).ToString());
-		SetTextIfChanged(_magicCat.TotalLbl, (magicTotal + System.Math.Max(0, (int)r.MagicEssence - magicTotal)).ToString());
+		bool showEmpty = visibleRows == 0;
+		if (cat.EmptyLbl.Visible != showEmpty) { cat.EmptyLbl.Visible = showEmpty; rowsChanged = true; }
+
+		if (_tips && (cat.Stored != cat.ShownStored || cat.Ground != cat.ShownGround))
+		{
+			cat.ShownStored = cat.Stored;
+			cat.ShownGround = cat.Ground;
+			string tip = $"{cat.Name}: {total.ToString("N0", Inv)}\n{cat.Blurb}\n" +
+				$"Stockpiled {cat.Stored.ToString("N0", Inv)} · On the ground {cat.Ground.ToString("N0", Inv)}";
+			Tooltips.Apply(cat.TitleLbl, tip);
+			Tooltips.Apply(cat.TotalLbl, tip);
+		}
+		return rowsChanged;
 	}
 
 	// v0.4.23 — write-elide. `Label.Text =` always triggers a Godot text-layout
@@ -482,37 +531,78 @@ public partial class HUDController : Control
 		if (lbl.Text != newText) lbl.Text = newText;
 	}
 
-	private static int ParseInt(string s) =>
-		int.TryParse(s, out var v) ? v : 0;
+	// ── Responsive width budget ────────────────────────────────────────────────
 
-	// v0.3.41 — collapsible resource category. Returns a ResourceCategory
-	// wrapping the caret button, total label, and expansion VBox. The
-	// expansion box is hidden by default; clicking the caret toggles it
-	// and flips ▶/▼.
+	// Gives both left-capsule flow rows a width budget of "viewport minus
+	// the Speed/Menu capsule and insets". At or under their natural
+	// single-line width the capsule hugs its content (floating look); a
+	// narrow window or large UI Size makes the rows wrap instead of the
+	// two capsules colliding. Called on window resize, UI-scale rebuild,
+	// caret toggles, and row-set changes.
+	private void UpdateResponsiveLayout()
+	{
+		if (_statsFlow == null || _resFlow == null || _rightPanel == null) return;
+		if (!IsInsideTree()) return;
+
+		float rightW = _rightPanel.GetCombinedMinimumSize().X;
+		float avail  = Size.X - UITheme.EdgeInset * 2f - BandSeparation - rightW
+		             - UITheme.ContentPadX * 2f;
+		float budget = Mathf.Max(UITheme.ScaledF(240), avail);
+		ApplyFlowBudget(_statsFlow, budget, StatsSepX);
+		ApplyFlowBudget(_resFlow,   budget, ResSepX);
+	}
+
+	private static void ApplyFlowBudget(HFlowContainer flow, float budget, int sepX)
+	{
+		// Natural single-line width = Σ visible children + separations.
+		// Clamping the flow's minimum width to min(natural, budget) is what
+		// makes it wrap: a flow container inside a shrink-sized capsule
+		// otherwise collapses to its widest child and wraps everything.
+		float natural = 0f;
+		int visible = 0;
+		foreach (var child in flow.GetChildren())
+		{
+			if (child is Control c && c.Visible)
+			{
+				natural += c.GetCombinedMinimumSize().X;
+				visible++;
+			}
+		}
+		if (visible > 1) natural += sepX * (visible - 1);
+		flow.CustomMinimumSize = new Vector2(Mathf.Min(natural, budget), 0);
+	}
+
+	// ── Category widget construction ───────────────────────────────────────────
+
+	// v0.3.41 — collapsible resource category. The expansion box is hidden by
+	// default; clicking the caret toggles it and flips ▶/▼.
 	private ResourceCategory AddCollapsibleResource(
-		HBoxContainer parent,
+		Container parent,
 		string icon,
 		string name,
+		string blurb,
 		ItemKind kind,
 		string? materialFamily,
-		(string Icon, string Name, string Key)[] subItems)
+		IEnumerable<(string Icon, string Name, string Key)> subItems)
 	{
 		var cat = new ResourceCategory
 		{
-			Kind = kind,
+			Kind           = kind,
 			MaterialFamily = materialFamily,
+			Name           = name,
+			Blurb          = blurb,
 		};
 
-		// Column holding the header row plus its own expansion box.
+		// Column holding the header row plus its own expansion box. The
+		// min width keeps the four category columns on a consistent grid
+		// and gives the right-aligned totals a stable edge.
 		var col = new VBoxContainer();
 		col.AddThemeConstantOverride("separation", 2);
 		col.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+		col.CustomMinimumSize = new Vector2(UITheme.Scaled(126), 0);
 		parent.AddChild(col);
 
-		// Header: ▶ icon + name + total. Caret button doubles as the
-		// click target; the whole header pressing it would be nicer but
-		// keeping the caret as a dedicated Button is simpler and matches
-		// the user's "click the caret" phrasing.
+		// Header: ▶ icon + name … total (right-aligned).
 		var header = new HBoxContainer();
 		header.AddThemeConstantOverride("separation", 4);
 		col.AddChild(header);
@@ -525,16 +615,20 @@ public partial class HUDController : Control
 			CustomMinimumSize = new Vector2(UITheme.Scaled(16), UITheme.Scaled(16)),
 		};
 		cat.CaretBtn.AddThemeFontSizeOverride("font_size", UITheme.Scaled(10));
-		cat.CaretBtn.AddThemeColorOverride("font_color",         Muted);
-		cat.CaretBtn.AddThemeColorOverride("font_hover_color",   Gold);
-		cat.CaretBtn.AddThemeColorOverride("font_pressed_color", Gold);
-		cat.CaretBtn.TooltipText = $"Toggle {name} breakdown";
+		cat.CaretBtn.AddThemeColorOverride("font_color",         UITheme.TextMuted);
+		cat.CaretBtn.AddThemeColorOverride("font_hover_color",   UITheme.TextAccent);
+		cat.CaretBtn.AddThemeColorOverride("font_pressed_color", UITheme.TextAccent);
+		if (_tips) Tooltips.Apply(cat.CaretBtn, $"Show or hide the {name} breakdown.");
 		header.AddChild(cat.CaretBtn);
 
-		var titleLbl = Lbl($"{icon} {name}", UITheme.Scaled(11), Muted);
-		header.AddChild(titleLbl);
+		cat.TitleLbl = Lbl($"{icon} {name}", UITheme.Scaled(11), UITheme.TextMuted);
+		cat.TitleLbl.MouseFilter = MouseFilterEnum.Pass;
+		header.AddChild(cat.TitleLbl);
 
-		cat.TotalLbl = Lbl("—", UITheme.Scaled(12), Parchment);
+		cat.TotalLbl = Lbl("0", UITheme.Scaled(13), UITheme.TextPrimary);
+		cat.TotalLbl.HorizontalAlignment   = HorizontalAlignment.Right;
+		cat.TotalLbl.SizeFlagsHorizontal   = SizeFlags.ExpandFill;
+		cat.TotalLbl.MouseFilter           = MouseFilterEnum.Pass;
 		header.AddChild(cat.TotalLbl);
 
 		// Expansion VBox — initially hidden.
@@ -552,16 +646,16 @@ public partial class HUDController : Control
 		indent.AddChild(subCol);
 
 		foreach (var (subIcon, subName, subKey) in subItems)
-		{
-			var row = new HBoxContainer();
-			row.AddThemeConstantOverride("separation", 4);
-			row.AddChild(Lbl($"{subIcon} {subName}", UITheme.Scaled(10), Muted));
-			row.AddChild(new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill });
-			var valueLbl = Lbl("0", UITheme.Scaled(10), Muted);
-			row.AddChild(valueLbl);
-			subCol.AddChild(row);
-			cat.SubLabels[subKey] = valueLbl;
-		}
+			AddSubRow(cat, subCol, subIcon, subName, subKey);
+
+		// Catch-all row: anything counted for this category that isn't a
+		// registered sub-type still shows up, so the rows always sum to
+		// the header total.
+		cat.OtherRow = AddSubRow(cat, subCol, "•", "Other", key: null);
+
+		cat.EmptyLbl = Lbl("(none yet)", UITheme.Scaled(10), UITheme.TextMuted);
+		cat.EmptyLbl.Visible = false;
+		subCol.AddChild(cat.EmptyLbl);
 
 		// Local capture so the lambda doesn't reference a re-used variable.
 		var captured = cat;
@@ -570,18 +664,39 @@ public partial class HUDController : Control
 			captured.Expanded = !captured.Expanded;
 			captured.ExpansionBox.Visible = captured.Expanded;
 			captured.CaretBtn.Text = captured.Expanded ? "▼" : "▶";
+			Callable.From(UpdateResponsiveLayout).CallDeferred();
 		};
 
 		return cat;
 	}
 
-	// v0.5.43 — speed / menu buttons now scale with UI Size. Pre-v0.5.43
-	// these were hardcoded to a 32-px height + AnimatedButton's internal
-	// 13-pt Compact font, neither of which scaled with the v0.5.29 UI Size
-	// slider. Result: the speed/menu capsule stayed at 100 % size while
-	// the rest of the HUD shrank, causing visual overlap on small UI Size.
-	// Sam: "Speed/Menu panel does not currently scale with the rest of the
-	// UI, causing overlap at small UI sizes."
+	private SubRow AddSubRow(ResourceCategory cat, VBoxContainer host, string icon, string name, string? key)
+	{
+		var rowBox = new HBoxContainer
+		{
+			Visible     = false,               // shown once the colony owns one
+			MouseFilter = MouseFilterEnum.Pass, // row-level tooltip hover target
+		};
+		rowBox.AddThemeConstantOverride("separation", 4);
+		rowBox.AddChild(Lbl($"{icon} {name}", UITheme.Scaled(10), UITheme.TextMuted));
+
+		var valueLbl = Lbl("0", UITheme.Scaled(10), UITheme.TextPrimary);
+		valueLbl.HorizontalAlignment = HorizontalAlignment.Right;
+		valueLbl.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		valueLbl.CustomMinimumSize   = new Vector2(UITheme.Scaled(34), 0);
+		rowBox.AddChild(valueLbl);
+		host.AddChild(rowBox);
+
+		var row = new SubRow { Root = rowBox, ValueLbl = valueLbl, Name = name };
+		cat.RowList.Add(row);
+		if (key != null) cat.Rows[key] = row;
+		return row;
+	}
+
+	// ── Shared widget helpers ──────────────────────────────────────────────────
+
+	// v0.5.43 — speed / menu buttons scale with UI Size (see that entry for
+	// the pre-history).
 	private static AnimatedButton MakeSmallBtn(string text)
 	{
 		var btn = new AnimatedButton
@@ -629,7 +744,7 @@ public partial class HUDController : Control
 	private static VSeparator Divider()
 	{
 		var v = new VSeparator();
-		v.AddThemeColorOverride("color", new Color(0.55f, 0.40f, 0.15f, 0.7f));
+		v.AddThemeColorOverride("color", UITheme.Hairline);
 		return v;
 	}
 }
