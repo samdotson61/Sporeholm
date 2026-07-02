@@ -32,13 +32,25 @@ public static class Changelog
             var body = new List<string>();
             while (i < lines.Length && !IsHeading(lines[i]))
             {
-                if (lines[i].Trim() != "---") body.Add(lines[i]); // drop section separators
+                if (lines[i].Trim() != "---") body.Add(CleanBodyLine(lines[i]));
                 i++;
             }
             var (version, date, title) = SplitHeading(heading);
             entries.Add(new NewsEntry(version, date, title, string.Join("\n", body).Trim()));
         }
         return entries;
+    }
+
+    /// <summary>The feed renders plain text, so markdown markers would show literally
+    /// (v1.0.1 displayed raw "###" section markers). Sub-headings keep their text,
+    /// list markers become a bullet glyph, and bold markers are dropped.</summary>
+    internal static string CleanBodyLine(string line)
+    {
+        var m = Regex.Match(line, @"^(\s*)(#{1,6})\s+(.*)$");
+        if (m.Success) return m.Groups[1].Value + m.Groups[3].Value.TrimEnd();
+        m = Regex.Match(line, @"^(\s*)[-*]\s+(.*)$");
+        if (m.Success) line = m.Groups[1].Value + "• " + m.Groups[2].Value;
+        return line.Replace("**", "");
     }
 
     private static bool IsHeading(string line) => line.StartsWith("## ", StringComparison.Ordinal);
@@ -48,6 +60,13 @@ public static class Changelog
         string version = h;
         var lb = h.IndexOf('['); var rb = h.IndexOf(']');
         if (lb >= 0 && rb > lb) version = h.Substring(lb + 1, rb - lb - 1).Trim();
+        else
+        {
+            // No brackets ("## 0.7.0 - date - title"): the version is the first segment,
+            // not the whole heading.
+            var first = h.Split(new[] { " — ", " – ", " - " }, StringSplitOptions.None)[0].Trim();
+            if (first.Length > 0) version = first;
+        }
 
         var parts = h.Split(new[] { " — ", " – ", " - " }, StringSplitOptions.None);
         string? date = null;

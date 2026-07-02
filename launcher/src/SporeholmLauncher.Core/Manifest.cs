@@ -17,9 +17,15 @@ public sealed class Manifest
     /// <summary>ISO-8601 release timestamp (informational).</summary>
     public string? ReleasedUtc { get; set; }
 
-    /// <summary>Per-OS download: key is "windows" | "macos" | "linux".</summary>
-    public Dictionary<string, ManifestFile> Files { get; set; } =
-        new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Per-OS download: key is "windows" | "macos" | "linux". The setter re-wraps
+    /// with a case-insensitive comparer — System.Text.Json builds its own dictionary on
+    /// deserialize, which would otherwise silently drop the comparer declared here.</summary>
+    public Dictionary<string, ManifestFile> Files
+    {
+        get => _files;
+        set => _files = new(value, StringComparer.OrdinalIgnoreCase);
+    }
+    private Dictionary<string, ManifestFile> _files = new(StringComparer.OrdinalIgnoreCase);
 
     public ManifestFile? FileFor(string os) => Files.TryGetValue(os, out var f) ? f : null;
 
@@ -33,8 +39,14 @@ public sealed class Manifest
 public sealed class LauncherManifest
 {
     public string Version { get; set; } = "";
-    public Dictionary<string, ManifestFile> Files { get; set; } =
-        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Setter re-wraps for case-insensitive keys (see <see cref="Manifest.Files"/>).</summary>
+    public Dictionary<string, ManifestFile> Files
+    {
+        get => _files;
+        set => _files = new(value, StringComparer.OrdinalIgnoreCase);
+    }
+    private Dictionary<string, ManifestFile> _files = new(StringComparer.OrdinalIgnoreCase);
 
     public ManifestFile? FileFor(string os) => Files.TryGetValue(os, out var f) ? f : null;
 }

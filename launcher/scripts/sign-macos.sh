@@ -3,6 +3,11 @@
 # Sign + notarize + staple BOTH macOS artifacts — the game (Sporeholm.app) and the launcher
 # (SporeholmLauncher.app) — then refresh the release so Gatekeeper opens them without warnings.
 #
+# NOTE (since v0.8.10): normally you DON'T need this — package-macos.sh signs AND
+# notarizes during packaging, and release.sh calls it for you. This standalone tool
+# remains for one case: re-signing artifacts that are ALREADY PUBLISHED on a release
+# in place (e.g. a release finalized on a machine that had no cert).
+#
 # RUN THIS ON YOUR MAC (codesign / notarytool / stapler are macOS-only). You need:
 #   • Xcode Command Line Tools           ->  xcode-select --install
 #   • A "Developer ID Application" cert   ->  developer.apple.com → Certificates (in your login keychain)

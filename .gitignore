@@ -2,7 +2,6 @@
 .godot/
 *.translation
 *.import
-export_presets.cfg
 
 # C# / .NET
 .vs/
@@ -14,3 +13,6 @@ bin/
 
 # macOS Finder junk
 .DS_Store
+
+# Local export output (release.sh / Godot Project > Export)
+exports/

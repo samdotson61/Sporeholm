@@ -62,11 +62,50 @@ pipeline so it can't recur, and carries two small game-side polish fixes for the
   once); it now reads `project.godot` → `config/version` directly, the documented single
   source of truth.
 
-### Known cosmetics (macOS launcher, noted for later)
-- The menu bar shows "Avalonia Application" instead of "Sporeholm Launcher" (arch-trampoline
-  launch quirk); the news feed renders markdown `###` markers literally. Neither affects
-  function. (`scripts/ui/ResourceHUD.cs` is dead code — superseded by the HUD merge in
-  v0.3.19 — left in place pending a deliberate removal.)
+### Launcher 1.0.2 — the two known cosmetics, fixed (2026-07-02)
+- The macOS menu bar now reads **"Sporeholm Launcher"** (the Avalonia application name was
+  never set, so it fell back to "Avalonia Application").
+- The news feed no longer shows raw markdown — `###` sub-headings render as their text,
+  `-`/`*` list markers become bullets, `**bold**` markers are dropped (`Changelog.CleanBodyLine`).
+- Dead code removed: `scripts/ui/ResourceHUD.cs` (superseded by the HUD merge in v0.3.19).
+
+### Tests — the manual audit is now executable (2026-07-02)
+- **`launcher/tests/SporeholmLauncher.Core.Tests`** (36 tests): SemVer parsing/ordering
+  (0.8.10 > 0.8.9 — the self-update comparison), manifest parsing incl. the launcher
+  section, changelog/news-feed parsing + body cleanup, config JSON round-trips.
+  First run immediately caught two real Core bugs, both fixed: `Manifest.FileFor()`'s
+  case-insensitive lookup silently broke after JSON deserialization (System.Text.Json
+  replaces the dictionary, dropping its comparer), and bracket-less changelog headings
+  parsed the whole heading as the version.
+- **`tests/Sporeholm.Tests`** (14 tests): the audit's "Pass A" as code — every recipe
+  output/ingredient and crop yield resolves in ItemRegistry/MaterialRegistry (the v0.8.7
+  "recipe never offered" and v0.8.9 butcher-flag bug classes), registry uniqueness +
+  lookup round-trips, crop growth/yield sanity, Botany gating monotonicity. Runs headless —
+  no engine needed — because the sim layer is pure C#.
+- **CI** (`.github/workflows/ci.yml`): both solutions build + all tests run on every
+  push/PR; the launcher suite runs on ubuntu + macos + windows.
+
+### Release pipeline v2 — one command, one machine (2026-07-02)
+- **`launcher/scripts/release.sh`** — cut a complete release from the Mac:
+  headless-exports Windows/Linux/macOS with the pinned Godot .NET editor
+  (`/Applications/Godot_mono_4.6.3.app` + matching mono templates), zips with
+  `version.txt` stamps and correct Unix permissions, writes the manifest + a news-feed
+  changelog truncated to the newest 10 entries, creates the GitHub release, carries the
+  previous launcher binaries forward when unchanged (releases stay self-contained), and
+  finalizes macOS via `package-macos.sh`. The Windows two-machine path still works.
+- **`package-macos.sh` now notarizes in the same pass** as signing — the old flow
+  double-shipped ~270 MB (package, upload, re-download, re-sign, re-upload). It also
+  skips the launcher rebuild when `LauncherInfo.Version` matches the manifest, and
+  strips FinderInfo xattrs before signing (iCloud/FileProvider folders re-apply them,
+  and codesign rejects the "detritus" — signing happens in a temp dir regardless).
+- **`export_presets.cfg` is now committed** (was machine-local — how the "1.0" macOS
+  bundle version shipped). All three presets verified by exporting on the Mac and
+  launch-testing the macOS output; `release.sh` keeps the preset's version fields synced
+  from `config/version`. Windows box: move your local presets file aside on first pull.
+- `BehaviorSystem.cs` (6,672 lines, ~12% of the game in one file) split into 8 domain
+  partials — movement, rescue, medical, combat, task selection, task constructors, task
+  effects, map helpers — pure code motion ahead of Phase 9's behavior work; builds clean
+  with all tests green before and after.
 
 Build clean, 0 warnings / 0 errors; every repaired artifact was launch-verified on Apple
 Silicon before upload, including the full launcher → install → play player path.

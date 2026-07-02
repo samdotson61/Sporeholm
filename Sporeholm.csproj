@@ -1,4 +1,4 @@
-<Project Sdk="Godot.NET.Sdk/4.6.2">
+<Project Sdk="Godot.NET.Sdk/4.6.3">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -8,9 +8,12 @@
 
   <!-- The launcher is a separate .NET solution living under launcher/ (it
        installs/updates this game). Keep its sources out of the game's compile;
-       a .gdignore in that folder keeps the Godot editor out of it too. -->
+       a .gdignore in that folder keeps the Godot editor out of it too.
+       Same treatment for tests/ (the xunit project that references this one). -->
   <ItemGroup>
     <Compile Remove="launcher\**\*.cs" />
     <None Remove="launcher\**\*" />
+    <Compile Remove="tests\**\*.cs" />
+    <None Remove="tests\**\*" />
   </ItemGroup>
 </Project>

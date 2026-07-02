@@ -46,8 +46,15 @@ SporeholmLauncher/
 │   ├── SporeholmLauncher.Core/   # the engine — pure .NET BCL, no NuGet deps
 │   ├── SporeholmLauncher.Cli/    # headless: status/check/update/play/rollback/mods/config
 │   └── SporeholmLauncher.App/    # Avalonia GUI (the double-click launcher)
+├── tests/
+│   └── SporeholmLauncher.Core.Tests/  # xunit: SemVer, manifest, changelog feed, json io
 ├── scripts/
-│   └── package-release.ps1       # producer side: zip + manifest + GitHub publish
+│   ├── release.sh                # THE release command (Mac): export → package → notarize → publish
+│   ├── package-macos.sh          # macOS finalize: repair + sign + notarize + smoke + upload
+│   ├── package-release.ps1       # Windows-side producer: zip + manifest + GitHub publish
+│   ├── build-launcher.ps1        # dotnet publish per RID (Windows box)
+│   ├── make-mac-app.ps1          # Windows-side .app preview (intermediate only)
+│   └── sign-macos.sh             # standalone re-sign of already-published assets (rare)
 └── samples/manifest.json         # reference manifest
 ```
 
@@ -243,6 +250,9 @@ and shipped triple-broken — exec bits / signing / missing dylibs — hence the
   with no prompt, verified through the real quarantine path.
 - **Windows code-signing** (separate cert; see RELEASING.md) so SmartScreen stops warning.
 
-**Known cosmetics (macOS):** the running app's menu-bar name shows "Avalonia
-Application" instead of "Sporeholm Launcher" (trampoline launch quirk), and the news
-feed renders markdown `###` markers literally. Neither affects function.
+**Tested:** `launcher/tests/SporeholmLauncher.Core.Tests` (xunit, 36 tests — SemVer,
+manifest, news feed, config io) runs in CI on ubuntu/macos/windows via
+`.github/workflows/ci.yml`. Its first run caught two real Core bugs (case-insensitive
+manifest lookup lost on JSON load; bracket-less changelog headings), both fixed in 1.0.2.
+1.0.2 also fixed the two macOS cosmetics: the menu-bar name ("Avalonia Application" →
+"Sporeholm Launcher") and raw markdown markers in the news feed.

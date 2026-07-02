@@ -10,4 +10,8 @@
          a .NET 8 SDK exists, independent of the Avalonia GUI. -->
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="SporeholmLauncher.Core.Tests" />
+  </ItemGroup>
+
 </Project>

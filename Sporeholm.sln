@@ -5,6 +5,10 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sporeholm", "Sporeholm.csproj", "{5B36FA3B-0A8C-4FD1-A158-3DBB69DB359D}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{68E7A405-3997-45FB-A83B-242D186BD3C1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sporeholm.Tests", "tests\Sporeholm.Tests\Sporeholm.Tests.csproj", "{0169F283-4E1F-480E-8FAF-FBD1E0EBF7A0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -18,5 +22,12 @@ Global
 		{5B36FA3B-0A8C-4FD1-A158-3DBB69DB359D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5B36FA3B-0A8C-4FD1-A158-3DBB69DB359D}.Release|Any CPU.ActiveCfg = Debug|Any CPU
 		{5B36FA3B-0A8C-4FD1-A158-3DBB69DB359D}.Release|Any CPU.Build.0 = Debug|Any CPU
+		{0169F283-4E1F-480E-8FAF-FBD1E0EBF7A0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0169F283-4E1F-480E-8FAF-FBD1E0EBF7A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0169F283-4E1F-480E-8FAF-FBD1E0EBF7A0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0169F283-4E1F-480E-8FAF-FBD1E0EBF7A0}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{0169F283-4E1F-480E-8FAF-FBD1E0EBF7A0} = {68E7A405-3997-45FB-A83B-242D186BD3C1}
 	EndGlobalSection
 EndGlobal

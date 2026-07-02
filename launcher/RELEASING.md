@@ -6,11 +6,36 @@ out of this:
 1. **The game release** — per‑OS zips + `manifest.json` + `changelog.md`, published to
    GitHub Releases. The launcher reads these to install/update the game.
 2. **The launcher binaries** — one self‑contained `.exe` per OS that players download
-   and double‑click. These don't change every release; rebuild them when the launcher
-   itself changes.
+   and double‑click. These don't change every release; they're rebuilt automatically
+   when `LauncherInfo.cs`'s version changes, and carried forward otherwise.
 
-> Everything below runs from the repo root `C:\Claude\Cloud\Sporeholm`. The launcher
-> lives in `launcher/` and is its own .NET solution.
+## TL;DR — the one-command release (Mac, since v0.8.10)
+
+```bash
+# 1. bump project.godot → config/version, add the changelog entry, commit
+# 2. then, on the Mac:
+launcher/scripts/release.sh --publish
+```
+
+`release.sh` headless-exports all three platforms with the pinned Godot .NET editor,
+zips them with `version.txt` stamps and correct Unix permissions, writes the manifest +
+a truncated news-feed changelog, creates/updates the GitHub release, and hands macOS to
+`package-macos.sh` — which repairs exec bits, signs with your Developer ID, **notarizes
+and staples both apps**, smoke-launches the launcher from the final zip (refusing to
+upload if it doesn't open), patches the manifest checksums, and uploads. The launcher
+binaries rebuild only when `LauncherInfo.Version` changed; otherwise the previous
+release's are carried forward so every release stays self-contained.
+
+The two-machine path (Windows exports + `package-release.ps1`, then `package-macos.sh
+--upload` on the Mac) still works and is documented below — use it when the release is
+cut from the Windows box.
+
+> The export presets are **committed** as `export_presets.cfg` since v0.8.10 (they were
+> machine-local before, which is how a "1.0" bundle version shipped). `release.sh` keeps
+> the macOS preset's version fields synced from `config/version` automatically.
+> **Windows box, first pull after v0.8.10:** you have a local untracked
+> `export_presets.cfg`, so git will refuse the pull — move yours aside
+> (`git stash -u` or rename it) and take the committed one.
 
 ---
 
@@ -29,20 +54,32 @@ out of this:
 
 ## One‑time setup
 
+**Mac (the `release.sh` machine — all in place since 2026-07-02):**
+- **Godot .NET editor, pinned** — `/Applications/Godot_mono_4.6.3.app` (from
+  [godot-builds](https://github.com/godotengine/godot-builds/releases); the Homebrew
+  `godot-mono` cask ships *latest* and will silently migrate the project — don't use it
+  for releases). Override with `GODOT=…` if the pin moves.
+- **Matching mono export templates** — unzip the `_mono_export_templates.tpz` for the
+  same version into `~/Library/Application Support/Godot/export_templates/<ver>.stable.mono/`.
+- **.NET 8 SDK** — user-local at `~/.dotnet` (installed via `dotnet-install.sh`).
+- **`gh` authed**, a **Developer ID Application** cert in the keychain, and the
+  **`sporeholm-notary`** notarytool profile (see Code signing below).
+
+**Windows (only needed for the two-machine path):**
 - **Export templates** — in Godot: *Editor ▸ Manage Export Templates ▸ Download and Install*
-  (matching the editor version). Needed once per machine, and for each OS you want to ship.
-- **Publishing** — either:
-  - `gh auth login` (so `package-release.ps1 -Publish` can create the release), **or**
-  - nothing — publish manually through GitHub Desktop / the web UI (steps below).
-  `gh` is installed here but **not logged in**, so the manual path is the default for now.
+  (matching the editor version).
+- **Publishing** — `gh auth login`, or publish manually through GitHub Desktop / the web
+  UI (steps below).
 
 ---
 
 ## Step by step
 
 ### 1. Bump the version
-Edit `project.godot` → `config/version="vX.Y.Z"`, update `changelog.md` (top `## [X.Y.Z] — date — title`
-section feeds the launcher's news feed), and the in‑game menu text. Commit.
+Edit `project.godot` → `config/version="vX.Y.Z"` and add the `changelog.md` entry (top
+`## [X.Y.Z] — date — title` section feeds the launcher's news feed). Commit. (The
+in‑game menu label reads `config/version` at runtime since v0.8.10 — no separate edit,
+and `release.sh` syncs the macOS preset's bundle version automatically.)
 
 ### 2. Export the game from Godot
 *Project ▸ Export*, or headless (what the published v0.8.9 used):
@@ -132,12 +169,14 @@ One command on the Mac fixes all three, smoke-launches the result, and republish
 launcher/scripts/package-macos.sh --upload          # latest release; --tag vX.Y.Z to pin
 ```
 
-It repairs the game zip (exec bits + plist version + re-sign), rebuilds the launcher for
-all four RIDs from `LauncherInfo.cs`'s version, assembles/signs the universal `.app` with
-its dylibs, **launches the freshly-zipped launcher once** (aborts the upload if it doesn't
-open — "it built" is not "it opens"), then patches `manifest.json` (game macOS entry + the
-whole `launcher` section) and re-uploads. Uses a Developer ID cert if the keychain has
-one, otherwise ad-hoc (runnable; see Code signing below for notarization).
+It repairs the game zip (exec bits + plist version), **signs AND notarizes + staples both
+apps in the same pass** (one upload — no second download→re-sign→re-upload round-trip),
+rebuilds the launcher for all four RIDs when `LauncherInfo.cs`'s version changed (skips
+otherwise), assembles the universal `.app` with its dylibs, **launches the freshly-zipped
+launcher once** (aborts the upload if it doesn't open — "it built" is not "it opens"),
+then patches `manifest.json` and re-uploads. With no Developer ID cert in the keychain it
+falls back to ad-hoc signing without notarization (runnable; Gatekeeper prompts once).
+`release.sh` calls this automatically as its final step.
 
 ### 6. Verify
 ```powershell

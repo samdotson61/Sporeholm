@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- Godot.NET.Sdk's source generators flow in through the game project
+         reference and require this to be set (they no-op here — no Godot
+         script classes in the tests — but warn CS8785 without it). -->
+    <GodotProjectDir>$(MSBuildThisFileDirectory)..\..\</GodotProjectDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The game assembly. Its sim layer is pure C# (no engine calls), so the
+         registries and data invariants test headless — no Godot runtime needed. -->
+    <ProjectReference Include="..\..\Sporeholm.csproj" />
+  </ItemGroup>
+
+</Project>
