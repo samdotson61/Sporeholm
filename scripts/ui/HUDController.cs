@@ -9,12 +9,16 @@ using Sporeholm.UI;
 // resources top-left, speed/menu top-right) using `FloatingPanelStyle`.
 //
 // v0.8.11 — resource readout rebuilt for counting parity + presentation:
-//   • Every category total is computed as the SUM OF ITS BREAKDOWN ROWS
-//     (stored inventory + items lying on the map, bucketed per sub-type),
+//   • Every category total is computed as the SUM OF ITS BREAKDOWN ROWS,
 //     so the header number always equals what the expanded rows show.
 //     Pre-v0.8.11 the total folded in map-ground items via the
 //     ColonyResources float getters while the rows only counted stored
 //     inventory — Sam's screenshot: Wood 4806 over rows summing 52.
+//   • v0.8.12 — counters count ONLY STORED goods: the colony store plus
+//     items sitting on storage tiles (stockpile-zone cells + built
+//     Shelves). Loose items scattered on the map are NOT counted until
+//     hauled in; their per-row / per-category amounts surface in the
+//     tooltips as "loose on the map" so the number never reads as a bug.
 //   • Rows derive from ItemRegistry / MaterialRegistry instead of a
 //     hard-coded list, so new foods / minerals surface automatically
 //     (the old list was missing all six v0.5.15 minerals and every
@@ -38,15 +42,17 @@ public partial class HUDController : Control
 	private Label _eraLabel = null!, _dateLabel = null!, _popLabel = null!, _moodLabel = null!;
 
 	// One breakdown row inside a category — a hidden-until-nonzero HBox
-	// with a name label and a right-aligned count. Stored/Ground are
-	// per-frame accumulators filled by _Process's aggregation walk.
+	// with a name label and a right-aligned count. Stored/Loose are
+	// per-frame accumulators filled by _Process's aggregation walk:
+	// Stored = colony store + items on storage tiles (the counted number);
+	// Loose = items on the map outside storage (tooltip-only, not counted).
 	private sealed class SubRow
 	{
 		public Control Root     = null!;
 		public Label   ValueLbl = null!;
 		public string  Name     = "";
-		public int Stored, Ground;
-		public int ShownStored = -1, ShownGround = -1;   // tooltip write-elide
+		public int Stored, Loose;
+		public int ShownStored = -1, ShownLoose = -1;   // tooltip write-elide
 	}
 
 	// v0.3.41 — per-category collapsible widgets for the resource row.
@@ -69,8 +75,8 @@ public partial class HUDController : Control
 		public SubRow                     OtherRow = null!;
 		public ItemKind Kind = ItemKind.Food;
 		public string?  MaterialFamily;          // non-null = bucket by material sub-type
-		public int Stored, Ground;
-		public int ShownStored = -1, ShownGround = -1;   // tooltip write-elide
+		public int Stored, Loose;
+		public int ShownStored = -1, ShownLoose = -1;   // tooltip write-elide
 	}
 
 	private ResourceCategory _foodCat  = null!;
@@ -80,8 +86,12 @@ public partial class HUDController : Control
 	private ResourceCategory[] _cats = System.Array.Empty<ResourceCategory>();
 
 	// Reused across frames by CopyDroppedGroupTotals — no steady-state alloc.
+	// _groundTallies = every dropped item; _storedGroundTallies = the subset
+	// on storage tiles (stockpile cells + built Shelves).
 	private readonly Dictionary<(ItemKind Kind, string Family, string MatSub, string ItemSub), int>
 		_groundTallies = new();
+	private readonly Dictionary<(ItemKind Kind, string Family, string MatSub, string ItemSub), int>
+		_storedGroundTallies = new();
 
 	private AnimatedButton _pauseBtn = null!;
 	// v0.3.28 — kept so GameController can query "is the cursor over a HUD
@@ -219,19 +229,19 @@ public partial class HUDController : Control
 		leftVbox.AddChild(_resFlow);
 
 		_foodCat = AddCollapsibleResource(_resFlow, "🍓", "Food",
-			"Everything edible the colony owns.",
+			"Edible stores — counted once stockpiled or shelved.",
 			ItemKind.Food, materialFamily: null, RowsFromItemKind(ItemKind.Food));
 		_resFlow.AddChild(Divider());
 		_stoneCat = AddCollapsibleResource(_resFlow, "🪨", "Stone",
-			"Excavated stone and minerals, by type.",
+			"Stored stone and minerals, by type.",
 			ItemKind.Material, materialFamily: "Stone", RowsFromMaterialFamily("Stone"));
 		_resFlow.AddChild(Divider());
 		_woodCat = AddCollapsibleResource(_resFlow, "🪵", "Wood",
-			"Felled timber, by wood type.",
+			"Stored timber, by wood type.",
 			ItemKind.Material, materialFamily: "Wood", RowsFromMaterialFamily("Wood"));
 		_resFlow.AddChild(Divider());
 		_magicCat = AddCollapsibleResource(_resFlow, "✨", "Magic",
-			"Essence, shards, and magical preparations.",
+			"Stored essence, shards, and magical preparations.",
 			ItemKind.Magic, materialFamily: null, RowsFromItemKind(ItemKind.Magic));
 
 		_cats = new[] { _foodCat, _stoneCat, _woodCat, _magicCat };
@@ -426,31 +436,39 @@ public partial class HUDController : Control
 
 	// ── Resource aggregation ───────────────────────────────────────────────────
 
-	// Each `_Process` tick, aggregate the colony's stored inventory + on-map
-	// ground items into the four category widgets in a single walk each.
-	// PARITY INVARIANT: a category's header total is computed as the sum of
-	// what lands in its rows (including the "Other" catch-all), so the
-	// number always equals the expanded breakdown. Cheap per frame: one
-	// inventory snapshot (pre-existing cost), one small dictionary copy,
-	// and write-elided label updates — and the old per-frame
-	// GetResourcesSnapshot() (four O(n) inventory walks) is gone.
+	// Each `_Process` tick, aggregate the colony's stores into the four
+	// category widgets in a single walk each. COUNTING SCOPE (v0.8.12):
+	// counted = colony store (Inventory) + items on storage tiles
+	// (stockpile-zone cells + built Shelves). Loose ground items are
+	// tracked separately for the tooltips but are NOT counted — they
+	// join the number when a hauler brings them in (or a zone is painted
+	// under them). PARITY INVARIANT: a category's header total is computed
+	// as the sum of what lands in its rows (including the "Other"
+	// catch-all), so the number always equals the expanded breakdown.
+	// Cheap per frame: one inventory snapshot (pre-existing cost), one
+	// small two-dictionary copy, and write-elided label updates.
 	public override void _Process(double delta)
 	{
 		if (Sim == null || _cats.Length == 0) return;
 
 		var inv = Sim.GetInventorySnapshot();
-		Sim.CopyDroppedGroupTotals(_groundTallies);
+		Sim.CopyDroppedGroupTotals(_groundTallies, _storedGroundTallies);
 
 		foreach (var cat in _cats)
 		{
-			cat.Stored = cat.Ground = 0;
-			foreach (var row in cat.RowList) row.Stored = row.Ground = 0;
+			cat.Stored = cat.Loose = 0;
+			foreach (var row in cat.RowList) row.Stored = row.Loose = 0;
 		}
 
 		foreach (var row in inv)
-			Accumulate(row.Kind, row.MaterialFamily, row.MaterialSubType, row.SubType, row.Quantity, ground: false);
+			Accumulate(row.Kind, row.MaterialFamily, row.MaterialSubType, row.SubType,
+				storedQty: row.Quantity, looseQty: 0);
 		foreach (var kv in _groundTallies)
-			Accumulate(kv.Key.Kind, kv.Key.Family, kv.Key.MatSub, kv.Key.ItemSub, kv.Value, ground: true);
+		{
+			_storedGroundTallies.TryGetValue(kv.Key, out int storedOnGround);
+			Accumulate(kv.Key.Kind, kv.Key.Family, kv.Key.MatSub, kv.Key.ItemSub,
+				storedQty: storedOnGround, looseQty: kv.Value - storedOnGround);
+		}
 
 		bool rowsChanged = false;
 		foreach (var cat in _cats) rowsChanged |= FlushCategory(cat);
@@ -459,9 +477,9 @@ public partial class HUDController : Control
 		if (rowsChanged) Callable.From(UpdateResponsiveLayout).CallDeferred();
 	}
 
-	private void Accumulate(ItemKind kind, string family, string matSub, string itemSub, int qty, bool ground)
+	private void Accumulate(ItemKind kind, string family, string matSub, string itemSub, int storedQty, int looseQty)
 	{
-		if (qty <= 0) return;
+		if (storedQty <= 0 && looseQty <= 0) return;
 		ResourceCategory? cat = kind switch
 		{
 			ItemKind.Food  => _foodCat,
@@ -476,46 +494,49 @@ public partial class HUDController : Control
 		if (key == null || !cat.Rows.TryGetValue(key, out var row))
 			row = cat.OtherRow;   // unregistered sub-type — still counted, still displayed
 
-		if (ground) { row.Ground += qty; cat.Ground += qty; }
-		else        { row.Stored += qty; cat.Stored += qty; }
+		if (storedQty > 0) { row.Stored += storedQty; cat.Stored += storedQty; }
+		if (looseQty  > 0) { row.Loose  += looseQty;  cat.Loose  += looseQty;  }
 	}
 
 	// Writes a category's accumulated counts into its labels + tooltips.
-	// Returns true when any row's visibility flipped (layout re-budget cue).
+	// Only the STORED amount is displayed/counted; loose ground amounts
+	// ride along in the tooltips so a big pile awaiting haul is visible
+	// without inflating the number. Returns true when any row's
+	// visibility flipped (layout re-budget cue).
 	private bool FlushCategory(ResourceCategory cat)
 	{
-		int total = cat.Stored + cat.Ground;
-		SetTextIfChanged(cat.TotalLbl, total.ToString("N0", Inv));
+		SetTextIfChanged(cat.TotalLbl, cat.Stored.ToString("N0", Inv));
 
 		bool rowsChanged = false;
 		int visibleRows = 0;
 		foreach (var row in cat.RowList)
 		{
-			int count = row.Stored + row.Ground;
-			bool show = count > 0;
+			bool show = row.Stored > 0;
 			if (row.Root.Visible != show) { row.Root.Visible = show; rowsChanged = true; }
 			if (!show) continue;
 			visibleRows++;
-			SetTextIfChanged(row.ValueLbl, count.ToString("N0", Inv));
-			if (_tips && (row.Stored != row.ShownStored || row.Ground != row.ShownGround))
+			SetTextIfChanged(row.ValueLbl, row.Stored.ToString("N0", Inv));
+			if (_tips && (row.Stored != row.ShownStored || row.Loose != row.ShownLoose))
 			{
 				row.ShownStored = row.Stored;
-				row.ShownGround = row.Ground;
-				Tooltips.Apply((Control)row.Root,
-					$"{row.Name}: {count.ToString("N0", Inv)}\n" +
-					$"Stockpiled {row.Stored.ToString("N0", Inv)} · On the ground {row.Ground.ToString("N0", Inv)}");
+				row.ShownLoose  = row.Loose;
+				string tip = $"{row.Name}: {row.Stored.ToString("N0", Inv)} in storage";
+				if (row.Loose > 0)
+					tip += $"\nLoose on the map (not counted): {row.Loose.ToString("N0", Inv)}";
+				Tooltips.Apply(row.Root, tip);
 			}
 		}
 
 		bool showEmpty = visibleRows == 0;
 		if (cat.EmptyLbl.Visible != showEmpty) { cat.EmptyLbl.Visible = showEmpty; rowsChanged = true; }
 
-		if (_tips && (cat.Stored != cat.ShownStored || cat.Ground != cat.ShownGround))
+		if (_tips && (cat.Stored != cat.ShownStored || cat.Loose != cat.ShownLoose))
 		{
 			cat.ShownStored = cat.Stored;
-			cat.ShownGround = cat.Ground;
-			string tip = $"{cat.Name}: {total.ToString("N0", Inv)}\n{cat.Blurb}\n" +
-				$"Stockpiled {cat.Stored.ToString("N0", Inv)} · On the ground {cat.Ground.ToString("N0", Inv)}";
+			cat.ShownLoose  = cat.Loose;
+			string tip = $"{cat.Name}: {cat.Stored.ToString("N0", Inv)} in storage\n{cat.Blurb}";
+			if (cat.Loose > 0)
+				tip += $"\nLoose on the map (not counted): {cat.Loose.ToString("N0", Inv)} — haul it to a stockpile or shelf.";
 			Tooltips.Apply(cat.TitleLbl, tip);
 			Tooltips.Apply(cat.TotalLbl, tip);
 		}
@@ -653,7 +674,7 @@ public partial class HUDController : Control
 		// the header total.
 		cat.OtherRow = AddSubRow(cat, subCol, "•", "Other", key: null);
 
-		cat.EmptyLbl = Lbl("(none yet)", UITheme.Scaled(10), UITheme.TextMuted);
+		cat.EmptyLbl = Lbl("(nothing stored yet)", UITheme.Scaled(10), UITheme.TextMuted);
 		cat.EmptyLbl.Visible = false;
 		subCol.AddChild(cat.EmptyLbl);
 

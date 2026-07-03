@@ -1179,18 +1179,24 @@ namespace Sporeholm
 				?? System.Array.Empty<Sporeholm.Simulation.Items.InventoryRow>();
 
 		// v0.8.11 — per-(Kind, Material, Item.SubType) tallies of items lying
-		// on the map, copied into the caller's reusable dictionary. Paired
+		// on the map, copied into the caller's reusable dictionaries. Paired
 		// with GetInventorySnapshot this gives the HUD everything the colony
-		// owns — stored AND on the ground — bucketed finely enough that the
-		// resource breakdown rows sum exactly to the category totals.
+		// owns, bucketed finely enough that the resource breakdown rows sum
+		// exactly to the category totals. v0.8.12 — split views: `destAll` is
+		// every dropped item; `destStored` is the subset on storage tiles
+		// (stockpile zones + built Shelves). The HUD counts only stored
+		// goods and shows the loose remainder in tooltips.
 		public void CopyDroppedGroupTotals(
 			System.Collections.Generic.Dictionary<
 				(Sporeholm.Simulation.Items.ItemKind Kind, string Family, string MatSub, string ItemSub),
-				int> dest)
+				int> destAll,
+			System.Collections.Generic.Dictionary<
+				(Sporeholm.Simulation.Items.ItemKind Kind, string Family, string MatSub, string ItemSub),
+				int> destStored)
 		{
 			var map = _core?.Map;
-			if (map == null) { dest.Clear(); return; }
-			map.CopyDroppedGroupTotals(dest);
+			if (map == null) { destAll.Clear(); destStored.Clear(); return; }
+			map.CopyDroppedGroupTotals(destAll, destStored);
 		}
 
 		// v0.3.47 — current sim-thread tick counter. Save format uses this

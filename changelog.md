@@ -7,6 +7,26 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.12] — 2026-07-03 — Resource counters count stored goods only
+
+The top-bar resource counters now count only what the colony has actually
+put away: the colony inventory plus items sitting on stockpile-zone tiles
+or built Shelves. Loose items scattered across the map no longer inflate
+the totals — they show in the category and row tooltips as "loose on the
+map (not counted)" and join the count the moment a hauler brings them in
+(or a stockpile is painted beneath them, which updates the counter
+instantly).
+
+- The map tracks a stored-items tally alongside the existing ground
+  tallies, updated at the same single choke point plus new storage-
+  transition hooks: painting or erasing a stockpile cell and building or
+  demolishing a Shelf shift any items already on that tile into or out of
+  the stored count immediately.
+- The breakdown rows use the same scope, so every category header still
+  equals the sum of its expanded rows exactly.
+- Category tooltips read "in storage" and call out the loose remainder,
+  with a hint to haul it to a stockpile or shelf.
+
 ## [0.8.11] — 2026-07-02 — The resource readout tells the whole truth
 
 The HUD's resource categories and their breakdown rows finally agree.

@@ -205,21 +205,53 @@ namespace Sporeholm.World
         // v0.8.11 — third tally axis: full (Kind, Material.Family,
         // Material.SubType, Item.SubType) group key. The HUD's resource
         // breakdown rows need per-subtype ground counts so the category
-        // total (which has always included ground items via the family/
-        // kind tallies above) equals the sum of its displayed rows —
-        // Sam's screenshot showed Wood 4806 over rows summing 52 because
-        // 4,754 logs lay on the map with no row counting them. Same lock,
-        // same choke point, O(1) per drop/remove.
+        // total equals the sum of its displayed rows — Sam's screenshot
+        // showed Wood 4806 over rows summing 52 because 4,754 logs lay on
+        // the map with no row counting them. Same lock, same choke point,
+        // O(1) per drop/remove.
+        // v0.8.12 — split into ALL-ground vs IN-STORAGE ground. The HUD
+        // counters now count only stored goods (stockpile-zone cells +
+        // built Shelves); loose ground items surface in tooltips as
+        // "not counted" until hauled. `_storedGroupTotals` is the subset
+        // of `_droppedGroupTotals` sitting on storage tiles, maintained
+        // at the same choke point plus the storage-transition hooks
+        // (stockpile paint/erase, shelf build/demolish).
         private readonly Dictionary<(ItemKind Kind, string Family, string MatSub, string ItemSub), int>
             _droppedGroupTotals = new();
+        private readonly Dictionary<(ItemKind Kind, string Family, string MatSub, string ItemSub), int>
+            _storedGroupTotals = new();
+
+        // Shared bump for the two group dictionaries. Caller MUST hold
+        // _itemsLock. Zero entries are pruned so snapshot copies stay small.
+        private static void BumpGroupTotals(
+            Dictionary<(ItemKind Kind, string Family, string MatSub, string ItemSub), int> dict,
+            Item item, int deltaQty)
+        {
+            var gkey = (item.Kind, item.Material.Family ?? "", item.Material.SubType ?? "", item.SubType ?? "");
+            dict.TryGetValue(gkey, out int gTotal);
+            int next = gTotal + deltaQty;
+            if (next == 0) dict.Remove(gkey);
+            else           dict[gkey] = next;
+        }
+
+        // v0.8.12 — "in storage" = inside a player-painted stockpile zone
+        // OR on a built Shelf (shelves are haul destinations even outside
+        // zones). Lock-free array reads, same pattern as GetStockpileIdAt /
+        // FindNearestShelf — safe to call while holding _itemsLock.
+        public bool IsStorageTile(int x, int y)
+        {
+            if (!InBounds(x, y)) return false;
+            if (_cellZoneId.Length > 0 && _cellZoneId[y * Width + x] != 0) return true;
+            return _structures[x, y].Type == StructureType.Shelf;
+        }
 
         // Caller MUST hold _itemsLock. `deltaQty` is the signed quantity
-        // change. Single choke point for ALL three tally dictionaries —
+        // change. Single choke point for ALL tally dictionaries —
         // partial consumes (PickupBestFoodAt / PickupDroppedAt /
         // ConsumeDroppedItemsByMaterial) used to adjust the kind + family
-        // dicts inline, which is exactly how a fourth dictionary would
-        // drift out of sync; they now route through here too.
-        private void AdjustDroppedTotalsBy(Item item, int deltaQty)
+        // dicts inline, which is exactly how a new dictionary would
+        // drift out of sync; they all route through here.
+        private void AdjustDroppedTotalsBy(Item item, int deltaQty, int tx, int ty)
         {
             if (deltaQty == 0) return;
             _droppedKindTotals.TryGetValue(item.Kind, out int kTotal);
@@ -231,19 +263,36 @@ namespace Sporeholm.World
                 _droppedFamilyTotals.TryGetValue(fkey, out int fTotal);
                 _droppedFamilyTotals[fkey] = fTotal + deltaQty;
             }
-            var gkey = (item.Kind, family ?? "", item.Material.SubType ?? "", item.SubType ?? "");
-            _droppedGroupTotals.TryGetValue(gkey, out int gTotal);
-            int next = gTotal + deltaQty;
-            if (next == 0) _droppedGroupTotals.Remove(gkey);
-            else           _droppedGroupTotals[gkey] = next;
+            BumpGroupTotals(_droppedGroupTotals, item, deltaQty);
+            if (IsStorageTile(tx, ty))
+                BumpGroupTotals(_storedGroupTotals, item, deltaQty);
         }
 
         // Caller MUST hold _itemsLock. Sign is +1 on add, -1 on remove.
         // Quantity zero-bookkeeping is fine: keys can stay in the dict
         // with a zero value (rare in steady state since gather drops are
         // bursty, not balanced).
-        private void AdjustDroppedTotals(Item item, int sign) =>
-            AdjustDroppedTotalsBy(item, item.Quantity * sign);
+        private void AdjustDroppedTotals(Item item, int sign, int tx, int ty) =>
+            AdjustDroppedTotalsBy(item, item.Quantity * sign, tx, ty);
+
+        // v0.8.12 — a tile's storage-ness flipped (stockpile painted or
+        // erased, shelf built or demolished) while items may already be
+        // sitting on it: shift those items into / out of the stored
+        // tallies. Callers pass the PRE-mutation storage-ness and must
+        // NOT hold _designationsLock (this takes _itemsLock; keeping the
+        // two locks un-nested in this direction avoids ordering hazards).
+        private void OnStorageTileChanged(int x, int y, bool wasStorage)
+        {
+            bool now = IsStorageTile(x, y);
+            if (now == wasStorage) return;
+            lock (_itemsLock)
+            {
+                if (!_droppedItems.TryGetValue((x, y), out var list)) return;
+                foreach (var it in list)
+                    if (it.Quantity > 0)
+                        BumpGroupTotals(_storedGroupTotals, it, now ? +it.Quantity : -it.Quantity);
+            }
+        }
 
         // O(1) totals read for the HUD aggregator. Lock acquisition is
         // the only real cost — no allocations, no scans.
@@ -265,19 +314,26 @@ namespace Sporeholm.World
             }
         }
 
-        // v0.8.11 — copy the per-group ground tallies into a caller-owned
-        // dictionary (the HUD reuses one across frames, so steady-state
+        // v0.8.11 — copy the per-group ground tallies into caller-owned
+        // dictionaries (the HUD reuses them across frames, so steady-state
         // cost is a clear + a few dozen inserts under the lock — no
         // allocation). Zero-quantity keys are pruned at write time so the
-        // copy only ever carries live groups.
+        // copies only ever carry live groups.
+        // v0.8.12 — also copies the in-storage subset (stockpile cells +
+        // built Shelves) in the same lock acquisition, so the two views
+        // are mutually consistent for the frame.
         public void CopyDroppedGroupTotals(
-            Dictionary<(ItemKind Kind, string Family, string MatSub, string ItemSub), int> dest)
+            Dictionary<(ItemKind Kind, string Family, string MatSub, string ItemSub), int> destAll,
+            Dictionary<(ItemKind Kind, string Family, string MatSub, string ItemSub), int> destStored)
         {
-            dest.Clear();
+            destAll.Clear();
+            destStored.Clear();
             lock (_itemsLock)
             {
                 foreach (var kv in _droppedGroupTotals)
-                    if (kv.Value != 0) dest[kv.Key] = kv.Value;
+                    if (kv.Value != 0) destAll[kv.Key] = kv.Value;
+                foreach (var kv in _storedGroupTotals)
+                    if (kv.Value != 0) destStored[kv.Key] = kv.Value;
             }
         }
 
@@ -334,7 +390,7 @@ namespace Sporeholm.World
                 if (!_droppedItems.TryGetValue((tx, ty), out var list))
                 {
                     _droppedItems[(tx, ty)] = list = new List<Item> { item };
-                    AdjustDroppedTotals(item, +1);
+                    AdjustDroppedTotals(item, +1, tx, ty);
                     ItemsChanged?.Invoke(tx, ty);
                     return true;
                 }
@@ -349,7 +405,7 @@ namespace Sporeholm.World
                             // Absorb mutates existing.Quantity += item.Quantity.
                             // Bump totals by item.Quantity (the delta), not by
                             // the post-absorb existing.Quantity.
-                            AdjustDroppedTotals(item, +1);
+                            AdjustDroppedTotals(item, +1, tx, ty);
                             existing.Absorb(item);
                             ItemsChanged?.Invoke(tx, ty);
                             return true;
@@ -357,7 +413,7 @@ namespace Sporeholm.World
                     }
                 }
                 list.Add(item);
-                AdjustDroppedTotals(item, +1);
+                AdjustDroppedTotals(item, +1, tx, ty);
                 ItemsChanged?.Invoke(tx, ty);
                 return true;
             }
@@ -422,7 +478,7 @@ namespace Sporeholm.World
                 if (!_droppedItems.TryGetValue((tx, ty), out var list))
                     _droppedItems[(tx, ty)] = list = new List<Item>();
                 list.Add(item);
-                AdjustDroppedTotals(item, +1);
+                AdjustDroppedTotals(item, +1, tx, ty);
             }
             ItemsChanged?.Invoke(tx, ty);
         }
@@ -445,7 +501,7 @@ namespace Sporeholm.World
             {
                 if (!_droppedItems.TryGetValue((tx, ty), out var list)) return false;
                 bool removed = list.Remove(item);
-                if (removed) AdjustDroppedTotals(item, -1);
+                if (removed) AdjustDroppedTotals(item, -1, tx, ty);
                 if (list.Count == 0) _droppedItems.Remove((tx, ty));
                 if (removed) ItemsChanged?.Invoke(tx, ty);
                 return removed;
@@ -609,7 +665,7 @@ namespace Sporeholm.World
                     CorpseInfo   = chosen.CorpseInfo,
                 };
                 chosen.Quantity -= 1;
-                AdjustDroppedTotalsBy(chosen, -1);
+                AdjustDroppedTotalsBy(chosen, -1, tx, ty);
                 list.RemoveAll(item => item.Quantity <= 0);
                 if (list.Count == 0) _droppedItems.Remove((tx, ty));
 
@@ -650,7 +706,7 @@ namespace Sporeholm.World
                     int take = System.Math.Min(amount - taken, it.Quantity);
                     it.Quantity -= take;
                     taken += take;
-                    AdjustDroppedTotalsBy(it, -take);
+                    AdjustDroppedTotalsBy(it, -take, tx, ty);
                     changed = true;
                 }
                 list.RemoveAll(it => it.Quantity <= 0);
@@ -736,7 +792,7 @@ namespace Sporeholm.World
                     item.Quantity -= take;
                     taken += take;
                     // Decrement totals by exactly the consumed delta.
-                    AdjustDroppedTotalsBy(item, -take);
+                    AdjustDroppedTotalsBy(item, -take, x, y);
                     if (affectedTiles.Count == 0 || affectedTiles[^1] != (x, y))
                         affectedTiles.Add((x, y));
                 }
@@ -807,7 +863,7 @@ namespace Sporeholm.World
                         else                              it.State = ItemState.Spoiled;
                         if (it.AvgCondition <= 0f)
                         {
-                            AdjustDroppedTotals(it, -1);
+                            AdjustDroppedTotals(it, -1, kv.Key.X, kv.Key.Y);
                             list.RemoveAt(i);
                             dirty.Add(kv.Key);
                             bonesToSpawn.Add(kv.Key);
@@ -1448,6 +1504,7 @@ namespace Sporeholm.World
             //   Else: no carry.
             // New Floor placement always replaces (Floor slot is itself).
             var old = _structures[x, y];
+            bool wasStorage = IsStorageTile(x, y);   // v0.8.12 — shelf build/demolish hook
             if (slot.Type != StructureType.Floor && slot.Type != StructureType.FloorPlanned)
             {
                 if (old.Type == StructureType.Floor)
@@ -1487,6 +1544,10 @@ namespace Sporeholm.World
             // call would still O(N) flood-fill per painted blueprint —
             // dirty-flag is the right granularity.
             _roomsDirty = true;
+            // v0.8.12 — a Shelf appearing/disappearing flips the tile's
+            // storage-ness; shift any items already on it into/out of the
+            // stored tallies (no-op unless the flag actually changed).
+            OnStorageTileChanged(x, y, wasStorage);
         }
         private bool _roomsDirty = true;
         // Lazy rebuild trigger — call before reading rooms.
@@ -2315,6 +2376,8 @@ namespace Sporeholm.World
             int existing = _cellZoneId[idx];
             if (existing != 0) return existing;   // already part of a zone
 
+            bool wasStorage = IsStorageTile(x, y);   // v0.8.12 — a shelf may already make it storage
+            int resultId;
             lock (_designationsLock)
             {
                 StockpileZone zone;
@@ -2331,8 +2394,12 @@ namespace Sporeholm.World
                 zone.Cells.Add((x, y));
                 _cellZoneId[idx] = zone.Id;
                 StockpileChanged?.Invoke(x, y);
-                return zone.Id;
+                resultId = zone.Id;
             }
+            // v0.8.12 — items already lying here become "stored" the moment
+            // the zone covers them. Outside _designationsLock (takes _itemsLock).
+            OnStorageTileChanged(x, y, wasStorage);
+            return resultId;
         }
 
         // Removes (x, y) from any stockpile zone it belongs to. Empty zones
@@ -2354,6 +2421,9 @@ namespace Sporeholm.World
                 _cellZoneId[idx] = 0;
             }
             StockpileChanged?.Invoke(x, y);
+            // v0.8.12 — items on the erased cell stop counting as stored
+            // (unless a built Shelf still makes the tile storage).
+            OnStorageTileChanged(x, y, wasStorage: true);
         }
 
         public int GetStockpileIdAt(int x, int y)
@@ -3122,6 +3192,12 @@ namespace Sporeholm.World
             IReadOnlyList<ItemKind> acceptedKinds, IReadOnlyList<(int X, int Y)> cells)
         {
             if (id <= 0 || cells == null || cells.Count == 0) return;
+            // v0.8.12 — collect the cells this call actually claims so the
+            // stored-item tallies can shift AFTER _designationsLock releases
+            // (OnStorageTileChanged takes _itemsLock). Load order safe either
+            // way: items restored after this see IsStorageTile via the drop
+            // choke point; items restored before it are shifted here.
+            var claimed = new List<(int X, int Y, bool WasStorage)>(cells.Count);
             lock (_designationsLock)
             {
                 var zone = new StockpileZone(id, name) { Priority = priority };
@@ -3131,6 +3207,7 @@ namespace Sporeholm.World
                     if (!InBounds(cx, cy)) continue;
                     int idx = cy * Width + cx;
                     if (_cellZoneId[idx] != 0) continue;   // already owned
+                    claimed.Add((cx, cy, IsStorageTile(cx, cy)));
                     zone.Cells.Add((cx, cy));
                     _cellZoneId[idx] = id;
                 }
@@ -3138,6 +3215,7 @@ namespace Sporeholm.World
                 _stockpileZones[id] = zone;
                 if (id >= _nextStockpileId) _nextStockpileId = id + 1;
             }
+            foreach (var (cx, cy, was) in claimed) OnStorageTileChanged(cx, cy, was);
             // Fire one event per cell so the overlay redraws cleanly.
             foreach (var (cx, cy) in cells) StockpileChanged?.Invoke(cx, cy);
         }
