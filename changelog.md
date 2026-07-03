@@ -27,6 +27,17 @@ instantly).
 - Category tooltips read "in storage" and call out the loose remainder,
   with a hint to haul it to a stockpile or shelf.
 
+### Also in this patch
+
+- **Exported builds now render the game font.** The font file was named
+  `GROBOLD.ttf` on disk while the UI requests `Grobold.ttf`; desktop
+  filesystems resolve that case-insensitively (so the editor always looked
+  right), but an exported pack's virtual filesystem is case-sensitive — so
+  every exported build to date silently fell back to the engine's default
+  font. The file is renamed to match the code; one rename fixes every
+  label, button, and panel in exported builds. Verified by a fresh Windows
+  export booted to the menu.
+
 ## [0.8.11] — 2026-07-02 — The resource readout tells the whole truth
 
 The HUD's resource categories and their breakdown rows finally agree.
