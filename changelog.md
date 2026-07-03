@@ -7,6 +7,34 @@ Version format: `aa.bb.cc`
 
 ---
 
+## [0.8.11] — 2026-07-02 — The resource readout tells the whole truth
+
+The HUD's resource categories and their breakdown rows finally agree.
+
+### The bug
+- A category total could dwarf its own rows — a live colony showed **Wood 4806** above
+  breakdown rows summing to 52, because 4,754 logs lay on the ground. Category totals
+  have always counted ground items (via the kind/family tallies), but the per-subtype
+  rows only counted stockpiled inventory, so the difference was invisible everywhere.
+
+### The fix
+- `LocalMap` gains a third tally axis — per **(kind, material family, material subtype,
+  item subtype)** ground counts — same lock, same O(1) cost per drop/remove as the
+  existing tallies.
+- All three tally dictionaries now update through a **single choke point**
+  (`AdjustDroppedTotalsBy`). The partial-consume paths that used to adjust two of them
+  inline — exactly how a new tally would have drifted out of sync — route through it too.
+- The HUD aggregates inventory + ground tallies itself, so **every category total equals
+  the sum of its displayed rows**. The legacy "unstored" float buffers in
+  `ColonyResources` were audited (nothing writes them anymore, so they're always zero)
+  and remain only as a compatibility shim for future float-path callers.
+- UI: new shared `UITheme.Hairline` — panel dividers previously hand-rolled
+  near-identical browns; one constant keeps every rule in step.
+
+Build clean, 0 warnings / 0 errors; CI green (4/4 jobs) on this commit.
+
+---
+
 ## [0.8.10] — 2026-07-01 — macOS release repaired (launcher 1.0.1) + release pipeline hardening
 
 The v0.8.9 macOS downloads had never been launched on a real Mac — and didn't run on one.
