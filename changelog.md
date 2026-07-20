@@ -9,6 +9,9 @@ Version format: `aa.bb.cc`
 
 ## [0.8.12] — 2026-07-03 — Resource counters count stored goods only
 
+Out now for Windows, Linux, and macOS — the launcher installs or updates
+you automatically.
+
 The top-bar resource counters now count only what the colony has actually
 put away: the colony inventory plus items sitting on stockpile-zone tiles
 or built Shelves. Loose items scattered across the map no longer inflate

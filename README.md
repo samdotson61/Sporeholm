@@ -2,7 +2,7 @@
 
 **Sporeholm** is a colony-survival game about a little tribe of mushroom-folk — the **Shroomps** — making a home in a strange fungal world. Designed and developed by **Sam Dotson**.
 
-Current version: **v0.8.9** — in active development.
+Current version: **v0.8.12** — in active development.
 
 ### ▶ Download Sporeholm
 
@@ -203,6 +203,7 @@ A workbench holds a queue of bills. Crafters pick them up, consume ingredients f
 ### UI
 
 - Bottom task bar (Orders, Build, Zones, Areas, Jobs, Resources, Shroomps, Animals).
+- Top-bar resource readout (Food / Stone / Wood / Magic) counts **stored goods only** — colony inventory plus stockpile and shelf tiles — with expandable per-type breakdowns that always sum to the header. Tooltips call out loose items still lying on the map, which join the count once hauled in.
 - Tile-hover info + per-tile properties panel (Terrain, Roof status, Room, Vegetation, Stone, Items, Structure).
 - Selection bracket on shroomps + tiles.
 - Alert pane for urgent colony events.
